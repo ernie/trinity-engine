@@ -2,7 +2,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION 3.12)
 
 PROJECT(quake3e)
 
-SET(DNAME "quake3e.ded")
+SET(DNAME "trinity.ded")
 
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
 

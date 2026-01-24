@@ -25,7 +25,7 @@ endif
 
 BUILD_SERVER     = 1
 
-DNAME            = quake3e.ded
+DNAME            = trinity.ded
 
 
 ifeq ($(V),1)

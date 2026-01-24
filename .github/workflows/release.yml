@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-x86_64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -y install build-essential
+
+      - name: Build
+        run: make install -j$(nproc) ARCH=x86_64 DESTDIR=bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: bin
+          if-no-files-found: error
+          retention-days: 5
+
+  build-arm64:
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -y install build-essential
+
+      - name: Build
+        run: make install -j$(nproc) ARCH=aarch64 DESTDIR=bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: bin
+          if-no-files-found: error
+          retention-days: 5
+
+  build-armv7:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        uses: uraimo/run-on-arch-action@v3
+        with:
+          arch: armv7
+          distro: ubuntu24.04
+          githubToken: ${{ github.token }}
+          shell: /bin/sh
+          run: |
+            apt-get -qq update
+            apt-get install -y make gcc g++
+            make install -j$(nproc) ARCH=arm DESTDIR=bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-armv7
+          path: bin
+          if-no-files-found: error
+          retention-days: 5
+
+  release:
+    needs: [build-x86_64, build-arm64, build-armv7]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create release archives
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+
+          mkdir -p trinity.ded-${VERSION}-linux-x86_64
+          cp linux-x86_64/* trinity.ded-${VERSION}-linux-x86_64/
+          tar -czvf trinity.ded-${VERSION}-linux-x86_64.tar.gz trinity.ded-${VERSION}-linux-x86_64
+
+          mkdir -p trinity.ded-${VERSION}-linux-arm64
+          cp linux-arm64/* trinity.ded-${VERSION}-linux-arm64/
+          tar -czvf trinity.ded-${VERSION}-linux-arm64.tar.gz trinity.ded-${VERSION}-linux-arm64
+
+          mkdir -p trinity.ded-${VERSION}-linux-arm
+          cp linux-armv7/* trinity.ded-${VERSION}-linux-arm/
+          tar -czvf trinity.ded-${VERSION}-linux-arm.tar.gz trinity.ded-${VERSION}-linux-arm
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            trinity.ded-${{ steps.version.outputs.VERSION }}-linux-x86_64.tar.gz
+            trinity.ded-${{ steps.version.outputs.VERSION }}-linux-arm64.tar.gz
+            trinity.ded-${{ steps.version.outputs.VERSION }}-linux-arm.tar.gz
+          generate_release_notes: true
