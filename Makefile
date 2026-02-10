@@ -45,8 +45,8 @@ USE_RENDERER_DLOPEN = 1
 # valid options: opengl, vulkan, opengl2
 RENDERER_DEFAULT = opengl
 
-CNAME            = quake3e
-DNAME            = quake3e.ded
+CNAME            = trinity
+DNAME            = trinity.ded
 
 RENDERER_PREFIX  = $(CNAME)
 
@@ -558,7 +558,7 @@ else
   endif
 
   ifeq ($(ARCH),arm)
-    OPTIMIZE += -march=armv7-a
+    OPTIMIZE += -march=armv7-a -mfpu=vfpv3-d16
     ARCHEXT = .arm
   endif
 
@@ -1054,6 +1054,7 @@ Q3OBJ = \
   $(B)/client/cl_ui.o \
   $(B)/client/cl_avi.o \
   $(B)/client/cl_jpeg.o \
+  $(B)/client/cl_tv.o \
   \
   $(B)/client/cm_load.o \
   $(B)/client/cm_patch.o \
@@ -1092,6 +1093,7 @@ Q3OBJ = \
   $(B)/client/sv_game.o \
   $(B)/client/sv_init.o \
   $(B)/client/sv_main.o \
+  $(B)/client/sv_tv.o \
   $(B)/client/sv_net_chan.o \
   $(B)/client/sv_snapshot.o \
   $(B)/client/sv_world.o \
@@ -1297,6 +1299,7 @@ Q3DOBJ = \
   $(B)/ded/sv_game.o \
   $(B)/ded/sv_init.o \
   $(B)/ded/sv_main.o \
+  $(B)/ded/sv_tv.o \
   $(B)/ded/sv_net_chan.o \
   $(B)/ded/sv_snapshot.o \
   $(B)/ded/sv_world.o \

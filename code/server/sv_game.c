@@ -1037,6 +1037,15 @@ static void SV_InitGameVM( qboolean restart ) {
 	// use the current msec count for a random seed
 	// init for this gamestate
 	VM_Call( gvm, 3, GAME_INIT, sv.time, Com_Milliseconds(), restart );
+
+	// After first GAME_INIT, check if game supports server events and notify
+	if ( sv_serverStarting ) {
+		sv_gameServerEvents = ( Cvar_VariableIntegerValue( "g_serverEvents" ) != 0 );
+		if ( sv_gameServerEvents ) {
+			VM_Call( gvm, 0, GAME_SERVER_STARTED );
+		}
+		sv_serverStarting = qfalse;
+	}
 }
 
 

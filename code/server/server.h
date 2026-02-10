@@ -229,6 +229,9 @@ typedef struct client_s {
 	char			tld[3]; // "XX\0"
 	const char		*country;
 
+	// VR support
+	qboolean		isVR;				// Client is VR (from userinfo)
+
 } client_t;
 
 //=============================================================================
@@ -281,6 +284,9 @@ extern	serverStatic_t	svs;				// persistant server info across maps
 extern	server_t		sv;					// cleared each map
 extern	vm_t			*gvm;				// game virtual machine
 
+extern	qboolean		sv_serverStarting;		// True until first GAME_INIT completes
+extern	qboolean		sv_gameServerEvents;	// True if game supports server event logging
+
 extern	cvar_t	*sv_fps;
 extern	cvar_t	*sv_timeout;
 extern	cvar_t	*sv_zombietime;
@@ -317,6 +323,54 @@ extern	cvar_t	*sv_banFile;
 extern	serverBan_t serverBans[SERVER_MAXBANS];
 extern	int serverBansCount;
 #endif
+
+// TV recording state
+#define MAX_TV_MSGLEN      (256*1024)
+#define MAX_TV_CMDS        256
+#define MAX_TV_CMDBUF      (64*1024)
+
+typedef struct {
+    int         target;     // client index or -1 for broadcast
+    int         offset;     // offset into cmdBuf
+    int         len;
+} tvCmd_t;
+
+typedef struct {
+    qboolean    recording;
+    qboolean    autoPending;    // waiting for first human client before auto-start
+    fileHandle_t file;
+    unsigned int fileOffset;
+    unsigned int fileOffsetHi; // for >4GB (unlikely)
+
+    int         frameCount;
+    int         firstServerTime;
+    int         lastServerTime;
+
+    // Previous-frame baselines for delta encoding
+    entityState_t   prevEntities[MAX_GENTITIES];
+    byte            prevEntityBitmask[MAX_GENTITIES/8]; // 128 bytes
+    playerState_t   prevPlayers[MAX_CLIENTS];
+    byte            prevPlayerBitmask[MAX_CLIENTS/8];   // 8 bytes
+
+    // Per-frame server command capture
+    tvCmd_t     cmds[MAX_TV_CMDS];
+    int         cmdCount;
+    char        cmdBuf[MAX_TV_CMDBUF];
+    int         cmdBufUsed;
+
+    // Per-frame configstring change tracking
+    qboolean    csChanged[MAX_CONFIGSTRINGS];
+
+    // Write buffer
+    byte        msgBuf[MAX_TV_MSGLEN];
+
+    qboolean    hadHuman;           // a human was active during recording
+    char        recordingPath[MAX_QPATH]; // path for potential deletion
+} tvState_t;
+
+extern tvState_t tv;
+extern cvar_t *sv_tvauto;
+extern cvar_t *sv_tvpath;
 
 //===========================================================
 
@@ -498,3 +552,15 @@ void SV_LoadFilters( const char *filename );
 const char *SV_RunFilters( const char *userinfo, const netadr_t *addr );
 void SV_AddFilter_f( void );
 void SV_AddFilterCmd_f( void );
+
+//
+// sv_tv.c
+//
+void SV_TV_Init( void );
+void SV_TV_StartRecord_f( void );
+void SV_TV_StopRecord_f( void );
+void SV_TV_WriteFrame( void );
+void SV_TV_StopRecord( qboolean discard );
+void SV_TV_ConfigstringChanged( int index );
+void SV_TV_CaptureServerCommand( int target, const char *cmd );
+void SV_TV_AutoStart( void );

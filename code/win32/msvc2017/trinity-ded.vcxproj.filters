@@ -1,45 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="..\..\client\cl_avi.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_cgame.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_cin.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_console.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_curl.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_input.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_jpeg.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_keys.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_main.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_net_chan.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_parse.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_scrn.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\cl_ui.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\qcommon\cm_load.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -94,40 +55,10 @@
     <ClCompile Include="..\..\qcommon\net_ip.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\qcommon\puff.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\qcommon\q_math.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\qcommon\q_shared.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\snd_adpcm.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\snd_codec.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\snd_codec_wav.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\snd_codec_ogg.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\snd_dma.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\snd_main.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\snd_mem.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\snd_mix.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\client\snd_wavelet.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\server\sv_bot.c">
@@ -149,6 +80,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\server\sv_main.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\server\sv_tv.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\server\sv_net_chan.c">
@@ -175,37 +109,13 @@
     <ClCompile Include="..\..\qcommon\vm_x86.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\win_input.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\win_main.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\win_minimize.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\win_shared.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\win_snd.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\win_syscon.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\win_wndproc.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\win_gamma.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\win_glimp.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\win_qgl.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\win_qvk.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -214,9 +124,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\cgame\cg_public.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\client\cl_curl.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\client\client.h">
@@ -243,9 +150,6 @@
     <ClInclude Include="..\..\client\keys.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\qcommon\puff.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\qcommon\q_platform.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -258,28 +162,13 @@
     <ClInclude Include="..\..\qcommon\qfiles.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\renderer\qgl.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\server\server.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\client\snd_local.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\client\snd_public.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\qcommon\surfaceflags.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\renderercommon\tr_public.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\renderercommon\tr_types.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\ui\ui_public.h">
@@ -294,19 +183,16 @@
     <ClInclude Include="..\win_local.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\glw_win.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Header Files">
-      <UniqueIdentifier>{68e78738-9ef9-474f-b785-e2790a963a37}</UniqueIdentifier>
+      <UniqueIdentifier>{c461f4e6-671d-4a7b-af33-10c266a5c657}</UniqueIdentifier>
     </Filter>
     <Filter Include="Resource Files">
-      <UniqueIdentifier>{fe6ba4b8-846b-45b9-b331-1ccb08e134ae}</UniqueIdentifier>
+      <UniqueIdentifier>{274bfc42-6c07-400f-b481-8f11124955b4}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source Files">
-      <UniqueIdentifier>{bf7bfea2-5a49-4869-9d21-37c3952c7389}</UniqueIdentifier>
+      <UniqueIdentifier>{eb4da30c-1ee1-4bb5-8907-f4e6b395b2f8}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -320,9 +206,6 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="..\..\asm\snd_mix_x64.asm">
-      <Filter>Source Files</Filter>
-    </CustomBuild>
     <CustomBuild Include="..\..\asm\common_x64.asm">
       <Filter>Source Files</Filter>
     </CustomBuild>

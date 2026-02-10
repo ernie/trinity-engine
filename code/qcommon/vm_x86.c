@@ -25,8 +25,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // with dynamic register allocation and various optimizations
 
 #include "vm_local.h"
+#ifndef DEDICATED
 #include "../ui/ui_public.h"
 #include "../cgame/cg_public.h"
+#endif
 #include "../game/g_public.h"
 
 #ifdef _WIN32
@@ -3428,11 +3430,13 @@ static void EmitDATWFunc( vm_t *vm )
 
 static qboolean IsFloorTrap( const vm_t *vm, const int trap )
 {
+#ifndef DEDICATED
 	if ( trap == ~CG_FLOOR && vm->index == VM_CGAME )
 		return qtrue;
 
 	if ( trap == ~UI_FLOOR && vm->index == VM_UI )
 		return qtrue;
+#endif
 
 	if ( trap == ~G_FLOOR && vm->index == VM_GAME )
 		return qtrue;
@@ -3443,11 +3447,13 @@ static qboolean IsFloorTrap( const vm_t *vm, const int trap )
 
 static qboolean IsCeilTrap( const vm_t *vm, const int trap )
 {
+#ifndef DEDICATED
 	if ( trap == ~CG_CEIL && vm->index == VM_CGAME )
 		return qtrue;
 
 	if ( trap == ~UI_CEIL && vm->index == VM_UI )
 		return qtrue;
+#endif
 
 	if ( trap == ~G_CEIL && vm->index == VM_GAME )
 		return qtrue;

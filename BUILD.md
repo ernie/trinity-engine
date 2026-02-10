@@ -2,13 +2,13 @@
 
 ### windows/msvc
 
-Install Visual Studio Community Edition 2017 or later and compile `quake3e` project from solution
+Install Visual Studio Community Edition 2017 or later and compile `trinity` project from solution
 
-`code/win32/msvc2017/quake3e.sln`
+`code/win32/msvc2017/trinity.sln`
 
 Copy resulting exe from `code/win32/msvc2017/output` directory
 
-To compile with Vulkan backend - clean solution, right click on `quake3e` project, find `Project Dependencies` and select `renderervk` instead of `renderer`
+To compile with Vulkan backend - clean solution, right click on `trinity` project, find `Project Dependencies` and select `renderervk` instead of `renderer`
 
 ---
 
@@ -39,7 +39,7 @@ Build with either `make ARCH=x86` or `make ARCH=x86_64` commands depending on yo
 
 ### generic/ubuntu linux/bsd
 
-You may need to run the following commands to install packages (using fresh ubuntu-18.04 installation as example):
+You may need to run the following commands to install packages (using fresh ubuntu installation as example):
 
 * sudo apt install make gcc libcurl4-openssl-dev mesa-common-dev
 * sudo apt install libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev
@@ -50,28 +50,6 @@ Build with: `make`
 Copy the resulting binaries from created `build` directory or use command:
 
 `make install DESTDIR=<path_to_game_files>`
-
----
-
-### Arch Linux
-
-The package `quake3e-git` can either be installed through your favourite AUR helper, or manually using these commands:
-
-Download the snapshot from AUR:
-
-`curl -O https://aur.archlinux.org/cgit/aur.git/snapshot/quake3e-git.tar.gz`
-
-Extract the snapshot:
-
-`tar xfz quake3e-git.tar.gz`
-
-Enter the extracted directory:
-
-`cd quake3e-git`
-
-Build and install `quake3e-git`:
-
-`makepkg -risc`
 
 ---
 
@@ -142,6 +120,12 @@ Several Makefile options are available for linux/mingw/macos builds:
 `RENDERER_DEFAULT=opengl` - set default value for `\cl_renderer` cvar or use selected renderer for static build for `USE_RENDERER_DLOPEN=0`, valid options are `opengl`, `opengl2`, `vulkan`
 
 `USE_SYSTEM_JPEG=0` - use current system JPEG library, disabled by default
+
+`USE_OGG_VORBIS=1` - build with OGG Vorbis audio support, enabled by default
+
+`USE_SYSTEM_OGG=0` - use current system libogg, disabled by default
+
+`USE_SYSTEM_VORBIS=0` - use current system libvorbis, disabled by default
 
 Example:
 

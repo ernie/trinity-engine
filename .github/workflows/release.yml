@@ -1,0 +1,313 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  windows-msys:
+    name: Release Windows-${{ matrix.cc }} ${{ matrix.arch }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x86_64]
+        cc: [gcc]
+        include:
+          - arch: x86
+            msystem: MINGW32
+            prefix: mingw-w64-i686
+
+          - arch: x86_64
+            msystem: MINGW64
+            prefix: mingw-w64-x86_64
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+
+    - uses: msys2/setup-msys2@v2
+      with:
+        install: base-devel ${{ matrix.prefix }}-binutils ${{ matrix.prefix }}-make ${{ matrix.prefix }}-${{ matrix.cc }}
+        msystem: ${{ matrix.msystem }}
+        path-type: minimal
+        release: false
+        update: false
+        cache: false
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build
+      run: |
+        make install -j$(nproc) ARCH=${{ matrix.arch }} COMPILE_ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin USE_SDL=0 USE_RENDERER_DLOPEN=0 RENDERER_DEFAULT=vulkan CNAME=trinity-vulkan BUILD_SERVER=0
+        make clean ARCH=${{ matrix.arch }}
+        make install -j$(nproc) ARCH=${{ matrix.arch }} COMPILE_ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin USE_SDL=0 USE_RENDERER_DLOPEN=0 RENDERER_DEFAULT=opengl
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: windows-${{ matrix.cc }}-${{ matrix.arch }}
+        path: bin
+        if-no-files-found: error
+        retention-days: 5
+
+  windows-msys32:
+    name: Release Windows-msys32 ${{ matrix.arch }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x86_64]
+
+    steps:
+    - name: Checkout current repo
+      uses: actions/checkout@v4
+
+    - name: Checkout msys32 tools from sibling repo
+      uses: actions/checkout@v4
+      with:
+        repository: ec-/msys32
+        path: msys
+
+    - name: Extract msys32.7z
+      run: |
+        7z x %GITHUB_WORKSPACE%/msys/msys32.7z -o%GITHUB_WORKSPACE%/msys
+      shell: cmd
+
+    - name: Prepend msys/bin to PATH
+      run: |
+           echo "PATH=$GITHUB_WORKSPACE/msys/mingw/bin;$GITHUB_WORKSPACE/msys/bin;$GITHUB_WORKSPACE/msys" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Build
+      shell: cmd
+      run: |
+        make install ARCH=${{ matrix.arch }} DESTDIR=bin USE_SDL=0 USE_RENDERER_DLOPEN=0 RENDERER_DEFAULT=vulkan CNAME=trinity-vulkan BUILD_SERVER=0
+        make clean ARCH=${{ matrix.arch }}
+        make install ARCH=${{ matrix.arch }} DESTDIR=bin USE_SDL=0 USE_RENDERER_DLOPEN=0 RENDERER_DEFAULT=opengl
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: windows-mingw-${{ matrix.arch }}
+        path: bin
+        if-no-files-found: error
+        retention-days: 5
+
+  windows-msvc:
+    name: Release Windows-MSVC ${{ matrix.arch }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86, x64]
+        include:
+          - arch: arm64
+            platform: ARM64
+            suffix: .arm64
+            pkg_suffix: arm64
+
+          - arch: x86
+            platform: Win32
+            pkg_suffix: x86
+
+          - arch: x64
+            platform: x64
+            suffix: .x64
+            pkg_suffix: x86_64
+
+    steps:
+
+    - uses: microsoft/setup-msbuild@v2
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build
+      run: |
+        mkdir bin
+
+        msbuild code\win32\msvc2017\trinity-ded.vcxproj -p:TargetName=trinity.ded,Configuration=Release,Platform=${{ matrix.platform }} /p:PlatformToolset=v143
+        copy code\win32\msvc2017\output\trinity.ded.exe bin\trinity.ded${{ matrix.suffix }}.exe
+        msbuild code\win32\msvc2017\trinity-ded.vcxproj -p:TargetName=trinity.ded,Configuration=Release,Platform=${{ matrix.platform }} -t:Clean
+
+        msbuild code\win32\msvc2017\renderer.vcxproj -p:Configuration=Release,Platform=${{ matrix.platform }} /p:PlatformToolset=v143
+        msbuild code\win32\msvc2017\trinity.vcxproj -p:TargetName=trinity,Configuration=Release,Platform=${{ matrix.platform }},UseWasapi=USE_WASAPI=0 /p:PlatformToolset=v143
+        copy code\win32\msvc2017\output\trinity.exe bin\trinity${{ matrix.suffix }}.exe
+        msbuild code\win32\msvc2017\renderer.vcxproj -p:Configuration=Release,Platform=${{ matrix.platform }} -t:Clean
+        msbuild code\win32\msvc2017\trinity.vcxproj -p:TargetName=trinity,Configuration=Release,Platform=${{ matrix.platform }},UseWasapi=USE_WASAPI=0 -t:Clean
+
+        msbuild code\win32\msvc2017\renderervk.vcxproj -p:Configuration=Release,Platform=${{ matrix.platform }} /p:PlatformToolset=v143
+        msbuild code\win32\msvc2017\trinity.vcxproj -p:TargetName=trinity,Configuration=Release,Platform=${{ matrix.platform }},UseWasapi=USE_WASAPI=0 /p:PlatformToolset=v143
+        copy code\win32\msvc2017\output\trinity.exe bin\trinity-vulkan${{ matrix.suffix }}.exe
+        msbuild code\win32\msvc2017\renderervk.vcxproj -p:Configuration=Release,Platform=${{ matrix.platform }} -t:Clean
+        msbuild code\win32\msvc2017\trinity.vcxproj -p:TargetName=trinity,Configuration=Release,Platform=${{ matrix.platform }},UseWasapi=USE_WASAPI=0 -t:Clean
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: windows-msvc-${{ matrix.pkg_suffix }}
+        path: bin
+        if-no-files-found: error
+        retention-days: 5
+
+  ubuntu-x86:
+    name: Release Ubuntu ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x86_64]
+        cc: [gcc]
+        include:
+          - arch: x86
+            use_sdl: USE_SDL=0
+
+          - arch: x86_64
+            use_sdl: USE_SDL=1
+
+    steps:
+
+    - name: Install tools
+      run: |
+        if [ ${{ matrix.arch }} == "x86" ]; then
+          sudo dpkg --add-architecture i386
+          sudo apt-get -qq update
+          sudo apt-get -y install gcc-multilib libcurl4-openssl-dev:i386 mesa-common-dev:i386 libxxf86dga-dev:i386 libxrandr-dev:i386 libxxf86vm-dev:i386 libasound-dev:i386
+        else
+          sudo apt-get -qq update
+          sudo apt-get -y install libcurl4-openssl-dev mesa-common-dev libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev libsdl2-dev
+        fi
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build
+      run: |
+        make install -j$(nproc) ARCH=${{ matrix.arch }} COMPILE_ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin ${{ matrix.use_sdl }} USE_RENDERER_DLOPEN=0 RENDERER_DEFAULT=vulkan CNAME=trinity-vulkan BUILD_SERVER=0
+        make clean ARCH=${{ matrix.arch }}
+        make install -j$(nproc) ARCH=${{ matrix.arch }} COMPILE_ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin ${{ matrix.use_sdl }} USE_RENDERER_DLOPEN=0 RENDERER_DEFAULT=opengl
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: linux-${{ matrix.arch }}
+        path: bin
+        if-no-files-found: error
+        retention-days: 5
+
+  ubuntu-arm64:
+    name: Release Ubuntu arm64
+    runs-on: ubuntu-22.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64]
+        cc: [gcc]
+
+    steps:
+
+    - name: Install tools
+      run: |
+        sudo apt-get -qq update
+        sudo apt-get install -y make gcc g++
+        sudo apt-get -y install libcurl4-openssl-dev mesa-common-dev libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev libsdl2-dev
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build
+      run: |
+          make install -j$(nproc) ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin USE_SDL=0 USE_RENDERER_DLOPEN=0 RENDERER_DEFAULT=vulkan CNAME=trinity-vulkan BUILD_SERVER=0
+          make clean ARCH=${{ matrix.arch }}
+          make install -j$(nproc) ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin USE_SDL=0 USE_RENDERER_DLOPEN=0 RENDERER_DEFAULT=opengl
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: linux-${{ matrix.arch }}
+        path: bin
+        if-no-files-found: error
+        retention-days: 5
+
+  build-armv7:
+    name: Release Linux armv7
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install cross-compiler
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -y install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+
+      - name: Build
+        run: make install -j$(nproc) ARCH=arm CC=arm-linux-gnueabihf-gcc STRIP=arm-linux-gnueabihf-strip DESTDIR=bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-armv7
+          path: bin
+          if-no-files-found: error
+          retention-days: 5
+
+  macos-x86:
+    name: Release macOS ${{ matrix.arch }}
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        cc: [clang]
+
+    steps:
+
+    - name: Install tools
+      run: brew install coreutils sdl2 # pkg-config
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Build
+      run: |
+        make install -j$(sysctl -n hw.logicalcpu) ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin INSTALL=ginstall USE_RENDERER_DLOPEN=0 RENDERER_DEFAULT=vulkan CNAME=trinity-vulkan BUILD_SERVER=0 STRIP=echo
+        make clean ARCH=${{ matrix.arch }}
+        make install -j$(sysctl -n hw.logicalcpu) ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin INSTALL=ginstall USE_RENDERER_DLOPEN=0 RENDERER_DEFAULT=opengl STRIP=echo
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: macos-${{ matrix.arch }}
+        path: bin
+        if-no-files-found: error
+        retention-days: 5
+
+  release:
+    needs: [windows-msys, windows-msys32, windows-msvc, ubuntu-x86, ubuntu-arm64, build-armv7, macos-x86]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create binary archives
+        run: |
+          7z a -r trinity-linux-x86.zip            ./linux-x86/*
+          7z a -r trinity-linux-x86_64.zip         ./linux-x86_64/*
+          7z a -r trinity-linux-arm64.zip          ./linux-arm64/*
+          7z a -r trinity-linux-armv7.zip          ./linux-armv7/*
+          7z a -r trinity-windows-mingw-x86.zip    ./windows-mingw-x86/*
+          7z a -r trinity-windows-mingw-x86_64.zip ./windows-mingw-x86_64/*
+          7z a -r trinity-windows-msvc-arm64.zip   ./windows-msvc-arm64/*
+          7z a -r trinity-macos-x86_64.zip         ./macos-x86_64/*
+          7z a -r trinity-macos-aarch64.zip        ./macos-aarch64/*
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.zip

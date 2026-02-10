@@ -610,7 +610,7 @@ void MSG_WriteDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, const
 MSG_ReadDeltaUsercmdKey
 =====================
 */
-void MSG_ReadDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, usercmd_t *to ) {
+void MSG_ReadDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, usercmd_t *to, int buttonBits ) {
 	if ( MSG_ReadBits( msg, 1 ) ) {
 		to->serverTime = from->serverTime + MSG_ReadBits( msg, 8 );
 	} else {
@@ -630,7 +630,7 @@ void MSG_ReadDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, usercm
 		to->upmove = MSG_ReadDeltaKey( msg, key, from->upmove, 8);
 		if( to->upmove == -128 )
 			to->upmove = -127;
-		to->buttons = MSG_ReadDeltaKey( msg, key, from->buttons, 16);
+		to->buttons = MSG_ReadDeltaKey( msg, key, from->buttons, buttonBits);
 		to->weapon = MSG_ReadDeltaKey( msg, key, from->weapon, 8);
 	} else {
 		to->angles[0] = from->angles[0];

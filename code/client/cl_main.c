@@ -805,6 +805,10 @@ static qboolean CL_DemoNameCallback_f( const char *filename, int length )
 	const int num_len = 2;
 	int version;
 
+	// Accept .tvd files
+	if ( length > 4 && !Q_stricmp( filename + length - 4, ".tvd" ) )
+		return qtrue;
+
 	if ( length <= ext_len + num_len || Q_stricmpn( filename + length - (ext_len + num_len), "." DEMOEXT, ext_len ) != 0 )
 		return qfalse;
 
@@ -830,6 +834,7 @@ static void CL_CompleteDemoName(const char *args, int argNum )
 	{
 		FS_SetFilenameCallback( CL_DemoNameCallback_f );
 		Field_CompleteFilename( "demos", "." DEMOEXT "??", qfalse, FS_MATCH_ANY | FS_MATCH_STICK | FS_MATCH_SUBDIRS );
+		Field_CompleteFilename( "demos", ".tvd", qfalse, FS_MATCH_ANY | FS_MATCH_STICK | FS_MATCH_SUBDIRS );
 		FS_SetFilenameCallback( NULL );
 	}
 }
@@ -859,6 +864,32 @@ static void CL_PlayDemo_f( void ) {
 
 	// open the demo file
 	arg = Cmd_Argv( 1 );
+
+	// Check for .tvd extension
+	ext_test = strrchr( arg, '.' );
+	if ( ext_test && !Q_stricmp( ext_test, ".tvd" ) ) {
+		Com_sprintf( name, sizeof( name ), "demos/%s", arg );
+
+		Cvar_Set( "sv_killserver", "2" );
+		CL_Disconnect( qtrue );
+
+		clc.demoplaying = qtrue;
+		Con_Close();
+
+		if ( !CL_TV_Open( name ) ) {
+			Com_Printf( S_COLOR_YELLOW "couldn't open TV demo %s\n", name );
+			clc.demoplaying = qfalse;
+			return;
+		}
+
+		Q_strncpyz( clc.demoName, arg, sizeof( clc.demoName ) );
+		Q_strncpyz( cls.servername, arg, sizeof( cls.servername ) );
+		cls.state = CA_CONNECTED;
+		clc.firstDemoFrameSkipped = qfalse;
+
+		CL_InitDownloads();
+		return;
+	}
 
 	// check for an extension .DEMOEXT_?? (?? is protocol)
 	ext_test = strrchr(arg, '.');
@@ -1214,6 +1245,11 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 	// Stop demo recording
 	if ( clc.demorecording ) {
 		CL_StopRecord_f();
+	}
+
+	// Stop TV playback
+	if ( tvPlay.active ) {
+		CL_TV_Close();
 	}
 
 	// Stop demo playback
@@ -4038,6 +4074,8 @@ void CL_Init( void ) {
 	Cmd_AddCommand( "dlmap", CL_Download_f );
 #endif
 	Cmd_AddCommand( "modelist", CL_ModeList_f );
+
+	CL_TV_Init();
 
 	Cvar_Set( "cl_running", "1" );
 #ifdef USE_MD5

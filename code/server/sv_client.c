@@ -1842,6 +1842,10 @@ void SV_UserinfoChanged( client_t *cl, qboolean updateUserinfo, qboolean runFilt
 
 	Info_SetValueForKey( cl->userinfo, "tld", cl->tld );
 
+	// Check if client is VR
+	val = Info_ValueForKey( cl->userinfo, "vr" );
+	cl->isVR = ( atoi( val ) == 1 );
+
 	if ( runFilter )
 	{
 		val = SV_RunFilters( cl->userinfo, &cl->netchan.remoteAddress );
@@ -2163,7 +2167,7 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 	oldcmd = &nullcmd;
 	for ( i = 0 ; i < cmdCount ; i++ ) {
 		cmd = &cmds[i];
-		MSG_ReadDeltaUsercmdKey( msg, key, oldcmd, cmd );
+		MSG_ReadDeltaUsercmdKey( msg, key, oldcmd, cmd, cl->isVR ? 32 : 16 );
 		oldcmd = cmd;
 	}
 

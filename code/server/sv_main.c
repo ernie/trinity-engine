@@ -192,6 +192,11 @@ void QDECL SV_SendServerCommand( client_t *cl, const char *fmt, ... ) {
 	len = Q_vsnprintf( message, sizeof( message ), fmt, argptr );
 	va_end( argptr );
 
+	// TV recording hook
+	if ( tv.recording ) {
+		SV_TV_CaptureServerCommand( cl ? (int)(cl - svs.clients) : -1, message );
+	}
+
 	if ( cl != NULL ) {
 		// outdated clients can't properly decode 1023-chars-long strings
 		// http://aluigi.altervista.org/adv/q3msgboom-adv.txt
@@ -701,8 +706,8 @@ static void SVC_Status( const netadr_t *from ) {
 		if ( cl->state >= CS_CONNECTED ) {
 
 			ps = SV_GameClientNum( i );
-			playerLength = Com_sprintf( player, sizeof( player ), "%i %i \"%s\"\n", 
-				ps->persistant[ PERS_SCORE ], cl->ping, cl->name );
+			playerLength = Com_sprintf( player, sizeof( player ), "%i %i %i \"%s\" %i\n",
+				ps->persistant[ PERS_SCORE ], cl->ping, ps->persistant[ PERS_TEAM ], cl->name, i );
 			
 			if ( statusLength + playerLength >= MAX_PACKETLEN-4 )
 				break; // can't hold any more
@@ -1388,6 +1393,8 @@ void SV_Frame( int msec ) {
 
 		// let everything in the world think and move
 		VM_Call( gvm, 1, GAME_RUN_FRAME, sv.time );
+
+		SV_TV_WriteFrame();
 	}
 
 	if ( com_speeds->integer ) {

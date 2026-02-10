@@ -92,6 +92,10 @@ CL_GetCurrentSnapshotNumber
 ====================
 */
 static void CL_GetCurrentSnapshotNumber( int *snapshotNumber, int *serverTime ) {
+	if ( tvPlay.active ) {
+		CL_TV_GetCurrentSnapshotNumber( snapshotNumber, serverTime );
+		return;
+	}
 	*snapshotNumber = cl.snap.messageNum;
 	*serverTime = cl.snap.serverTime;
 }
@@ -105,6 +109,10 @@ CL_GetSnapshot
 static qboolean CL_GetSnapshot( int snapshotNumber, snapshot_t *snapshot ) {
 	clSnapshot_t	*clSnap;
 	int				i, count;
+
+	if ( tvPlay.active ) {
+		return CL_TV_GetSnapshot( snapshotNumber, snapshot );
+	}
 
 	if ( cl.snap.messageNum - snapshotNumber < 0 ) {
 		Com_Error( ERR_DROP, "CL_GetSnapshot: snapshotNumber (%i) > cl.snapshot.messageNum (%i)", snapshotNumber, cl.snap.messageNum );
@@ -245,6 +253,10 @@ static qboolean CL_GetServerCommand( int serverCommandNumber ) {
 	const char *cmd;
 	static char bigConfigString[BIG_INFO_STRING];
 	int argc, index;
+
+	if ( tvPlay.active ) {
+		return CL_TV_GetServerCommand( serverCommandNumber );
+	}
 
 	// if we have irretrievably lost a reliable command, drop the connection
 	if ( clc.serverCommandSequence - serverCommandNumber >= MAX_RELIABLE_COMMANDS ) {
@@ -586,6 +598,9 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return 0;
 	case CG_S_RESPATIALIZE:
 		S_Respatialize( args[1], VMA(2), VMA(3), args[4] );
+		if ( tvPlay.active ) {
+			VectorCopy( ((float*)VMA(2)), tvPlay.viewOrigin );
+		}
 		return 0;
 	case CG_S_REGISTERSOUND:
 		return S_RegisterSound( VMA(1), args[2] );
@@ -1124,7 +1139,9 @@ void CL_SetCGameTime( void ) {
 				clc.firstDemoFrameSkipped = qtrue;
 				return;
 			}
-			CL_ReadDemoMessage();
+			if ( !tvPlay.active ) {
+				CL_ReadDemoMessage();
+			}
 		}
 		if ( cl.newSnapshots ) {
 			cl.newSnapshots = qfalse;
@@ -1147,7 +1164,9 @@ void CL_SetCGameTime( void ) {
 	}
 
 	if ( cl.snap.serverTime - cl.oldFrameServerTime < 0 ) {
-		Com_Error( ERR_DROP, "cl.snap.serverTime < cl.oldFrameServerTime" );
+		if ( !tvPlay.active ) {
+			Com_Error( ERR_DROP, "cl.snap.serverTime < cl.oldFrameServerTime" );
+		}
 	}
 	cl.oldFrameServerTime = cl.snap.serverTime;
 
@@ -1165,7 +1184,9 @@ void CL_SetCGameTime( void ) {
 		// guarantee that time will never flow backwards, even if
 		// serverTimeDelta made an adjustment or cl_timeNudge was changed
 		if ( cl.serverTime - cl.oldServerTime < 0 ) {
-			cl.serverTime = cl.oldServerTime;
+			if ( !tvPlay.active ) {
+				cl.serverTime = cl.oldServerTime;
+			}
 		}
 		cl.oldServerTime = cl.serverTime;
 
@@ -1202,6 +1223,28 @@ void CL_SetCGameTime( void ) {
 		}
 		clc.timeDemoFrames++;
 		cl.serverTime = clc.timeDemoBaseTime + clc.timeDemoFrames * 50;
+	}
+
+	if ( tvPlay.active ) {
+		// Advance TV frames while cl.serverTime is ahead of latest snapshot
+		while ( cl.serverTime - tvPlay.snapshots[1].serverTime >= 0 ) {
+			if ( tvPlay.atEnd ) {
+				CL_Disconnect( qtrue );
+				return;
+			}
+			// Shift: snap[0] = snap[1]
+			tvPlay.snapshots[0] = tvPlay.snapshots[1];
+			Com_Memcpy( tvPlay.snapEntities[0], tvPlay.snapEntities[1],
+				sizeof( tvPlay.snapEntities[0] ) );
+			// Read next frame and build new snap[1]
+			CL_TV_ReadFrame();
+			CL_TV_BuildSnapshot( 1 );
+		}
+		cl.snap = tvPlay.snapshots[1];
+		cl.newSnapshots = qtrue;
+		Cvar_SetIntegerValue( "cl_tvTime",
+			tvPlay.serverTime - tvPlay.firstServerTime );
+		return;
 	}
 
 	//while ( cl.serverTime >= cl.snap.serverTime ) {

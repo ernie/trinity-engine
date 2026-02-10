@@ -114,7 +114,7 @@ void  MSG_ReadData(msg_t *sb, void *buffer, int size);
 int   MSG_ReadEntitynum(msg_t *sb);
 
 void MSG_WriteDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, const usercmd_t *to );
-void MSG_ReadDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, usercmd_t *to );
+void MSG_ReadDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, usercmd_t *to, int buttonBits );
 
 void MSG_WriteDeltaEntity( msg_t *msg, const entityState_t *from, const entityState_t *to, qboolean force );
 void MSG_ReadDeltaEntity( msg_t *msg, const entityState_t *from, entityState_t *to, int number );

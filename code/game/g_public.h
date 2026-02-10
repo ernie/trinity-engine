@@ -438,6 +438,10 @@ typedef enum {
 
 	BOTAI_START_FRAME,				// ( int time );
 
+	// Server lifecycle events - game just logs, engine handles lifecycle
+	GAME_SERVER_STARTED,			// ( void ); Called after first GAME_INIT - logs ServerStartup
+	GAME_SERVER_STOPPING,			// ( void ); Called before final shutdown - logs ServerShutdown
+
 	GAME_EXPORT_LAST
 } gameExport_t;
 

@@ -145,6 +145,62 @@ typedef struct {
 
 extern	clientActive_t		cl;
 
+// TV playback state
+#define MAX_TV_MSGLEN		(256*1024)
+
+typedef struct {
+	qboolean		active;
+	fileHandle_t	file;
+
+	// Header
+	int				svFps;
+	int				maxclients;
+
+	// Running state buffers
+	entityState_t	entities[MAX_GENTITIES];
+	byte			entityBitmask[MAX_GENTITIES/8];
+	playerState_t	players[MAX_CLIENTS];
+	byte			playerBitmask[MAX_CLIENTS/8];
+
+	// Frame tracking
+	int				serverTime;
+
+	// Double-buffered snapshots for cgame interpolation
+	clSnapshot_t	snapshots[2];
+	int				snapCount;
+
+	// Entities for the two snapshots
+	entityState_t	snapEntities[2][MAX_ENTITIES_IN_SNAPSHOT];
+
+	// Viewpoint
+	int				viewpoint;
+	vec3_t			viewOrigin;		// updated by cgame via respatialize trap
+
+	// Server commands for cgame delivery
+	int				cmdSequence;
+	char			cmds[MAX_RELIABLE_COMMANDS][MAX_STRING_CHARS];
+
+	// Read buffer
+	byte			msgBuf[MAX_TV_MSGLEN];
+
+	// Duration info
+	int				totalDuration;		// from header, in msec
+	int				firstServerTime;
+	int				lastServerTime;
+
+	// EOF tracking
+	qboolean		atEnd;
+
+	// Seek state
+	qboolean		seeking;
+
+	// Saved initial state for seeking (configstrings are delta-encoded from header)
+	long			firstFrameOffset;
+	gameState_t		initialGameState;
+} tvPlayback_t;
+
+extern tvPlayback_t tvPlay;
+
 #define EM_GAMESTATE 1
 #define EM_SNAPSHOT  2
 #define EM_COMMAND   4
@@ -600,6 +656,23 @@ size_t	CL_SaveJPGToBuffer( byte *buffer, size_t bufSize, int quality, int image_
 void	CL_SaveJPG( const char *filename, int quality, int image_width, int image_height, byte *image_buffer, int padding );
 void	CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *height );
 
+
+//
+// cl_tv.c
+//
+extern cvar_t *cl_tvViewpoint;
+extern cvar_t *cl_tvTime;
+extern cvar_t *cl_tvDuration;
+
+void CL_TV_Init( void );
+qboolean CL_TV_Open( const char *filename );
+void CL_TV_Close( void );
+void CL_TV_ReadFrame( void );
+void CL_TV_BuildSnapshot( int which );
+void CL_TV_Seek( int targetTime );
+qboolean CL_TV_GetSnapshot( int snapshotNumber, snapshot_t *snapshot );
+void CL_TV_GetCurrentSnapshotNumber( int *snapshotNumber, int *serverTime );
+qboolean CL_TV_GetServerCommand( int serverCommandNumber );
 
 // base backend functions
 void	HandleEvents( void );
