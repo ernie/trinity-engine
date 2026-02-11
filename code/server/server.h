@@ -325,9 +325,12 @@ extern	int serverBansCount;
 #endif
 
 // TV recording state
+#include "zstd.h"
+
 #define MAX_TV_MSGLEN      (256*1024)
 #define MAX_TV_CMDS        256
 #define MAX_TV_CMDBUF      (64*1024)
+#define ZSTD_OUT_BUF_SIZE  (128*1024)
 
 typedef struct {
     int         target;     // client index or -1 for broadcast
@@ -364,12 +367,20 @@ typedef struct {
     // Write buffer
     byte        msgBuf[MAX_TV_MSGLEN];
 
-    qboolean    hadHuman;           // a human was active during recording
+    qboolean    autoRecording;      // started by auto-record (not manual tvrecord)
+    qboolean    keepRecording;      // threshold met, do not auto-delete
+    int         thresholdMetTime;   // sv.time when threshold was first continuously met (0 = not met)
     char        recordingPath[MAX_QPATH]; // path for potential deletion
+
+    // Zstd streaming compression
+    ZSTD_CStream    *cstream;
+    byte            zstdOutBuf[ZSTD_OUT_BUF_SIZE];
 } tvState_t;
 
 extern tvState_t tv;
-extern cvar_t *sv_tvauto;
+extern cvar_t *sv_tvAuto;
+extern cvar_t *sv_tvAutoMinPlayers;
+extern cvar_t *sv_tvAutoMinPlayersSecs;
 extern cvar_t *sv_tvpath;
 
 //===========================================================

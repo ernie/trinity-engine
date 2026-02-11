@@ -6,10 +6,15 @@ Trinity Engine is a fork of [Quake3e](https://github.com/ec-/Quake3e) with featu
 
 ### TV (TrinityVision, of course :wink:) Demo System
 
-Server-side demo recording captures complete match state — all entities, player states, and server commands — into a compact delta-encoded `.tvd` format. Client-side playback supports multiple viewpoints, smooth interpolation between snapshots, and seeking via replay from the beginning.
+Server-side demo recording captures complete match state — all entities, player states,
+and server commands — into a compact, zstd-compressed, delta-encoded `.tvd` format.
+Client-side playback supports multiple viewpoints, smooth interpolation between snapshots,
+and seeking via replay from the beginning.
 
 - `tvrecord` / `tvstop` — manual recording control
-- `sv_tvauto` — automatic recording when the first human client connects
+- `sv_tvAuto` — automatic recording on map load
+- `sv_tvAutoMinPlayers` — minimum concurrent non-spectator human players to keep auto-recording (0 = always keep)
+- `sv_tvAutoMinPlayersSecs` — seconds the threshold must be continuously met (0 = instantaneous)
 - Client-side viewpoint switching and seek during playback
 
 ### VR Client Support

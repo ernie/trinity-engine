@@ -146,7 +146,11 @@ typedef struct {
 extern	clientActive_t		cl;
 
 // TV playback state
+#include "zstd.h"
+
 #define MAX_TV_MSGLEN		(256*1024)
+#define TVD_ZSTD_IN_BUF_SIZE   (128*1024)
+#define TVD_ZSTD_OUT_BUF_SIZE  (256*1024)
 
 typedef struct {
 	qboolean		active;
@@ -197,6 +201,16 @@ typedef struct {
 	// Saved initial state for seeking (configstrings are delta-encoded from header)
 	long			firstFrameOffset;
 	gameState_t		initialGameState;
+
+	// Zstd streaming decompression
+	ZSTD_DStream	*dstream;
+	byte			zstdInBuf[TVD_ZSTD_IN_BUF_SIZE];
+	size_t			zstdInSize;
+	size_t			zstdInPos;
+	byte			zstdOutBuf[TVD_ZSTD_OUT_BUF_SIZE];
+	size_t			zstdOutSize;
+	size_t			zstdOutPos;
+	qboolean		zstdStreamEnded;
 } tvPlayback_t;
 
 extern tvPlayback_t tvPlay;

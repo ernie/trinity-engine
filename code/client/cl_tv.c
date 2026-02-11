@@ -53,6 +53,167 @@ void CL_TV_Init( void ) {
 
 /*
 ===============
+CL_TV_DecompressRead
+
+Read decompressed data from the zstd stream.
+Returns number of bytes actually read (< len at stream end).
+===============
+*/
+static int CL_TV_DecompressRead( void *buf, int len ) {
+	byte *dst = (byte *)buf;
+	int total = 0;
+
+	while ( total < len ) {
+		// Consume from decompressed output buffer first
+		if ( tvPlay.zstdOutPos < tvPlay.zstdOutSize ) {
+			size_t avail = tvPlay.zstdOutSize - tvPlay.zstdOutPos;
+			size_t want = (size_t)( len - total );
+			size_t copy = ( want < avail ) ? want : avail;
+			Com_Memcpy( dst + total, tvPlay.zstdOutBuf + tvPlay.zstdOutPos, copy );
+			tvPlay.zstdOutPos += copy;
+			total += (int)copy;
+			continue;
+		}
+
+		if ( tvPlay.zstdStreamEnded ) {
+			break;
+		}
+
+		// Read more compressed data from file if input buffer exhausted
+		if ( tvPlay.zstdInPos >= tvPlay.zstdInSize ) {
+			int bytesRead = FS_Read( tvPlay.zstdInBuf, TVD_ZSTD_IN_BUF_SIZE, tvPlay.file );
+			if ( bytesRead <= 0 ) {
+				tvPlay.zstdStreamEnded = qtrue;
+				break;
+			}
+			tvPlay.zstdInSize = (size_t)bytesRead;
+			tvPlay.zstdInPos = 0;
+		}
+
+		// Decompress
+		{
+			ZSTD_inBuffer in = { tvPlay.zstdInBuf, tvPlay.zstdInSize, tvPlay.zstdInPos };
+			ZSTD_outBuffer out = { tvPlay.zstdOutBuf, TVD_ZSTD_OUT_BUF_SIZE, 0 };
+			size_t ret = ZSTD_decompressStream( tvPlay.dstream, &out, &in );
+			tvPlay.zstdInPos = in.pos;
+			tvPlay.zstdOutSize = out.pos;
+			tvPlay.zstdOutPos = 0;
+
+			if ( ret == 0 ) {
+				// Zstd frame complete
+				tvPlay.zstdStreamEnded = qtrue;
+			}
+			if ( ZSTD_isError( ret ) ) {
+				tvPlay.zstdStreamEnded = qtrue;
+			}
+		}
+	}
+
+	return total;
+}
+
+
+/*
+===============
+CL_TV_ReadTrailer
+
+Read k/v trailer from the end of the file.
+Format: "TVDt" + repeated(key\0 + valueLen:2 + valueData) + \0 + trailerSize:4
+Returns qtrue on success, qfalse on failure (sets totalDuration=0).
+===============
+*/
+static qboolean CL_TV_ReadTrailer( void ) {
+	long savedPos;
+	int trailerSize;
+	char magic[4];
+	long fileLen;
+	char key[64];
+	unsigned short vlen;
+	byte vbuf[256];
+
+	tvPlay.totalDuration = 0;
+
+	savedPos = FS_FTell( tvPlay.file );
+
+	// Get file length by seeking to end
+	FS_Seek( tvPlay.file, 0, FS_SEEK_END );
+	fileLen = FS_FTell( tvPlay.file );
+
+	// Minimum trailer: "TVDt"(4) + \0(1) + size(4) = 9
+	if ( fileLen < 9 ) {
+		FS_Seek( tvPlay.file, savedPos, FS_SEEK_SET );
+		return qfalse;
+	}
+
+	// Read trailerSize from EOF-4
+	FS_Seek( tvPlay.file, fileLen - 4, FS_SEEK_SET );
+	if ( FS_Read( &trailerSize, 4, tvPlay.file ) != 4 || trailerSize < 9 || trailerSize > fileLen ) {
+		FS_Seek( tvPlay.file, savedPos, FS_SEEK_SET );
+		return qfalse;
+	}
+
+	// Seek to trailer start
+	FS_Seek( tvPlay.file, fileLen - trailerSize, FS_SEEK_SET );
+
+	// Read and validate magic "TVDt"
+	if ( FS_Read( magic, 4, tvPlay.file ) != 4 ||
+		 magic[0] != 'T' || magic[1] != 'V' || magic[2] != 'D' || magic[3] != 't' ) {
+		FS_Seek( tvPlay.file, savedPos, FS_SEEK_SET );
+		return qfalse;
+	}
+
+	// Read k/v pairs until empty key (terminator)
+	while ( 1 ) {
+		int i;
+
+		// Read key (null-terminated)
+		for ( i = 0; i < (int)sizeof( key ) - 1; i++ ) {
+			if ( FS_Read( &key[i], 1, tvPlay.file ) != 1 ) {
+				FS_Seek( tvPlay.file, savedPos, FS_SEEK_SET );
+				return qfalse;
+			}
+			if ( key[i] == '\0' ) {
+				break;
+			}
+		}
+		key[sizeof( key ) - 1] = '\0';
+
+		// Empty key = terminator
+		if ( key[0] == '\0' ) {
+			break;
+		}
+
+		// Read value length
+		if ( FS_Read( &vlen, 2, tvPlay.file ) != 2 ) {
+			FS_Seek( tvPlay.file, savedPos, FS_SEEK_SET );
+			return qfalse;
+		}
+
+		// Read value data
+		if ( vlen > sizeof( vbuf ) ) {
+			// Skip unknown large value
+			FS_Seek( tvPlay.file, vlen, FS_SEEK_CUR );
+			continue;
+		}
+		if ( vlen > 0 && FS_Read( vbuf, vlen, tvPlay.file ) != vlen ) {
+			FS_Seek( tvPlay.file, savedPos, FS_SEEK_SET );
+			return qfalse;
+		}
+
+		// Match known keys
+		if ( !Q_stricmp( key, "dur" ) && vlen == 4 ) {
+			Com_Memcpy( &tvPlay.totalDuration, vbuf, 4 );
+		}
+	}
+
+	// Restore file position
+	FS_Seek( tvPlay.file, savedPos, FS_SEEK_SET );
+	return qtrue;
+}
+
+
+/*
+===============
 CL_TV_ReadString
 
 Read a null-terminated string from file, byte at a time.
@@ -195,12 +356,6 @@ qboolean CL_TV_Open( const char *filename ) {
 		return qfalse;
 	}
 
-	// Duration in msec (written by server on recording close)
-	if ( FS_Read( &tvPlay.totalDuration, 4, tvPlay.file ) != 4 ) {
-		FS_FCloseFile( tvPlay.file );
-		return qfalse;
-	}
-
 	// Map name
 	if ( CL_TV_ReadString( mapname, sizeof( mapname ) ) < 0 ) {
 		FS_FCloseFile( tvPlay.file );
@@ -211,15 +366,6 @@ qboolean CL_TV_Open( const char *filename ) {
 	if ( CL_TV_ReadString( timestamp, sizeof( timestamp ) ) < 0 ) {
 		FS_FCloseFile( tvPlay.file );
 		return qfalse;
-	}
-
-	{
-		int secs = tvPlay.totalDuration / 1000;
-		int h = secs / 3600;
-		int m = ( secs % 3600 ) / 60;
-		int s = secs % 60;
-		Com_Printf( "TV: %s recorded %s, %i fps, %i maxclients, %02i:%02i:%02i\n",
-			mapname, timestamp, tvPlay.svFps, tvPlay.maxclients, h, m, s );
 	}
 
 	// Populate cl.gameState with configstrings
@@ -277,9 +423,36 @@ qboolean CL_TV_Open( const char *filename ) {
 		CL_TV_UpdateConfigstring( CS_SERVERINFO, si, (int)strlen( si ) );
 	}
 
+	// Read trailer for duration (before saving frame offset)
+	CL_TV_ReadTrailer();
+
+	// Print header info
+	{
+		if ( tvPlay.totalDuration > 0 ) {
+			int secs = tvPlay.totalDuration / 1000;
+			int h = secs / 3600;
+			int m = ( secs % 3600 ) / 60;
+			int s = secs % 60;
+			Com_Printf( "TV: %s recorded %s, %i fps, %i maxclients, %02i:%02i:%02i\n",
+				mapname, timestamp, tvPlay.svFps, tvPlay.maxclients, h, m, s );
+		} else {
+			Com_Printf( "TV: %s recorded %s, %i fps, %i maxclients, unknown duration\n",
+				mapname, timestamp, tvPlay.svFps, tvPlay.maxclients );
+		}
+	}
+
 	// Save initial gameState and first frame offset for seeking
 	tvPlay.initialGameState = cl.gameState;
 	tvPlay.firstFrameOffset = FS_FTell( tvPlay.file );
+
+	// Init zstd decompressor
+	tvPlay.dstream = ZSTD_createDStream();
+	ZSTD_initDStream( tvPlay.dstream );
+	tvPlay.zstdInSize = 0;
+	tvPlay.zstdInPos = 0;
+	tvPlay.zstdOutSize = 0;
+	tvPlay.zstdOutPos = 0;
+	tvPlay.zstdStreamEnded = qfalse;
 
 	// Zero entity/player buffers
 	Com_Memset( tvPlay.entities, 0, sizeof( tvPlay.entities ) );
@@ -354,6 +527,11 @@ CL_TV_Close
 ===============
 */
 void CL_TV_Close( void ) {
+	if ( tvPlay.dstream ) {
+		ZSTD_freeDStream( tvPlay.dstream );
+		tvPlay.dstream = NULL;
+	}
+
 	if ( tvPlay.file ) {
 		FS_FCloseFile( tvPlay.file );
 	}
@@ -387,8 +565,8 @@ void CL_TV_ReadFrame( void ) {
 	int i;
 	char csData[BIG_INFO_STRING];
 
-	// Read frame size (4 bytes raw)
-	if ( FS_Read( &frameSize, 4, tvPlay.file ) != 4 || frameSize == 0 ) {
+	// Read frame size (4 bytes from compressed stream)
+	if ( CL_TV_DecompressRead( &frameSize, 4 ) != 4 || frameSize == 0 ) {
 		tvPlay.atEnd = qtrue;
 		return;
 	}
@@ -399,8 +577,8 @@ void CL_TV_ReadFrame( void ) {
 		return;
 	}
 
-	// Read Huffman-encoded payload
-	if ( FS_Read( tvPlay.msgBuf, frameSize, tvPlay.file ) != (int)frameSize ) {
+	// Read Huffman-encoded payload from compressed stream
+	if ( CL_TV_DecompressRead( tvPlay.msgBuf, frameSize ) != (int)frameSize ) {
 		tvPlay.atEnd = qtrue;
 		return;
 	}
@@ -908,33 +1086,53 @@ void CL_TV_Seek( int targetTime ) {
 	if ( targetTime < tvPlay.firstServerTime ) {
 		targetTime = tvPlay.firstServerTime;
 	}
-	if ( targetTime > tvPlay.firstServerTime + tvPlay.totalDuration ) {
+	if ( tvPlay.totalDuration > 0 && targetTime > tvPlay.firstServerTime + tvPlay.totalDuration ) {
 		targetTime = tvPlay.firstServerTime + tvPlay.totalDuration;
 	}
 
-	// Restore initial gameState (configstrings are delta-encoded from header,
-	// not snapshotted in keyframes, so we must replay from the beginning)
-	cl.gameState = tvPlay.initialGameState;
+	if ( targetTime >= tvPlay.serverTime && !tvPlay.atEnd ) {
+		// Forward seek: continue streaming from current position
+		// Entity/player delta state and configstrings are already correct
+		tvPlay.seeking = qtrue;
 
-	// Seek to the first frame and reset all running state
-	FS_Seek( tvPlay.file, tvPlay.firstFrameOffset, FS_SEEK_SET );
-	Com_Memset( tvPlay.entities, 0, sizeof( tvPlay.entities ) );
-	Com_Memset( tvPlay.entityBitmask, 0, sizeof( tvPlay.entityBitmask ) );
-	Com_Memset( tvPlay.players, 0, sizeof( tvPlay.players ) );
-	Com_Memset( tvPlay.playerBitmask, 0, sizeof( tvPlay.playerBitmask ) );
-	tvPlay.serverTime = 0;
-	tvPlay.atEnd = qfalse;
+		while ( tvPlay.serverTime < targetTime && !tvPlay.atEnd ) {
+			CL_TV_ReadFrame();
+		}
 
-	// Skip command queueing during seek to avoid buffer overflow
-	tvPlay.seeking = qtrue;
+		tvPlay.seeking = qfalse;
+	} else {
+		// Backward seek: full reset required
 
-	// Read ALL frames from the beginning to ensure configstrings are correct
-	// (keyframes only snapshot entities/players, not configstrings)
-	while ( tvPlay.serverTime < targetTime && !tvPlay.atEnd ) {
-		CL_TV_ReadFrame();
+		// Restore initial gameState (configstrings are delta-encoded from header)
+		cl.gameState = tvPlay.initialGameState;
+
+		// Seek to the first frame and reset all running state
+		FS_Seek( tvPlay.file, tvPlay.firstFrameOffset, FS_SEEK_SET );
+		Com_Memset( tvPlay.entities, 0, sizeof( tvPlay.entities ) );
+		Com_Memset( tvPlay.entityBitmask, 0, sizeof( tvPlay.entityBitmask ) );
+		Com_Memset( tvPlay.players, 0, sizeof( tvPlay.players ) );
+		Com_Memset( tvPlay.playerBitmask, 0, sizeof( tvPlay.playerBitmask ) );
+		tvPlay.serverTime = 0;
+		tvPlay.atEnd = qfalse;
+
+		// Reset zstd decompressor session (without freeing context)
+		ZSTD_DCtx_reset( tvPlay.dstream, ZSTD_reset_session_only );
+		tvPlay.zstdInSize = 0;
+		tvPlay.zstdInPos = 0;
+		tvPlay.zstdOutSize = 0;
+		tvPlay.zstdOutPos = 0;
+		tvPlay.zstdStreamEnded = qfalse;
+
+		// Skip command queueing during seek to avoid buffer overflow
+		tvPlay.seeking = qtrue;
+
+		// Read ALL frames from the beginning to ensure configstrings are correct
+		while ( tvPlay.serverTime < targetTime && !tvPlay.atEnd ) {
+			CL_TV_ReadFrame();
+		}
+
+		tvPlay.seeking = qfalse;
 	}
-
-	tvPlay.seeking = qfalse;
 
 	// Build both snapshots
 	CL_TV_BuildSnapshot( 0 );

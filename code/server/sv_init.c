@@ -426,8 +426,9 @@ void SV_SpawnServer( const char *mapname, qboolean killBots ) {
 	const char	*p;
 
 	// Stop any active TV recording before map change
-	if ( tv.recording && !tv.hadHuman ) {
-		Com_Printf( "TV: No human players during match, discarding recording.\n" );
+	if ( tv.recording && tv.autoRecording && !tv.keepRecording
+		 && sv_tvAutoMinPlayers->integer > 0 ) {
+		Com_Printf( "TV: Auto-recording did not meet player threshold, discarding.\n" );
 		SV_TV_StopRecord( qtrue );
 	} else {
 		SV_TV_StopRecord( qfalse );
@@ -904,8 +905,9 @@ void SV_Shutdown( const char *finalmsg ) {
 	}
 
 	// Stop any active TV recording before shutdown
-	if ( tv.recording && !tv.hadHuman ) {
-		Com_Printf( "TV: No human players during match, discarding recording.\n" );
+	if ( tv.recording && tv.autoRecording && !tv.keepRecording
+		 && sv_tvAutoMinPlayers->integer > 0 ) {
+		Com_Printf( "TV: Auto-recording did not meet player threshold, discarding.\n" );
 		SV_TV_StopRecord( qtrue );
 	} else {
 		SV_TV_StopRecord( qfalse );

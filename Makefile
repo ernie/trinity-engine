@@ -216,6 +216,7 @@ BLIBDIR=$(MOUNT_DIR)/botlib
 JPDIR=$(MOUNT_DIR)/libjpeg
 OGGDIR=$(MOUNT_DIR)/libogg
 VORBISDIR=$(MOUNT_DIR)/libvorbis
+ZSTDDIR=$(MOUNT_DIR)/libzstd
 
 bin_path=$(shell which $(1) 2> /dev/null)
 
@@ -416,6 +417,7 @@ ifdef MINGW
   BASE_CFLAGS += -Wall -Wimplicit -Wstrict-prototypes -DUSE_ICON -DMINGW=1
 
   BASE_CFLAGS += -Wno-unused-result -fvisibility=hidden
+  BASE_CFLAGS += -I$(ZSTDDIR)
   BASE_CFLAGS += -ffunction-sections -flto
 
   ifeq ($(ARCH),x86_64)
@@ -486,6 +488,7 @@ ifeq ($(COMPILE_PLATFORM),darwin)
   BASE_CFLAGS += -Wno-unused-result
 
   BASE_CFLAGS += -DMACOS_X
+  BASE_CFLAGS += -I$(ZSTDDIR)
 
   OPTIMIZE = -O2 -fvisibility=hidden
 
@@ -546,6 +549,7 @@ else
   BASE_CFLAGS += -DUSE_ICON
 
   BASE_CFLAGS += -I/usr/include -I/usr/local/include
+  BASE_CFLAGS += -I$(ZSTDDIR)
 
   OPTIMIZE = -O2 -fvisibility=hidden
 
@@ -792,12 +796,14 @@ endif
 ifeq ($(USE_SYSTEM_VORBIS),0)
 	@if [ ! -d $(B)/client/vorbis ];then $(MKDIR) $(B)/client/vorbis;fi
 endif
+	@if [ ! -d $(B)/client/zstd ];then $(MKDIR) $(B)/client/zstd;fi
 	@if [ ! -d $(B)/rend1 ];then $(MKDIR) $(B)/rend1;fi
 	@if [ ! -d $(B)/rend2 ];then $(MKDIR) $(B)/rend2;fi
 	@if [ ! -d $(B)/rend2/glsl ];then $(MKDIR) $(B)/rend2/glsl;fi
 	@if [ ! -d $(B)/rendv ];then $(MKDIR) $(B)/rendv;fi
 ifneq ($(BUILD_SERVER),0)
 	@if [ ! -d $(B)/ded ];then $(MKDIR) $(B)/ded/qvm;fi
+	@if [ ! -d $(B)/ded/zstd ];then $(MKDIR) $(B)/ded/zstd;fi
 endif
 
 #############################################################################
@@ -1142,6 +1148,9 @@ ifeq ($(USE_OGG_VORBIS),1)
     $(B)/client/snd_codec_ogg.o
 endif
 
+ZSTDOBJ = $(B)/client/zstd/zstd.o
+Q3OBJ += $(ZSTDOBJ)
+
 ifneq ($(USE_RENDERER_DLOPEN),1)
   ifeq ($(USE_VULKAN),1)
     Q3OBJ += $(Q3RENDVOBJ)
@@ -1357,6 +1366,9 @@ Q3DOBJ = \
   $(B)/ded/l_script.o \
   $(B)/ded/l_struct.o
 
+ZSTDDEDOBJ = $(B)/ded/zstd/zstd.o
+Q3DOBJ += $(ZSTDDEDOBJ)
+
 ifdef MINGW
   Q3DOBJ += \
   $(B)/ded/win_main.o \
@@ -1430,6 +1442,12 @@ $(B)/client/ogg/%.o: $(OGGDIR)/src/%.c
 
 $(B)/client/vorbis/%.o: $(VORBISDIR)/lib/%.c
 	$(DO_CC)
+
+$(B)/client/zstd/%.o: $(ZSTDDIR)/%.c
+	$(DO_CC)
+
+$(B)/ded/zstd/%.o: $(ZSTDDIR)/%.c
+	$(DO_DED_CC)
 
 $(B)/client/%.o: $(SDLDIR)/%.c
 	$(DO_CC)

@@ -23,7 +23,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "server.h"
 
 tvState_t tv;
-cvar_t *sv_tvauto;
+cvar_t *sv_tvAuto;
+cvar_t *sv_tvAutoMinPlayers;
+cvar_t *sv_tvAutoMinPlayersSecs;
 cvar_t *sv_tvpath;
 
 
@@ -33,8 +35,14 @@ SV_TV_Init
 ===============
 */
 void SV_TV_Init( void ) {
-	sv_tvauto = Cvar_Get( "sv_tvauto", "0", CVAR_ARCHIVE );
-	Cvar_SetDescription( sv_tvauto, "Automatically start TV recording on map load." );
+	sv_tvAuto = Cvar_Get( "sv_tvAuto", "0", CVAR_ARCHIVE );
+	Cvar_SetDescription( sv_tvAuto, "Automatically start TV recording on map load." );
+
+	sv_tvAutoMinPlayers = Cvar_Get( "sv_tvAutoMinPlayers", "0", CVAR_ARCHIVE );
+	Cvar_SetDescription( sv_tvAutoMinPlayers, "Min concurrent non-spectator human players to keep an auto-recording. 0 = always keep." );
+
+	sv_tvAutoMinPlayersSecs = Cvar_Get( "sv_tvAutoMinPlayersSecs", "0", CVAR_ARCHIVE );
+	Cvar_SetDescription( sv_tvAutoMinPlayersSecs, "Seconds the threshold must be continuously met. 0 = instantaneous." );
 
 	sv_tvpath = Cvar_Get( "sv_tvpath", "demos", CVAR_ARCHIVE );
 	Cvar_SetDescription( sv_tvpath, "Directory for TV recordings." );
@@ -58,6 +66,26 @@ static void SV_TV_FileWrite( const void *data, int len, fileHandle_t f ) {
 		tv.fileOffsetHi++;
 	}
 	tv.fileOffset = newOffset;
+}
+
+
+/*
+===============
+SV_TV_CompressWrite
+
+Feed data into the zstd compressor and flush output to file.
+===============
+*/
+static void SV_TV_CompressWrite( const void *data, int len ) {
+	ZSTD_inBuffer in = { data, (size_t)len, 0 };
+
+	while ( in.pos < in.size ) {
+		ZSTD_outBuffer out = { tv.zstdOutBuf, ZSTD_OUT_BUF_SIZE, 0 };
+		ZSTD_compressStream2( tv.cstream, &out, &in, ZSTD_e_continue );
+		if ( out.pos > 0 ) {
+			SV_TV_FileWrite( tv.zstdOutBuf, (int)out.pos, tv.file );
+		}
+	}
 }
 
 
@@ -115,10 +143,6 @@ static void SV_TV_StartRecord( const char *filename ) {
 	val = sv.maxclients;
 	SV_TV_FileWrite( &val, 4, tv.file );
 
-	// Duration in msec (placeholder, patched on close)
-	val = 0;
-	SV_TV_FileWrite( &val, 4, tv.file );
-
 	// Map name (null-terminated)
 	SV_TV_FileWrite( sv_mapname->string, (int)strlen( sv_mapname->string ) + 1, tv.file );
 
@@ -150,6 +174,11 @@ static void SV_TV_StartRecord( const char *filename ) {
 		unsigned short term = 0xFFFF;
 		SV_TV_FileWrite( &term, 2, tv.file );
 	}
+
+	// Init zstd streaming compressor
+	tv.cstream = ZSTD_createCStream();
+	ZSTD_CCtx_setParameter( tv.cstream, ZSTD_c_compressionLevel, -3 );
+	ZSTD_initCStream( tv.cstream, -3 );
 
 	// Zero baselines
 	Com_Memset( tv.prevEntities, 0, sizeof( tv.prevEntities ) );
@@ -226,12 +255,12 @@ void SV_TV_WriteFrame( void ) {
 				}
 
 				SV_TV_StartRecord( name );
+				tv.autoRecording = qtrue;
 			}
 		} else {
-			// Fallback: start when first human client connects
+			// Fallback: start when first client connects
 			for ( i = 0; i < sv.maxclients; i++ ) {
-				if ( svs.clients[i].state == CS_ACTIVE &&
-					 svs.clients[i].netchan.remoteAddress.type != NA_BOT ) {
+				if ( svs.clients[i].state == CS_ACTIVE ) {
 					char name[MAX_QPATH];
 					const char *uuid;
 
@@ -247,6 +276,7 @@ void SV_TV_WriteFrame( void ) {
 					}
 
 					SV_TV_StartRecord( name );
+					tv.autoRecording = qtrue;
 					break;
 				}
 			}
@@ -258,17 +288,30 @@ void SV_TV_WriteFrame( void ) {
 		return;
 	}
 
-	// Track whether a human was present during recording
-	if ( !tv.hadHuman ) {
+	// Track whether player threshold has been met for auto-recordings
+	if ( tv.autoRecording && !tv.keepRecording && sv_tvAutoMinPlayers->integer > 0 ) {
+		int playerCount = 0;
+
 		for ( i = 0; i < sv.maxclients; i++ ) {
 			if ( svs.clients[i].state == CS_ACTIVE &&
 				 svs.clients[i].netchan.remoteAddress.type != NA_BOT ) {
 				playerState_t *ps = SV_GameClientNum( i );
 				if ( ps->persistant[ PERS_TEAM ] != TEAM_SPECTATOR ) {
-					tv.hadHuman = qtrue;
-					break;
+					playerCount++;
 				}
 			}
+		}
+
+		if ( playerCount >= sv_tvAutoMinPlayers->integer ) {
+			if ( sv_tvAutoMinPlayersSecs->integer <= 0 ) {
+				tv.keepRecording = qtrue;    // instantaneous check
+			} else if ( tv.thresholdMetTime == 0 ) {
+				tv.thresholdMetTime = sv.time;   // start timing
+			} else if ( sv.time - tv.thresholdMetTime >= sv_tvAutoMinPlayersSecs->integer * 1000 ) {
+				tv.keepRecording = qtrue;    // duration met
+			}
+		} else {
+			tv.thresholdMetTime = 0;         // reset timer
 		}
 	}
 
@@ -386,8 +429,8 @@ void SV_TV_WriteFrame( void ) {
 	}
 
 	frameSize = (unsigned int)msg.cursize;
-	SV_TV_FileWrite( &frameSize, 4, tv.file );
-	SV_TV_FileWrite( msg.data, msg.cursize, tv.file );
+	SV_TV_CompressWrite( &frameSize, 4 );
+	SV_TV_CompressWrite( msg.data, msg.cursize );
 
 	// Save current state as previous for next delta.
 	// Zero removed entities/players so reappearing ones get a full delta.
@@ -431,19 +474,57 @@ void SV_TV_StopRecord( qboolean discard ) {
 	Com_sprintf( tmpPath, sizeof( tmpPath ), "%s.tvd.tmp", tv.recordingPath );
 
 	if ( discard ) {
-		// Close and delete the file without finalizing
+		// Free compressor, close and delete the file without finalizing
+		if ( tv.cstream ) {
+			ZSTD_freeCStream( tv.cstream );
+			tv.cstream = NULL;
+		}
 		FS_FCloseFile( tv.file );
 		FS_HomeRemove( tmpPath );
 		Com_Printf( "TV: Recording discarded, file deleted.\n" );
 	} else {
 		char finalPath[MAX_QPATH];
 		int durationMsec;
+		int val;
+		size_t ret;
 
-		// Patch duration in header at offset 16
-		// (magic[4] + protocol[4] + sv_fps[4] + maxclients[4])
-		durationMsec = tv.lastServerTime - tv.firstServerTime;
-		FS_Seek( tv.file, 16, FS_SEEK_SET );
-		FS_Write( &durationMsec, 4, tv.file );
+		// Flush and end the zstd stream
+		if ( tv.cstream ) {
+			ZSTD_inBuffer in = { NULL, 0, 0 };
+			do {
+				ZSTD_outBuffer out = { tv.zstdOutBuf, ZSTD_OUT_BUF_SIZE, 0 };
+				ret = ZSTD_compressStream2( tv.cstream, &out, &in, ZSTD_e_end );
+				if ( out.pos > 0 ) {
+					SV_TV_FileWrite( tv.zstdOutBuf, (int)out.pos, tv.file );
+				}
+			} while ( ret != 0 );
+			ZSTD_freeCStream( tv.cstream );
+			tv.cstream = NULL;
+		}
+
+		// Write uncompressed k/v trailer:
+		//   "TVDt"  magic
+		//   repeated: key\0 + valueLen:2 + valueData
+		//   \0       terminator (empty key)
+		//   size:4   trailer total size (for EOF-4 seeking)
+		{
+			unsigned int trailerStart = tv.fileOffset;
+			unsigned short vlen;
+
+			durationMsec = tv.lastServerTime - tv.firstServerTime;
+
+			SV_TV_FileWrite( "TVDt", 4, tv.file );
+
+			SV_TV_FileWrite( "dur", 4, tv.file );       // key including \0
+			vlen = 4;
+			SV_TV_FileWrite( &vlen, 2, tv.file );
+			SV_TV_FileWrite( &durationMsec, 4, tv.file );
+
+			SV_TV_FileWrite( "", 1, tv.file );           // terminator
+
+			val = (int)( tv.fileOffset - trailerStart + 4 ); // +4 for this field itself
+			SV_TV_FileWrite( &val, 4, tv.file );
+		}
 
 		FS_FCloseFile( tv.file );
 
@@ -521,11 +602,10 @@ SV_TV_AutoStart
 ===============
 */
 void SV_TV_AutoStart( void ) {
-	if ( !sv_tvauto->integer || tv.recording || tv.autoPending ) {
+	if ( !sv_tvAuto->integer || tv.recording || tv.autoPending ) {
 		return;
 	}
 
 	tv.autoPending = qtrue;
-	tv.hadHuman = qfalse;
 	Com_Printf( "TV: Auto-record pending, waiting for first client.\n" );
 }
