@@ -752,6 +752,11 @@ static int Com_DL_CallbackProgress( void *data, double dltotal, double dlnow, do
 		Cvar_SetIntegerValue( "cl_downloadCount", dl->Count );
 	}
 
+	if ( dl == &tvDownload ) {
+		Cvar_SetIntegerValue( "cl_downloadSize", dl->Size );
+		Cvar_SetIntegerValue( "cl_downloadCount", dl->Count );
+	}
+
 	if ( dl->Size ) {
 #if CURL_AT_LEAST_VERSION(7, 32, 0)
 		percentage = ( dlnow * 100 ) / dltotal;
@@ -1210,7 +1215,10 @@ qboolean CL_TV_BeginDownload( const char *localName, const char *remoteURL )
 	Com_sprintf( dl->TempName, sizeof( dl->TempName ),
 		"%s%c%s.tmp", dl->gameDir, PATH_SEP, dl->Name );
 
-	Com_Printf( "TV: downloading %s\n", dl->URL );
+	Cvar_Set( "cl_downloadName", dl->Name );
+	Cvar_Set( "cl_downloadSize", "0" );
+	Cvar_Set( "cl_downloadCount", "0" );
+	Cvar_SetIntegerValue( "cl_downloadTime", cls.realtime );
 
 	if ( com_developer->integer )
 		dl->func.easy_setopt( dl->cURL, CURLOPT_VERBOSE, 1 );
@@ -1297,15 +1305,23 @@ qboolean CL_TV_PerformDownload( void )
 		FS_SV_Rename( dl->TempName, finalName );
 		dl->TempName[0] = '\0'; // prevent Com_DL_Cleanup from deleting the renamed file
 
-		Com_Printf( S_COLOR_GREEN "TV: %s downloaded\n", dl->Name );
+		Com_Printf( S_COLOR_GREEN "Downloaded TVD: %s\n", dl->Name );
+		Cvar_Set( "cl_downloadName", "" );
+		Cvar_Set( "cl_downloadSize", "0" );
+		Cvar_Set( "cl_downloadCount", "0" );
+		Cvar_Set( "cl_downloadTime", "0" );
 		Com_DL_Cleanup( dl );
 		return qfalse;
 	} else {
 		long code;
 
 		dl->func.easy_getinfo( msg->easy_handle, CURLINFO_RESPONSE_CODE, &code );
-		Com_Printf( S_COLOR_RED "TV: download error: %s Code: %ld\n",
+		Com_Printf( S_COLOR_RED "TVD download error: %s Code: %ld\n",
 			dl->func.easy_strerror( msg->data.result ), code );
+		Cvar_Set( "cl_downloadName", "" );
+		Cvar_Set( "cl_downloadSize", "0" );
+		Cvar_Set( "cl_downloadCount", "0" );
+		Cvar_Set( "cl_downloadTime", "0" );
 		Com_DL_Cleanup( dl );
 	}
 
