@@ -140,6 +140,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif // !__LITTLE_ENDIAN__
 #endif // __PPC64__
 
+#if defined (__EMSCRIPTEN__)
+#define ARCH_STRING "wasm32"
+#define Q3_LITTLE_ENDIAN
+#endif // __EMSCRIPTEN__
+
 #endif // !_WIN32
 
 // ============================== Linux ====================================
@@ -188,6 +193,17 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define DLL_EXT ".dylib"
 
 #endif // __APPLE__
+
+// ============================= Emscripten ================================
+
+#ifdef __EMSCRIPTEN__
+
+#define OS_STRING "emscripten"
+#define ID_INLINE inline
+#undef DLL_EXT
+#define DLL_EXT ".wasm"
+
+#endif // __EMSCRIPTEN__
 
 // ================================ Q3VM ===================================
 

@@ -37,6 +37,37 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 #include <windows.h>
 #include <GL/gl.h>
+#elif defined(__EMSCRIPTEN__)
+#include <GL/gl.h>
+// Desktop GL sized internal formats not in GLES headers, needed for format conversion
+#ifndef GL_LUMINANCE8
+#define GL_LUMINANCE8                     0x8040
+#endif
+#ifndef GL_LUMINANCE8_ALPHA8
+#define GL_LUMINANCE8_ALPHA8              0x8045
+#endif
+#ifndef GL_RGB5
+#define GL_RGB5                           0x8050
+#endif
+#ifndef GL_RGB4_S3TC
+#define GL_RGB4_S3TC                      0x83A1
+#endif
+// WebGL2/GLES3 formats (from GLES3/gl3.h, not in GL/gl.h)
+#ifndef GL_RG
+#define GL_RG                             0x8227
+#endif
+#ifndef GL_R8
+#define GL_R8                             0x8229
+#endif
+#ifndef GL_RG8
+#define GL_RG8                            0x822B
+#endif
+#ifndef GL_DEPTH_COMPONENT16
+#define GL_DEPTH_COMPONENT16              0x81A5
+#endif
+#ifndef GL_DEPTH_COMPONENT24
+#define GL_DEPTH_COMPONENT24              0x81A6
+#endif
 #elif defined( __linux__ ) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined( __sun )
 #include <GL/gl.h>
 #include <GL/glx.h>
@@ -397,6 +428,7 @@ extern int qglMajorVersion, qglMinorVersion;
 extern int qglesMajorVersion, qglesMinorVersion;
 #define QGL_VERSION_ATLEAST( major, minor ) ( qglMajorVersion > major || ( qglMajorVersion == major && qglMinorVersion >= minor ) )
 #define QGLES_VERSION_ATLEAST( major, minor ) ( qglesMajorVersion > major || ( qglesMajorVersion == major && qglesMinorVersion >= minor ) )
+
 
 
 #endif // __QGL_H__

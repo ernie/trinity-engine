@@ -280,7 +280,7 @@ static	void R_LoadLightmaps( const lump_t *l, const lump_t *surfs ) {
 		tr.deluxemaps = ri.Hunk_Alloc( tr.numLightmaps * sizeof(image_t *), h_low );
 
 	textureInternalFormat = GL_RGBA8;
-	if (r_hdr->integer)
+	if (r_hdr->integer && !qglesMajorVersion)
 	{
 		// Check for the first hdr lightmap, if it exists, use GL_RGBA16 for textures.
 		char filename[MAX_QPATH];
@@ -671,7 +671,7 @@ static void LoadDrawVertToSrfVert(srfVert_t *s, const drawVert_t *d, int realLig
 	else
 	{
 		//hack: convert LDR vertex colors to HDR
-		if (r_hdr->integer)
+		if (r_hdr->integer && !qglesMajorVersion)
 		{
 			v[0] = MAX(d->color.rgba[0], 0.499f);
 			v[1] = MAX(d->color.rgba[1], 0.499f);
@@ -1726,7 +1726,7 @@ static	void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 	s_worldData.surfacesPshadowBits = ri.Hunk_Alloc ( count * sizeof(*s_worldData.surfacesPshadowBits), h_low );
 
 	// load hdr vertex colors
-	if (r_hdr->integer)
+	if (r_hdr->integer && !qglesMajorVersion)
 	{
 		char filename[MAX_QPATH];
 		int size;
@@ -2210,7 +2210,7 @@ static void R_LoadLightGrid( const lump_t *l ) {
 	}
 
 	// load hdr lightgrid
-	if (r_hdr->integer)
+	if (r_hdr->integer && !qglesMajorVersion)
 	{
 		char filename[MAX_QPATH];
 		float *hdrLightGrid;

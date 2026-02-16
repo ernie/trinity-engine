@@ -290,7 +290,13 @@ void FBO_Init(void)
 		FBO_AttachImage(tr.msaaResolveFbo, tr.renderDepthImage, GL_DEPTH_ATTACHMENT, 0);
 		R_CheckFBO(tr.msaaResolveFbo);
 	}
-	else if (r_hdr->integer)
+	else if (r_hdr->integer
+#ifdef __EMSCRIPTEN__
+		// WebGL2 can't glCopyTexSubImage2D from default framebuffer to depth texture,
+		// so always render to an FBO with the depth texture directly attached
+		|| tr.renderDepthImage
+#endif
+	)
 	{
 		tr.renderFbo = FBO_Create("_render", tr.renderDepthImage->width, tr.renderDepthImage->height);
 		FBO_AttachImage(tr.renderFbo, tr.renderImage, GL_COLOR_ATTACHMENT0, 0);

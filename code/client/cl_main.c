@@ -692,6 +692,9 @@ static void CL_DemoCompleted( void ) {
 		}
 	}
 
+#ifdef DEMOPLAYER
+	Com_Quit_f();
+#endif
 	CL_Disconnect( qtrue );
 	CL_NextDemo();
 }

@@ -243,10 +243,23 @@ static void GLSL_GetShaderHeader( GLenum shaderType, const GLchar *extra, char *
 	// HACK: abuse the GLSL preprocessor to turn GLSL 1.20 shaders into 1.30 ones
 	if(glRefConfig.glslMajorVersion > 1 || (glRefConfig.glslMajorVersion == 1 && glRefConfig.glslMinorVersion >= 30))
 	{
-		if (glRefConfig.glslMajorVersion > 1 || (glRefConfig.glslMajorVersion == 1 && glRefConfig.glslMinorVersion >= 50))
+		if (qglesMajorVersion >= 3 && glRefConfig.glslMajorVersion >= 3)
+			Q_strcat(dest, size, "#version 300 es\n");
+		else if (glRefConfig.glslMajorVersion > 1 || (glRefConfig.glslMajorVersion == 1 && glRefConfig.glslMinorVersion >= 50))
 			Q_strcat(dest, size, "#version 150\n");
 		else
 			Q_strcat(dest, size, "#version 130\n");
+
+		if (extra)
+		{
+			Q_strcat(dest, size, extra);
+		}
+
+		if (qglesMajorVersion >= 2)
+		{
+			Q_strcat(dest, size, "precision mediump float;\n");
+			Q_strcat(dest, size, "precision mediump sampler2DShadow;\n");
+		}
 
 		if(shaderType == GL_VERTEX_SHADER)
 		{
@@ -266,8 +279,30 @@ static void GLSL_GetShaderHeader( GLenum shaderType, const GLchar *extra, char *
 	}
 	else
 	{
-		Q_strcat(dest, size, "#version 120\n");
-		Q_strcat(dest, size, "#define shadow2D(a,b) shadow2D(a,b).r \n");
+		if (qglesMajorVersion >= 2)
+		{
+			Q_strcat(dest, size, "#version 100\n");
+
+			if (extra)
+			{
+				Q_strcat(dest, size, extra);
+			}
+
+			Q_strcat(dest, size, "precision mediump float;\n");
+			Q_strcat(dest, size, "precision mediump sampler2DShadow;\n");
+			Q_strcat(dest, size, "#define shadow2D(a,b) shadow2DEXT(a,b)\n");
+		}
+		else
+		{
+			Q_strcat(dest, size, "#version 120\n");
+
+			if (extra)
+			{
+				Q_strcat(dest, size, extra);
+			}
+
+			Q_strcat(dest, size, "#define shadow2D(a,b) shadow2D(a,b).r\n");
+		}
 	}
 
 	// HACK: add some macros to avoid extra uniforms and save speed and code maintenance
@@ -353,11 +388,6 @@ static void GLSL_GetShaderHeader( GLenum shaderType, const GLchar *extra, char *
 		}
 		numRoughnessMips = MAX(1, numRoughnessMips - 2);
 		Q_strcat(dest, size, va("#define ROUGHNESS_MIPS float(%d)\n", numRoughnessMips));
-	}
-
-	if (extra)
-	{
-		Q_strcat(dest, size, extra);
 	}
 
 	// OK we added a lot of stuff but if we do something bad in the GLSL shaders then we want the proper line

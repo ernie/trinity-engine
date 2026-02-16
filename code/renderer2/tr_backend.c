@@ -675,7 +675,7 @@ Stretches a raw 32 bit power of 2 bitmap image over the given screen rectangle.
 Used for cinematics.
 =============
 */
-void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty ) {
+void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, byte *data, int client, qboolean dirty ) {
 	int			i, j;
 	int			start, end;
 	vec4_t quadVerts[4];
@@ -741,7 +741,7 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, const byte *
 	RB_InstantQuad2(quadVerts, texCoords);
 }
 
-void RE_UploadCinematic (int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty) {
+void RE_UploadCinematic (int w, int h, int cols, int rows, byte *data, int client, qboolean dirty) {
 	GLuint texture;
 
 	if (!tr.scratchImage[client])
@@ -756,7 +756,10 @@ void RE_UploadCinematic (int w, int h, int cols, int rows, const byte *data, int
 	if ( cols != tr.scratchImage[client]->width || rows != tr.scratchImage[client]->height ) {
 		tr.scratchImage[client]->width = tr.scratchImage[client]->uploadWidth = cols;
 		tr.scratchImage[client]->height = tr.scratchImage[client]->uploadHeight = rows;
-		qglTextureImage2DEXT(texture, GL_TEXTURE_2D, 0, GL_RGB8, cols, rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+		if (qglesMajorVersion)
+			qglTextureImage2DEXT(texture, GL_TEXTURE_2D, 0, GL_RGBA8, cols, rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+		else
+			qglTextureImage2DEXT(texture, GL_TEXTURE_2D, 0, GL_RGB8, cols, rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 		qglTextureParameterfEXT(texture, GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		qglTextureParameterfEXT(texture, GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 		qglTextureParameterfEXT(texture, GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -928,8 +931,11 @@ static const void	*RB_DrawSurfs( const void *data ) {
 			{
 				// If we're rendering directly to the screen, copy the depth to a texture
 				// This is incredibly slow on Intel Graphics, so just skip it on there
+				// WebGL2 does not support glCopyTexSubImage2D on depth textures
+#ifndef __EMSCRIPTEN__
 				if (!glRefConfig.intelGraphics)
 					qglCopyTextureSubImage2DEXT(tr.renderDepthImage->texnum, GL_TEXTURE_2D, 0, 0, 0, 0, 0, glConfig.vidWidth, glConfig.vidHeight);
+#endif
 			}
 
 			if (tr.hdrDepthFbo)
@@ -1049,6 +1055,17 @@ static const void	*RB_DrawSurfs( const void *data ) {
 
 					RB_InstantQuad2(quadVerts, texCoords);
 				}
+
+	#ifdef __EMSCRIPTEN__
+				// WebGL2 validates all sampler-texture bindings at draw time.
+				// Unbind shadow depth textures (which have compare mode set) so
+				// subsequent draws with sampler2D on these units don't get a
+				// sampler type mismatch error.
+				GL_BindToTMU(tr.whiteImage, TB_SHADOWMAP);
+				GL_BindToTMU(tr.whiteImage, TB_SHADOWMAP2);
+				GL_BindToTMU(tr.whiteImage, TB_SHADOWMAP3);
+				GL_BindToTMU(tr.whiteImage, TB_SHADOWMAP4);
+#endif
 			}
 
 			if (r_ssao->integer)
@@ -1430,6 +1447,8 @@ static const void *RB_CapShadowMap(const void *data)
 
 	if (cmd->map != -1)
 	{
+#ifndef __EMSCRIPTEN__
+		// WebGL2 does not support glCopyTexSubImage2D on depth textures
 		if (cmd->cubeSide != -1)
 		{
 			if (tr.shadowCubemaps[cmd->map])
@@ -1444,6 +1463,7 @@ static const void *RB_CapShadowMap(const void *data)
 				qglCopyTextureSubImage2DEXT(tr.pshadowMaps[cmd->map]->texnum, GL_TEXTURE_2D, 0, 0, 0, backEnd.refdef.x, glConfig.vidHeight - (backEnd.refdef.y + PSHADOW_MAP_SIZE), PSHADOW_MAP_SIZE, PSHADOW_MAP_SIZE);
 			}
 		}
+#endif
 	}
 
 	return (const void *)(cmd + 1);

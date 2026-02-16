@@ -1519,6 +1519,39 @@ $(B)/ded/%.o: $(W32DIR)/%.rc
 	$(DO_WINDRES)
 
 #############################################################################
+# WEB / EMSCRIPTEN BUILDS
+#############################################################################
+
+WEB_BUILD_DIR=build/web
+DEMOPLAYER_BUILD_DIR=build/demoplayer
+
+web:
+	@mkdir -p $(WEB_BUILD_DIR)
+	cd $(WEB_BUILD_DIR) && emcmake cmake ../.. -DCMAKE_BUILD_TYPE=Release && emmake make -j$$(nproc)
+	@mkdir -p dist/web
+	@cp $(WEB_BUILD_DIR)/trinity.html dist/web/index.html
+	@cp $(WEB_BUILD_DIR)/trinity-loader.js dist/web/demo-loader.js
+	@cp $(WEB_BUILD_DIR)/trinity.js dist/web/trinity.js
+	@cp $(WEB_BUILD_DIR)/trinity.wasm dist/web/trinity.wasm
+	@cp $(WEB_BUILD_DIR)/trinity-config.json dist/web/trinity-config.json
+	@echo "Web build ready in dist/web/"
+
+demoplayer:
+	@mkdir -p $(DEMOPLAYER_BUILD_DIR)
+	cd $(DEMOPLAYER_BUILD_DIR) && emcmake cmake ../.. -DCMAKE_BUILD_TYPE=Release -DDEMOPLAYER=ON && emmake make -j$$(nproc)
+	@mkdir -p dist/demo
+	@cp $(DEMOPLAYER_BUILD_DIR)/trinity.html dist/demo/index.html
+	@cp $(DEMOPLAYER_BUILD_DIR)/trinity-loader.js dist/demo/demo-loader.js
+	@cp $(DEMOPLAYER_BUILD_DIR)/trinity.js dist/demo/trinity.js
+	@cp $(DEMOPLAYER_BUILD_DIR)/trinity.wasm dist/demo/trinity.wasm
+	@cp $(DEMOPLAYER_BUILD_DIR)/trinity-config.json dist/demo/trinity-config.json
+	@echo "Demo player build ready in dist/demo/"
+
+clean-web:
+	@rm -rf $(WEB_BUILD_DIR) $(DEMOPLAYER_BUILD_DIR) dist/web dist/demo
+	@echo "Cleaned web build directories"
+
+#############################################################################
 # MISC
 #############################################################################
 
@@ -1560,4 +1593,5 @@ endif
 
 .PHONY: all clean clean2 clean-debug clean-release copyfiles \
 	debug default dist distclean makedirs release \
-	targets tools toolsclean
+	targets tools toolsclean \
+	web demoplayer clean-web

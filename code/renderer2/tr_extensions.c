@@ -34,6 +34,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define GLE(ret, name, ...) name##proc * qgl##name;
 QGL_1_1_PROCS;
 QGL_DESKTOP_1_1_PROCS;
+QGL_ES_1_1_PROCS;
 QGL_1_3_PROCS;
 QGL_1_5_PROCS;
 QGL_2_0_PROCS;
@@ -60,6 +61,14 @@ static qboolean GLimp_HaveExtension( const char *ext )
 }
 
 
+#ifdef __EMSCRIPTEN__
+// Wrappers to map desktop GL (double) calls to GLES (float) equivalents
+static void APIENTRY wrap_ClearDepth(GLclampd depth) { qglClearDepthf((GLclampf)depth); }
+static void APIENTRY wrap_DepthRange(GLclampd n, GLclampd f) { qglDepthRangef((GLclampf)n, (GLclampf)f); }
+static void APIENTRY wrap_DrawBuffer(GLenum mode) { (void)mode; }
+static void APIENTRY wrap_PolygonMode(GLenum face, GLenum mode) { (void)face; (void)mode; }
+#endif
+
 void GLimp_InitExtraExtensions( void )
 {
 	int len;
@@ -77,7 +86,16 @@ void GLimp_InitExtraExtensions( void )
 #define GLE(ret, name, ...) qgl##name = (name##proc *) ri.GL_GetProcAddress( "gl" #name );
 
 	QGL_1_1_PROCS;
+#ifdef __EMSCRIPTEN__
+	QGL_ES_1_1_PROCS;
+	// Map desktop GL names to GLES wrappers
+	qglClearDepth = wrap_ClearDepth;
+	qglDepthRange = wrap_DepthRange;
+	qglDrawBuffer = wrap_DrawBuffer;
+	qglPolygonMode = wrap_PolygonMode;
+#else
 	QGL_DESKTOP_1_1_PROCS;
+#endif
 
 	// OpenGL 1.3, was GL_ARB_texture_compression
 	QGL_1_3_PROCS;
@@ -106,7 +124,14 @@ void GLimp_InitExtraExtensions( void )
 	Q_strncpyz( gl_extensions, (char *)qglGetString( GL_EXTENSIONS ), sizeof( gl_extensions ) );
 	Q_strncpyz( glConfig.extensions_string, gl_extensions, sizeof( glConfig.extensions_string ) );
 
-	sscanf( glConfig.version_string, "%d.%d", &qglMajorVersion, &qglMinorVersion );
+	if ( Q_stricmpn( "OpenGL ES", glConfig.version_string, 9 ) == 0 ) {
+		sscanf( glConfig.version_string, "OpenGL ES %d.%d", &qglesMajorVersion, &qglesMinorVersion );
+		// Map GLES version to GL version for compatibility checks
+		qglMajorVersion = qglesMajorVersion;
+		qglMinorVersion = qglesMinorVersion;
+	} else {
+		sscanf( glConfig.version_string, "%d.%d", &qglMajorVersion, &qglMinorVersion );
+	}
 
 	// Check OpenGL version
 	if ( !QGL_VERSION_ATLEAST( 2, 0 ) )
@@ -223,7 +248,10 @@ void GLimp_InitExtraExtensions( void )
 
 		Q_strncpyz(version, (char *)qglGetString(GL_SHADING_LANGUAGE_VERSION), sizeof(version));
 
-		sscanf(version, "%d.%d", &glRefConfig.glslMajorVersion, &glRefConfig.glslMinorVersion);
+		if ( Q_stricmpn( "OpenGL ES GLSL ES", version, 17 ) == 0 )
+			sscanf(version, "OpenGL ES GLSL ES %d.%d", &glRefConfig.glslMajorVersion, &glRefConfig.glslMinorVersion);
+		else
+			sscanf(version, "%d.%d", &glRefConfig.glslMajorVersion, &glRefConfig.glslMinorVersion);
 
 		ri.Printf(PRINT_ALL, "...using GLSL version %s\n", version);
 	}

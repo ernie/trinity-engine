@@ -1243,6 +1243,9 @@ void CL_SetCGameTime( void ) {
 		// Advance TV frames while cl.serverTime is ahead of latest snapshot
 		while ( cl.serverTime - tvPlay.snapshots[1].serverTime >= 0 ) {
 			if ( tvPlay.atEnd ) {
+#ifdef DEMOPLAYER
+				Com_Quit_f();
+#endif
 				CL_Disconnect( qtrue );
 				return;
 			}

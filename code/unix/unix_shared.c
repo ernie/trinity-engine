@@ -20,17 +20,23 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #define _GNU_SOURCE
+#ifndef __EMSCRIPTEN__
 #include <sched.h>
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <unistd.h>
+#ifndef __EMSCRIPTEN__
 #include <sys/mman.h>
+#endif
 #include <sys/time.h>
 #include <pwd.h>
+#ifndef __EMSCRIPTEN__
 #include <dlfcn.h>
+#endif
 #include <libgen.h>
 
 #include "../qcommon/q_shared.h"
@@ -92,6 +98,9 @@ Sys_RandomBytes
 */
 qboolean Sys_RandomBytes( byte *string, int len )
 {
+#ifdef __EMSCRIPTEN__
+	return qfalse;
+#else
 	FILE *fp;
 
 	fp = fopen( "/dev/urandom", "r" );
@@ -107,6 +116,7 @@ qboolean Sys_RandomBytes( byte *string, int len )
 
 	fclose( fp );
 	return qtrue;
+#endif
 }
 
 
@@ -362,6 +372,7 @@ const char *Sys_Pwd( void )
 	if ( pwd[0] )
 		return pwd;
 
+#ifndef __EMSCRIPTEN__
 	// more reliable, linux-specific
 	if ( readlink( "/proc/self/exe", pwd, sizeof( pwd ) - 1 ) != -1 )
 	{
@@ -369,6 +380,7 @@ const char *Sys_Pwd( void )
 		dirname( pwd );
 		return pwd;
 	}
+#endif
 
 	if ( !getcwd( pwd, sizeof( pwd ) ) )
 	{
@@ -460,6 +472,16 @@ LOAD/UNLOAD DLL
 */
 
 
+#ifdef __EMSCRIPTEN__
+
+// Emscripten stubs - no dynamic library loading in browser
+void *Sys_LoadLibrary( const char *name ) { return NULL; }
+void Sys_UnloadLibrary( void *handle ) {}
+void *Sys_LoadFunction( void *handle, const char *name ) { return NULL; }
+int Sys_LoadFunctionErrors( void ) { return 0; }
+
+#else // !__EMSCRIPTEN__
+
 static int dll_err_count = 0;
 
 
@@ -507,7 +529,7 @@ void *Sys_LoadFunction( void *handle, const char *name )
 	void *symbol;
 	size_t nlen;
 
-	if ( handle == NULL || name == NULL || *name == '\0' ) 
+	if ( handle == NULL || name == NULL || *name == '\0' )
 	{
 		dll_err_count++;
 		return NULL;
@@ -545,6 +567,8 @@ int Sys_LoadFunctionErrors( void )
 	dll_err_count = 0;
 	return result;
 }
+
+#endif // !__EMSCRIPTEN__
 
 
 #ifdef USE_AFFINITY_MASK

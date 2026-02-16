@@ -1936,24 +1936,150 @@ static GLenum PixelDataFormatFromInternalFormat(GLenum internalFormat)
 		case GL_DEPTH_COMPONENT24_ARB:
 		case GL_DEPTH_COMPONENT32_ARB:
 			return GL_DEPTH_COMPONENT;
+		case GL_R8:
+		case GL_R32F:
+			return GL_RED;
+		case GL_RG8:
+			return GL_RG;
+		case GL_RGB:
+		case GL_RGB8:
+			return GL_RGB;
 		default:
 			return GL_RGBA;
 			break;
 	}
 }
 
-static void RawImage_UploadTexture(GLuint texture, byte *data, int x, int y, int width, int height, GLenum target, GLenum picFormat, int numMips, GLenum internalFormat, imgType_t type, imgFlags_t flags, qboolean subtexture )
+
+/*
+==================
+R_ConvertTextureFormat
+
+Convert RGBA unsigned byte to specified format and type
+==================
+*/
+#define ROW_PADDING( width, bpp, alignment ) PAD( (width) * (bpp), (alignment) ) - (width) * (bpp)
+static void R_ConvertTextureFormat( const byte *in, int width, int height, GLenum format, GLenum type, byte *out )
 {
-	GLenum dataFormat, dataType;
+	int x, y, rowPadding;
+	int unpackAlign = 4; // matches GL_UNPACK_ALIGNMENT default
+
+	if ( format == GL_RGB && type == GL_UNSIGNED_BYTE )
+	{
+		rowPadding = ROW_PADDING( width, 3, unpackAlign );
+
+		for ( y = 0; y < height; y++ )
+		{
+			for ( x = 0; x < width; x++ )
+			{
+				*out++ = *in++;
+				*out++ = *in++;
+				*out++ = *in++;
+				in++;
+			}
+
+			out += rowPadding;
+		}
+	}
+	else if ( ( format == GL_LUMINANCE || format == GL_RED ) && type == GL_UNSIGNED_BYTE )
+	{
+		rowPadding = ROW_PADDING( width, 1, unpackAlign );
+
+		for ( y = 0; y < height; y++ )
+		{
+			for ( x = 0; x < width; x++ )
+			{
+				*out++ = *in++; // red
+				in += 3;
+			}
+
+			out += rowPadding;
+		}
+	}
+	else if ( ( format == GL_LUMINANCE_ALPHA || format == GL_RG ) && type == GL_UNSIGNED_BYTE )
+	{
+		rowPadding = ROW_PADDING( width, 2, unpackAlign );
+
+		for ( y = 0; y < height; y++ )
+		{
+			for ( x = 0; x < width; x++ )
+			{
+				*out++ = *in++; // red
+				in += 2;
+				*out++ = *in++; // alpha
+			}
+
+			out += rowPadding;
+		}
+	}
+	else if ( format == GL_RGB && type == GL_UNSIGNED_SHORT_5_6_5 )
+	{
+		rowPadding = ROW_PADDING( width, 2, unpackAlign );
+
+		for ( y = 0; y < height; y++ )
+		{
+			for ( x = 0; x < width; x++, in += 4, out += 2 )
+			{
+				*((unsigned short*)out) = ( (unsigned short)( in[0] >> 3 ) << 11 )
+					    | ( (unsigned short)( in[1] >> 2 ) << 5 )
+					    | ( (unsigned short)( in[2] >> 3 ) << 0 );
+			}
+
+			out += rowPadding;
+		}
+	}
+	else if ( format == GL_RGBA && type == GL_UNSIGNED_SHORT_4_4_4_4 )
+	{
+		rowPadding = ROW_PADDING( width, 2, unpackAlign );
+
+		for ( y = 0; y < height; y++ )
+		{
+			for ( x = 0; x < width; x++, in += 4, out += 2 )
+			{
+				*((unsigned short*)out) = ( (unsigned short)( in[0] >> 4 ) << 12 )
+					    | ( (unsigned short)( in[1] >> 4 ) << 8 )
+					    | ( (unsigned short)( in[2] >> 4 ) << 4 )
+					    | ( (unsigned short)( in[3] >> 4 ) << 0 );
+			}
+
+			out += rowPadding;
+		}
+	}
+	else if ( format == GL_RGBA && type == GL_FLOAT )
+	{
+		for ( y = 0; y < height; y++ )
+		{
+			for ( x = 0; x < width; x++, in += 4, out += 16 )
+			{
+				((float*)out)[0] = in[0] / 255.0f;
+				((float*)out)[1] = in[1] / 255.0f;
+				((float*)out)[2] = in[2] / 255.0f;
+				((float*)out)[3] = in[3] / 255.0f;
+			}
+		}
+	}
+	else
+	{
+		ri.Error( ERR_DROP, "Unable to convert RGBA image to OpenGL format 0x%X and type 0x%X", format, type );
+	}
+}
+
+static void RawImage_UploadTexture(GLuint texture, byte *data, int x, int y, int width, int height, GLenum target, GLenum picFormat, GLenum dataFormat, GLenum dataType, int numMips, GLenum internalFormat, imgType_t type, imgFlags_t flags, qboolean subtexture )
+{
 	qboolean rgtc = internalFormat == GL_COMPRESSED_RG_RGTC2;
 	qboolean rgba8 = picFormat == GL_RGBA8 || picFormat == GL_SRGB8_ALPHA8_EXT;
 	qboolean rgba = rgba8 || picFormat == GL_RGBA16;
 	qboolean mipmap = !!(flags & IMGFLAG_MIPMAP);
 	int size, miplevel;
 	qboolean lastMip = qfalse;
+	byte *formatBuffer = NULL;
 
-	dataFormat = PixelDataFormatFromInternalFormat(internalFormat);
-	dataType = picFormat == GL_RGBA16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
+	if (qglesMajorVersion && rgba8 && (dataFormat != GL_RGBA || dataType != GL_UNSIGNED_BYTE))
+	{
+		int typeSize = (dataType == GL_FLOAT) ? 4 : (dataType == GL_HALF_FLOAT_ARB) ? 2 : 1;
+		int components = (dataFormat == GL_RED) ? 1 : (dataFormat == GL_RG) ? 2 : (dataFormat == GL_RGB) ? 3 : 4;
+		formatBuffer = ri.Hunk_AllocateTempMemory(components * typeSize * width * height);
+	}
 
 	miplevel = 0;
 	do
@@ -1972,6 +2098,11 @@ static void RawImage_UploadTexture(GLuint texture, byte *data, int x, int y, int
 
 			if (rgba8 && rgtc)
 				RawImage_UploadToRgtc2Texture(texture, miplevel, x, y, width, height, data);
+			else if (formatBuffer)
+			{
+				R_ConvertTextureFormat(data, width, height, dataFormat, dataType, formatBuffer);
+				qglTextureSubImage2DEXT(texture, target, miplevel, x, y, width, height, dataFormat, dataType, formatBuffer);
+			}
 			else
 				qglTextureSubImage2DEXT(texture, target, miplevel, x, y, width, height, dataFormat, dataType, data);
 		}
@@ -2005,6 +2136,9 @@ static void RawImage_UploadTexture(GLuint texture, byte *data, int x, int y, int
 		}
 	}
 	while (!lastMip);
+
+	if (formatBuffer != NULL)
+		ri.Hunk_FreeTempMemory(formatBuffer);
 }
 
 
@@ -2014,7 +2148,7 @@ Upload32
 
 ===============
 */
-static void Upload32(byte *data, int x, int y, int width, int height, GLenum picFormat, int numMips, image_t *image, qboolean scaled)
+static void Upload32(byte *data, int x, int y, int width, int height, GLenum picFormat, GLenum dataFormat, GLenum dataType, int numMips, image_t *image, qboolean scaled)
 {
 	int			i, c;
 	byte		*scan;
@@ -2069,7 +2203,7 @@ static void Upload32(byte *data, int x, int y, int width, int height, GLenum pic
 		for (i = 0; i < 6; i++)
 		{
 			int w2 = width, h2 = height;
-			RawImage_UploadTexture(image->texnum, data, x, y, width, height, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, picFormat, numMips, internalFormat, type, flags, qfalse);
+			RawImage_UploadTexture(image->texnum, data, x, y, width, height, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, picFormat, dataFormat, dataType, numMips, internalFormat, type, flags, qfalse);
 			for (c = numMips; c; c--)
 			{
 				data += CalculateMipSize(w2, h2, picFormat);
@@ -2080,7 +2214,7 @@ static void Upload32(byte *data, int x, int y, int width, int height, GLenum pic
 	}
 	else
 	{
-		RawImage_UploadTexture(image->texnum, data, x, y, width, height, GL_TEXTURE_2D, picFormat, numMips, internalFormat, type, flags, qfalse);
+		RawImage_UploadTexture(image->texnum, data, x, y, width, height, GL_TEXTURE_2D, picFormat, dataFormat, dataType, numMips, internalFormat, type, flags, qfalse);
 	}
 
 	GL_CheckErrors();
@@ -2106,7 +2240,7 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 	qboolean    picmip = !!(flags & IMGFLAG_PICMIP);
 	qboolean    lastMip;
 	GLenum textureTarget = cubemap ? GL_TEXTURE_CUBE_MAP : GL_TEXTURE_2D;
-	GLenum dataFormat;
+	GLenum dataFormat, dataType;
 	size_t		namelen;
 
 	namelen = strlen( name );
@@ -2141,6 +2275,83 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 	if (!internalFormat)
 		internalFormat = RawImage_GetFormat(pic, width * height, picFormat, isLightmap, image->type, image->flags);
 
+	dataFormat = PixelDataFormatFromInternalFormat(internalFormat);
+	dataType = picFormat == GL_RGBA16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
+
+	// Convert image data format for OpenGL ES / WebGL2
+	if (qglesMajorVersion)
+	{
+		switch (internalFormat)
+		{
+			case GL_LUMINANCE:
+			case GL_LUMINANCE8:
+				internalFormat = GL_R8;
+				dataFormat = GL_RED;
+				dataType = GL_UNSIGNED_BYTE;
+				break;
+			case GL_LUMINANCE_ALPHA:
+			case GL_LUMINANCE8_ALPHA8:
+				internalFormat = GL_RG8;
+				dataFormat = GL_RG;
+				dataType = GL_UNSIGNED_BYTE;
+				break;
+			case GL_RGB:
+			case GL_RGB8:
+			case GL_RGB5:
+				internalFormat = GL_RGB8;
+				dataFormat = GL_RGB;
+				dataType = GL_UNSIGNED_BYTE;
+				break;
+			case GL_RGBA:
+			case GL_RGBA8:
+			case GL_RGBA4:
+				internalFormat = GL_RGBA8;
+				dataFormat = GL_RGBA;
+				dataType = GL_UNSIGNED_BYTE;
+				break;
+			case GL_DEPTH_COMPONENT:
+			case GL_DEPTH_COMPONENT16_ARB:
+				internalFormat = GL_DEPTH_COMPONENT16;
+				dataFormat = GL_DEPTH_COMPONENT;
+				dataType = GL_UNSIGNED_SHORT;
+				break;
+			case GL_DEPTH_COMPONENT24_ARB:
+				internalFormat = GL_DEPTH_COMPONENT24;
+				dataFormat = GL_DEPTH_COMPONENT;
+				dataType = GL_UNSIGNED_INT;
+				break;
+			case GL_DEPTH_COMPONENT32_ARB:
+				internalFormat = GL_DEPTH_COMPONENT24;
+				dataFormat = GL_DEPTH_COMPONENT;
+				dataType = GL_UNSIGNED_INT;
+				break;
+			case GL_RGBA16F_ARB:
+				// GL_RGBA16F_ARB (0x881A) is same value as GL_RGBA16F in GLES3
+				dataFormat = GL_RGBA;
+				dataType = GL_FLOAT;
+				break;
+			case GL_R32F:
+				dataFormat = GL_RED;
+				dataType = GL_FLOAT;
+				break;
+			// Compressed format fallbacks: WebGL2 can't pre-allocate compressed
+			// textures via glTexImage2D, so fall back to uncompressed equivalents
+			case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+			case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+			case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+			case GL_COMPRESSED_RGBA_BPTC_UNORM_ARB:
+			case GL_COMPRESSED_RG_RGTC2:
+			case GL_RGB4_S3TC:
+				internalFormat = GL_RGBA8;
+				dataFormat = GL_RGBA;
+				dataType = GL_UNSIGNED_BYTE;
+				break;
+			default:
+				ri.Printf( PRINT_WARNING, "Missing OpenGL ES support for image '%s' with internal format 0x%X\n", name, internalFormat );
+				break;
+		}
+	}
+
 	image->internalFormat = internalFormat;
 
 	// Possibly scale image before uploading.
@@ -2165,7 +2376,6 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 	image->uploadHeight = height;
 
 	// Allocate texture storage so we don't have to worry about it later.
-	dataFormat = PixelDataFormatFromInternalFormat(internalFormat);
 	mipWidth = width;
 	mipHeight = height;
 	miplevel = 0;
@@ -2177,11 +2387,11 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 			int i;
 
 			for (i = 0; i < 6; i++)
-				qglTextureImage2DEXT(image->texnum, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, miplevel, internalFormat, mipWidth, mipHeight, 0, dataFormat, GL_UNSIGNED_BYTE, NULL);
+				qglTextureImage2DEXT(image->texnum, GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, miplevel, internalFormat, mipWidth, mipHeight, 0, dataFormat, dataType, NULL);
 		}
 		else
 		{
-			qglTextureImage2DEXT(image->texnum, GL_TEXTURE_2D, miplevel, internalFormat, mipWidth, mipHeight, 0, dataFormat, GL_UNSIGNED_BYTE, NULL);
+			qglTextureImage2DEXT(image->texnum, GL_TEXTURE_2D, miplevel, internalFormat, mipWidth, mipHeight, 0, dataFormat, dataType, NULL);
 		}
 
 		mipWidth  = MAX(1, mipWidth >> 1);
@@ -2192,7 +2402,7 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 
 	// Upload data.
 	if (pic)
-		Upload32(pic, 0, 0, width, height, picFormat, numMips, image, scaled);
+		Upload32(pic, 0, 0, width, height, picFormat, dataFormat, dataType, numMips, image, scaled);
 
 	if (resampledBuffer != NULL)
 		ri.Hunk_FreeTempMemory(resampledBuffer);
@@ -2214,9 +2424,11 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 		case GL_DEPTH_COMPONENT16_ARB:
 		case GL_DEPTH_COMPONENT24_ARB:
 		case GL_DEPTH_COMPONENT32_ARB:
+#ifndef __EMSCRIPTEN__
 			// Fix for sampling depth buffer on old nVidia cards.
-			// from http://www.idevgames.com/forums/thread-4141-post-34844.html#pid34844
+			// GL_DEPTH_TEXTURE_MODE does not exist in GLES/WebGL.
 			qglTextureParameterfEXT(image->texnum, textureTarget, GL_DEPTH_TEXTURE_MODE, GL_LUMINANCE);
+#endif
 			qglTextureParameterfEXT(image->texnum, textureTarget, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 			qglTextureParameterfEXT(image->texnum, textureTarget, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 			break;
@@ -2224,6 +2436,27 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 			qglTextureParameterfEXT(image->texnum, textureTarget, GL_TEXTURE_MIN_FILTER, mipmap ? gl_filter_min : GL_LINEAR);
 			qglTextureParameterfEXT(image->texnum, textureTarget, GL_TEXTURE_MAG_FILTER, mipmap ? gl_filter_max : GL_LINEAR);
 			break;
+	}
+
+	// Set texture swizzle for luminance formats converted to R8/RG8 on ES/WebGL2
+	if (qglesMajorVersion)
+	{
+		if (internalFormat == GL_R8)
+		{
+			// Replicate red to RGB, alpha = 1 (matches GL_LUMINANCE behavior)
+			qglTextureParameteriEXT(image->texnum, textureTarget, GL_TEXTURE_SWIZZLE_R, GL_RED);
+			qglTextureParameteriEXT(image->texnum, textureTarget, GL_TEXTURE_SWIZZLE_G, GL_RED);
+			qglTextureParameteriEXT(image->texnum, textureTarget, GL_TEXTURE_SWIZZLE_B, GL_RED);
+			qglTextureParameteriEXT(image->texnum, textureTarget, GL_TEXTURE_SWIZZLE_A, GL_ONE);
+		}
+		else if (internalFormat == GL_RG8)
+		{
+			// Red to RGB, green to alpha (matches GL_LUMINANCE_ALPHA behavior)
+			qglTextureParameteriEXT(image->texnum, textureTarget, GL_TEXTURE_SWIZZLE_R, GL_RED);
+			qglTextureParameteriEXT(image->texnum, textureTarget, GL_TEXTURE_SWIZZLE_G, GL_RED);
+			qglTextureParameteriEXT(image->texnum, textureTarget, GL_TEXTURE_SWIZZLE_B, GL_RED);
+			qglTextureParameteriEXT(image->texnum, textureTarget, GL_TEXTURE_SWIZZLE_A, GL_GREEN);
+		}
 	}
 
 	GL_CheckErrors();
@@ -2251,7 +2484,12 @@ image_t *R_CreateImage(const char *name, byte *pic, int width, int height, imgTy
 
 void R_UpdateSubImage( image_t *image, byte *pic, int x, int y, int width, int height, GLenum picFormat )
 {
-	Upload32(pic, x, y, width, height, picFormat, 0, image, qfalse);
+	GLenum dataFormat, dataType;
+
+	dataFormat = PixelDataFormatFromInternalFormat(image->internalFormat);
+	dataType = picFormat == GL_RGBA16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE;
+
+	Upload32(pic, x, y, width, height, picFormat, dataFormat, dataType, 0, image, qfalse);
 }
 
 //===================================================================

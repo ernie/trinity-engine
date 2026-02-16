@@ -1,0 +1,259 @@
+// Trinity demo loader - ES module
+// Exports loadDemo() for use by standalone player and tracker integration
+
+const CLIENT_NAME = '@CLIENT_NAME@';
+const BASEGAME = '@BASEGAME@';
+const EMSCRIPTEN_PRELOAD_FILE = '@EMSCRIPTEN_PRELOAD_FILE@' === 'ON';
+const DEMOPLAYER = @DEMOPLAYER_JS@;
+
+const CACHE_NAME = `${CLIENT_NAME}-assets-v1`;
+const cacheAvailable = typeof caches !== 'undefined';
+
+async function cachedFetch(url, label, statusEl) {
+    if (cacheAvailable) {
+        try {
+            const cache = await caches.open(CACHE_NAME);
+            const cached = await cache.match(url);
+            if (cached) {
+                if (label && statusEl) statusEl.textContent = `${label} (cached)`;
+                return cached;
+            }
+            const response = await fetch(url);
+            if (response.ok) {
+                cache.put(url, response.clone()).catch(() => {});
+            }
+            return response;
+        } catch (e) {
+            // Cache API unavailable (e.g. non-secure context), fall through
+        }
+    }
+    return fetch(url);
+}
+
+/**
+ * Load and run the Trinity demo player engine.
+ *
+ * @param {Object} opts
+ * @param {HTMLCanvasElement} opts.canvas - Target canvas element
+ * @param {HTMLElement} opts.statusEl - Element for status messages
+ * @param {string} opts.enginePath - Path to engine .js/.wasm files (e.g. '/demo/')
+ * @param {string} opts.demoUrl - URL of the .tvd demo file
+ * @param {string[]} [opts.extraPk3s] - Additional pk3 URLs to load
+ * @param {string} [opts.extraArgs] - Additional engine command-line arguments
+ * @param {function} [opts.onProgress] - Progress callback(loaded, total)
+ * @returns {Promise<Object>} The Emscripten Module instance
+ */
+export async function loadDemo({ canvas, statusEl, enginePath, demoUrl, extraPk3s = [], extraArgs = '', onProgress }) {
+    if (window.location.protocol === 'file:') {
+        throw new Error('Browser security restrictions prevent loading wasm from a file: URL. Serve this file via a web server.');
+    }
+
+    const progress = onProgress || (() => {});
+
+    const fs_basegame = BASEGAME;
+    let fs_game = '';
+
+    const configFilename = enginePath + `${CLIENT_NAME}-config.json`;
+    const dataURL = new URL('/', location.origin);
+
+    let generatedArguments = `
+        +set sv_pure 0
+        +set net_enabled 0
+        +set fs_basegame "${fs_basegame}"
+    `;
+    if (extraArgs) generatedArguments += ` ${extraArgs} `;
+
+    // Load config for game assets
+    const configPromise = EMSCRIPTEN_PRELOAD_FILE ? Promise.resolve({[BASEGAME]: {files: []}})
+      : fetch(configFilename).then(r => r.ok ? r.json() : {});
+
+    // Load demo file
+    let demoData = null;
+    let demoFilename = null;
+    let demoMapName = null;
+    if (demoUrl) {
+        statusEl.textContent = 'Downloading demo...';
+        const resp = await fetch(demoUrl);
+        if (!resp.ok) {
+            statusEl.textContent = `Failed to fetch demo: ${resp.status}`;
+            throw new Error(`Failed to fetch demo: ${resp.status}`);
+        }
+        demoData = new Uint8Array(await resp.arrayBuffer());
+        const urlPath = new URL(demoUrl, window.location.href).pathname;
+        demoFilename = urlPath.split('/').pop() || 'demo.tvd';
+        generatedArguments += ` +demo ${demoFilename} `;
+
+        // Parse TVD header to extract map name (offset 16, null-terminated string)
+        if (demoData.length > 20 && String.fromCharCode(...demoData.slice(0, 4)) === 'TVD1') {
+            let end = demoData.indexOf(0, 16);
+            if (end > 16) demoMapName = new TextDecoder().decode(demoData.slice(16, end));
+
+            // Parse configstrings to extract fs_game from CS_SYSTEMINFO (index 1)
+            if (!fs_game) {
+                let off = end + 1;
+                let tsEnd = demoData.indexOf(0, off);
+                if (tsEnd > off) {
+                    off = tsEnd + 1;
+                    while (off + 2 <= demoData.length) {
+                        const csIdx = demoData[off] | (demoData[off+1] << 8);
+                        off += 2;
+                        if (csIdx === 0xFFFF) break;
+                        if (off + 2 > demoData.length) break;
+                        const csLen = demoData[off] | (demoData[off+1] << 8);
+                        off += 2;
+                        if (csIdx === 1 && csLen > 0) {
+                            const csStr = new TextDecoder().decode(demoData.slice(off, off + csLen));
+                            const m = csStr.match(/\\fs_game\\([^\\]*)/);
+                            if (m && m[1]) fs_game = m[1];
+                            break;
+                        }
+                        off += csLen;
+                    }
+                }
+            }
+        }
+
+        if (fs_game) generatedArguments += ` +set fs_game "${fs_game}" `;
+    }
+
+    statusEl.textContent = 'Loading engine...';
+
+    const TrinityEngine = (await import(enginePath + `${CLIENT_NAME}.js`)).default;
+    // Resolve with the module as soon as preRun fires so callers can abort early
+    let resolveModule;
+    const modulePromise = new Promise((resolve) => { resolveModule = resolve; });
+    // iOS Safari requires a user gesture to resume a suspended AudioContext.
+    // Emscripten's SDL2 attempts this internally but can miss edge cases.
+    function resumeAudio() {
+        if (typeof SDL2 !== 'undefined' && SDL2.audioContext) {
+            SDL2.audioContext.resume();
+            document.removeEventListener('click', resumeAudio, true);
+            document.removeEventListener('touchstart', resumeAudio, true);
+        }
+    }
+    document.addEventListener('click', resumeAudio, true);
+    document.addEventListener('touchstart', resumeAudio, true);
+
+    TrinityEngine({
+        canvas: canvas,
+        arguments: generatedArguments.trim().split(/\s+/),
+        locateFile: (file) => enginePath + file,
+        preRun: [async (mod) => {
+            resolveModule(mod);
+            mod.addRunDependency('setup-trinity-filesystem');
+            try {
+                    const config = await configPromise;
+
+                    // Count total assets to load for progress reporting
+                    let totalAssets = 0;
+                    let loadedAssets = 0;
+                    const gamedirs = [fs_basegame, fs_game];
+                    for (const gamedir of gamedirs) {
+                        if (gamedir === '') continue;
+                        if (config[gamedir]?.files) totalAssets += config[gamedir].files.length;
+                    }
+                    totalAssets += extraPk3s.length;
+                    if (demoMapName) totalAssets++;
+                    // Engine WASM counts as 1
+                    totalAssets++;
+                    loadedAssets++;
+                    progress(loadedAssets, totalAssets);
+
+                    for (let g = 0; g < gamedirs.length; g++) {
+                        const gamedir = gamedirs[g];
+                        if (gamedir === '') continue;
+                        if (!config[gamedir] || !config[gamedir].files) {
+                            console.warn(`Game directory '${gamedir}' not found in ${configFilename}.`);
+                            continue;
+                        }
+                        const files = config[gamedir].files;
+                        const urls = files.map(file => new URL(file.src, dataURL).href);
+                        const fetches = urls.map((url, i) => {
+                            const name = files[i].src.match(/[^/]+$/)[0];
+                            statusEl.textContent = `Loading ${name}...`;
+                            return cachedFetch(url, `Loading ${name}`, statusEl);
+                        });
+                        for (let i = 0; i < files.length; i++) {
+                            const name = files[i].src.match(/[^/]+$/)[0];
+                            statusEl.textContent = `Loading ${name}...`;
+                            const response = await fetches[i];
+                            loadedAssets++;
+                            progress(loadedAssets, totalAssets);
+                            if (!response.ok) continue;
+                            const data = await response.arrayBuffer();
+                            let dir = files[i].dst;
+                            mod.FS.mkdirTree(dir);
+                            mod.FS.writeFile(`${dir}/${name}`, new Uint8Array(data));
+                        }
+                    }
+
+                    // Load extra pk3 files
+                    if (extraPk3s.length > 0) {
+                        const pk3Urls = extraPk3s.map(url => new URL(url, window.location.href).href);
+                        const pk3Fetches = pk3Urls.map((url, i) => {
+                            const name = url.split('/').pop();
+                            return cachedFetch(url, `Loading ${name}`, statusEl);
+                        });
+                        for (let i = 0; i < extraPk3s.length; i++) {
+                            const filename = pk3Urls[i].split('/').pop();
+                            statusEl.textContent = `Loading ${filename}...`;
+                            const response = await pk3Fetches[i];
+                            loadedAssets++;
+                            progress(loadedAssets, totalAssets);
+                            if (!response.ok) {
+                                console.warn(`Failed to fetch pk3: ${extraPk3s[i]} (${response.status})`);
+                                continue;
+                            }
+                            const data = await response.arrayBuffer();
+                            mod.FS.mkdirTree(`/${fs_basegame}`);
+                            mod.FS.writeFile(`/${fs_basegame}/${filename}`, new Uint8Array(data));
+                        }
+                    }
+
+                    // Load map pk3 inferred from demo
+                    if (demoMapName) {
+                        const mapPk3Url = new URL(`demopk3s/maps/${demoMapName}.pk3`, dataURL).href;
+                        statusEl.textContent = `Loading ${demoMapName} map...`;
+                        const mapResp = await cachedFetch(mapPk3Url, `Loading ${demoMapName} map`, statusEl);
+                        if (mapResp.ok) {
+                            const mapData = await mapResp.arrayBuffer();
+                            mod.FS.mkdirTree(`/${fs_basegame}`);
+                            mod.FS.writeFile(`/${fs_basegame}/${demoMapName}.pk3`, new Uint8Array(mapData));
+                        } else {
+                            console.warn(`Map pk3 not found: ${demoMapName}.pk3 (${mapResp.status})`);
+                        }
+                        loadedAssets++;
+                        progress(loadedAssets, totalAssets);
+                    }
+
+                    // Load demo file into virtual filesystem
+                    if (demoData && demoFilename) {
+                        mod.FS.mkdirTree(`/${fs_basegame}/demos`);
+                        mod.FS.writeFile(`/${fs_basegame}/demos/${demoFilename}`, demoData);
+                    }
+
+                    // Generate autoexec.cfg from config cvars and binds
+                    let autoexec = '';
+                    if (config.cvars) {
+                        for (const [name, value] of Object.entries(config.cvars))
+                            autoexec += `set ${name} "${value}"\n`;
+                    }
+                    if (config.binds) {
+                        if (DEMOPLAYER) autoexec += 'unbindall\n';
+                        for (const [key, cmd] of Object.entries(config.binds))
+                            autoexec += `bind ${key} "${cmd}"\n`;
+                    }
+                    if (autoexec) {
+                        mod.FS.mkdirTree(`/${fs_basegame}`);
+                        mod.FS.writeFile(`/${fs_basegame}/autoexec.cfg`, autoexec);
+                    }
+                } finally {
+                    mod.removeRunDependency('setup-trinity-filesystem');
+                }
+
+                statusEl.style.display = 'none';
+            }],
+        });
+
+    return modulePromise;
+}

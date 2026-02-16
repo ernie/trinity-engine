@@ -563,11 +563,13 @@ static void CL_KeyDownEvent( int key, unsigned time )
 #endif
 
 	// console key is hardcoded, so the user can never unbind it
+#ifndef DEMOPLAYER
 	if ( key == K_CONSOLE || ( keys[K_SHIFT].down && key == K_ESCAPE ) ) {
 		Con_ToggleConsole_f();
 		Key_ClearStates();
 		return;
 	}
+#endif
 
 	// hardcoded screenshot key
 	if ( key == K_PRINT ) {
@@ -589,6 +591,9 @@ static void CL_KeyDownEvent( int key, unsigned time )
 
 	// escape is always handled special
 	if ( key == K_ESCAPE ) {
+#ifdef DEMOPLAYER
+		return;
+#endif
 #ifdef USE_CURL
 		if ( Com_DL_InProgress( &download ) && download.mapAutoDownload ) {
 			Com_DL_Cleanup( &download );

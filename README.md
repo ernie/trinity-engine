@@ -19,6 +19,21 @@ and seeking via replay from the beginning.
 - `cl_tvDownload` — opt in to automatic TV demo downloads from the server
 - Client-side viewpoint switching and seek during playback
 
+### Web Demo Player (Emscripten/WebAssembly)
+
+The engine compiles to WebAssembly via Emscripten, enabling browser-based playback of `.tvd` demos
+with no install required. Two build variants are available:
+
+- `make web` — full web client that loads game assets from a configurable JSON manifest
+- `make demoplayer` — locked-down demo player with minimal assets and preconfigured keybinds for spectating
+
+The demo loader (`demo-loader.js`) is an ES module that handles fetching the engine, game assets,
+and demo files into an Emscripten virtual filesystem. It parses TVD headers to determine the map
+and `fs_game`, fetches the appropriate pk3s, and supports browser-side asset caching. It can be
+integrated standalone or embedded into an existing page.
+
+Requires the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html) (`emcmake`/`emmake`).
+
 ### VR Client Support
 
 The engine detects VR clients via userinfo and extends the network protocol to support 32-bit button states (up from 16), using this space to receive head orientation information so that it's reflected in-game. Servers advertise VR capability to clients via the `vr_support` serverinfo cvar.

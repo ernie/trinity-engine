@@ -387,6 +387,12 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			SDL_GL_SetAttribute( SDL_GL_ALPHA_SIZE, 1 );
 #endif
 
+#ifdef __EMSCRIPTEN__
+			SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES );
+			SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
+			SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 0 );
+#endif
+
 			SDL_GL_SetAttribute( SDL_GL_RED_SIZE, perChannelColorBits );
 			SDL_GL_SetAttribute( SDL_GL_GREEN_SIZE, perChannelColorBits );
 			SDL_GL_SetAttribute( SDL_GL_BLUE_SIZE, perChannelColorBits );
@@ -600,7 +606,7 @@ void GLimp_Init( glconfig_t *config )
 {
 	rserr_t err;
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 	InitSig();
 #endif
 
@@ -695,7 +701,7 @@ void VKimp_Init( glconfig_t *config )
 {
 	rserr_t err;
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 	InitSig();
 #endif
 

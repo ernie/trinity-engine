@@ -1,7 +1,9 @@
 build/
+dist/
 output/
 .vs/
 .vscode/
+.claude/
 *.user
 cmake-*
 .idea

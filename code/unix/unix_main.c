@@ -29,17 +29,27 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
+#ifndef __EMSCRIPTEN__
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#endif
 #include <sys/stat.h>
 #include <string.h>
 #include <ctype.h>
+#ifndef __EMSCRIPTEN__
 #include <sys/wait.h>
 #include <sys/mman.h>
+#endif
 #include <errno.h>
 #include <libgen.h> // dirname
 
+#ifndef __EMSCRIPTEN__
 #include <dlfcn.h>
+#endif
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+#endif
 
 #ifdef __linux__
 #ifdef __GLIBC__
@@ -52,7 +62,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 
 // FIXME TTimo should we gard this? most *nix system should comply?
+#ifndef __EMSCRIPTEN__
 #include <termios.h>
+#endif
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
@@ -79,6 +91,17 @@ typedef enum {
 	TTY_ERROR
 } tty_err;
 
+#ifdef __EMSCRIPTEN__
+
+// Stubs for Emscripten - no tty console in browser
+static qboolean ttycon_on = qfalse;
+static int ttycon_hide = 0;
+static qboolean ttycon_color_on = qfalse;
+
+tty_err Sys_ConsoleInputInit( void );
+
+#else // !__EMSCRIPTEN__
+
 // enable/disabled tty input mode
 // NOTE TTimo this is used during startup, cannot be changed during run
 static cvar_t *ttycon = NULL;
@@ -104,6 +127,8 @@ static cvar_t *ttycon_ansicolor = NULL;
 static qboolean ttycon_color_on = qfalse;
 
 tty_err Sys_ConsoleInputInit( void );
+
+#endif // !__EMSCRIPTEN__
 
 // =======================================================================
 // General routines
@@ -137,6 +162,8 @@ void Sys_BeginProfiling( void )
 // NOTE: if the user is editing a line when something gets printed to the early console then it won't look good
 //   so we provide tty_Clear and tty_Show to be called before and after a stdout or stderr output
 // =============================================================
+
+#ifndef __EMSCRIPTEN__
 
 // flush stdin, I suspect some terminals are sending a LOT of shit
 // FIXME TTimo relevant?
@@ -265,6 +292,17 @@ void CON_SigTStp( int signum )
 	kill( getpid(),  SIGTSTP );
 }
 
+#else // __EMSCRIPTEN__
+
+// Emscripten stubs for tty console
+void tty_Hide( void ) {}
+void tty_Show( void ) {}
+void Sys_ConsoleInputShutdown( void ) {}
+tty_err Sys_ConsoleInputInit( void ) { return TTY_DISABLED; }
+char *Sys_ConsoleInput( void ) { return NULL; }
+
+#endif // __EMSCRIPTEN__
+
 
 // =============================================================
 // general sys routines
@@ -310,6 +348,7 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *format, ... )
 	va_list argptr;
 	char text[1024];
 
+#ifndef __EMSCRIPTEN__
 	// change stdin to non blocking
 	// NOTE TTimo not sure how well that goes with tty console mode
 	if ( stdin_active )
@@ -323,6 +362,7 @@ void NORETURN FORMAT_PRINTF(1, 2) QDECL Sys_Error( const char *format, ... )
 	{
 		tty_Hide();
 	}
+#endif
 
 	va_start( argptr, format );
 	Q_vsnprintf( text, sizeof( text ), format, argptr );
@@ -344,6 +384,7 @@ void floating_point_exception_handler( int whatever )
 }
 
 
+#ifndef __EMSCRIPTEN__
 // initialize the console input (tty mode if wanted and possible)
 // warning: might be called from signal handler
 tty_err Sys_ConsoleInputInit( void )
@@ -584,6 +625,7 @@ char *Sys_ConsoleInput( void )
 
 	return NULL;
 }
+#endif // !__EMSCRIPTEN__ (Sys_ConsoleInputInit + Sys_ConsoleInput)
 
 
 /*
@@ -978,6 +1020,15 @@ static int Sys_ParseArgs( int argc, const char* argv[] )
 }
 
 
+#if defined(__EMSCRIPTEN__) && !defined(DEDICATED)
+static void Emscripten_MainLoopStep( void )
+{
+	IN_Frame();
+	Com_Frame( CL_NoDelay() );
+}
+#endif
+
+
 int main( int argc, const char* argv[] )
 {
 	char con_title[ MAX_CVAR_VALUE_STRING ];
@@ -985,7 +1036,9 @@ int main( int argc, const char* argv[] )
 	//qboolean useXYpos;
 	char  *cmdline;
 	int   len, i;
+#ifndef __EMSCRIPTEN__
 	tty_err	err;
+#endif
 
 #ifdef __APPLE__
 	// This is passed if we are launched by double-clicking
@@ -1025,6 +1078,7 @@ int main( int argc, const char* argv[] )
 
 	Com_Init( cmdline );
 
+#ifndef __EMSCRIPTEN__
 	// Sys_ConsoleInputInit() might be called in signal handler
 	// so modify/init any cvars here
 	ttycon = Cvar_Get( "ttycon", "1", 0 );
@@ -1050,7 +1104,13 @@ int main( int argc, const char* argv[] )
 	// init here for dedicated, as we don't have GLimp_Init
 	InitSig();
 #endif
+#endif // !__EMSCRIPTEN__
 
+#ifdef __EMSCRIPTEN__
+#ifndef DEDICATED
+	emscripten_set_main_loop( Emscripten_MainLoopStep, 0, 1 );
+#endif
+#else
 	while (1)
 	{
 #ifdef __linux__
@@ -1067,6 +1127,7 @@ int main( int argc, const char* argv[] )
 		Com_Frame( CL_NoDelay() );
 #endif
 	}
+#endif // !__EMSCRIPTEN__
 	// never gets here
 	return 0;
 }

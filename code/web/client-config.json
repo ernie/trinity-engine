@@ -1,0 +1,56 @@
+{
+  "cvars": {
+    "r_fullscreen": 0,
+    "cg_damageEffect": 1,
+    "cg_bloodParticles": 1,
+    "r_lodCurveError": 8192,
+    "r_picmip": 0,
+    "r_lodBias": -2,
+    "cg_scorePlums": 0,
+    "cg_damagePlums": 1,
+    "cg_drawTimer": 1,
+    "cg_hitSounds": 1,
+    "cg_followMode": 1,
+    "cg_drawAttacker": 0,
+    "cg_drawCrosshair": 8,
+    "cg_crosshairSize": 12,
+    "cg_drawCrosshairNames": 1,
+    "cg_lagometer": 1,
+    "s_khz": 48,
+    "s_sdlDevSamps": 4096
+  },
+  "binds": {},
+  "baseq3": {
+    "files": [
+      { "src": "q3/baseq3/pak0.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak1.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak2.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak3.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak4.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak5.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak6.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak7.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak8.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak8t.pk3", "dst": "/baseq3" }
+    ]
+  },
+  "missionpack": {
+    "files": [
+      { "src": "q3/baseq3/pak0.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak1.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak2.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak3.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak4.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak5.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak6.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak7.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak8.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak8t.pk3", "dst": "/baseq3" },
+      { "src": "q3/missionpack/pak0.pk3", "dst": "/missionpack" },
+      { "src": "q3/missionpack/pak1.pk3", "dst": "/missionpack" },
+      { "src": "q3/missionpack/pak2.pk3", "dst": "/missionpack" },
+      { "src": "q3/missionpack/pak3.pk3", "dst": "/missionpack" },
+      { "src": "q3/missionpack/pak3t.pk3", "dst": "/missionpack" }
+    ]
+  }
+}
