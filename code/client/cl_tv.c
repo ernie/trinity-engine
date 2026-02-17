@@ -1335,7 +1335,7 @@ EMSCRIPTEN_KEEPALIVE
 const char *CL_TV_GetPlayerList( void ) {
 	static char buf[4096];
 	int len, i;
-	const char *cs, *name;
+	const char *cs;
 
 	if ( !tvPlay.active ) {
 		buf[0] = '\0';

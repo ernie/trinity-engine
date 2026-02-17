@@ -289,6 +289,8 @@ typedef struct {
 	// TV demo download
 	char		tvDemoFile[MAX_QPATH]; // pending TV demo remote path for HTTP download
 	char		tvDemoMap[MAX_QPATH];  // map name for local filename generation
+	char		tvDemoPendingUrl[MAX_OSPATH];
+	char		tvDemoPendingLocal[MAX_OSPATH];
 
 	// demo information
 	char		demoName[MAX_OSPATH];
@@ -484,6 +486,9 @@ extern	cvar_t	*cl_allowDownload;
 extern	cvar_t	*cl_mapAutoDownload;
 extern	cvar_t	*cl_dlDirectory;
 extern	cvar_t	*cl_tvDownload;
+extern	cvar_t	*cl_tvdOffer;
+extern	cvar_t	*cl_voteYesKey;
+extern	cvar_t	*cl_voteNoKey;
 #endif
 extern	cvar_t	*cl_conXOffset;
 extern	cvar_t	*cl_conColor;

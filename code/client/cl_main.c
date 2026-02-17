@@ -70,6 +70,9 @@ cvar_t	*cl_guidServerUniq;
 cvar_t	*cl_dlURL;
 cvar_t	*cl_dlDirectory;
 cvar_t	*cl_tvDownload;
+cvar_t	*cl_tvdOffer;
+cvar_t	*cl_voteYesKey;
+cvar_t	*cl_voteNoKey;
 
 cvar_t	*cl_reconnectArgs;
 
@@ -1277,6 +1280,11 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 #endif
 	clc.tvDemoFile[0] = '\0';
 	clc.tvDemoMap[0] = '\0';
+	clc.tvDemoPendingUrl[0] = '\0';
+	clc.tvDemoPendingLocal[0] = '\0';
+	Cvar_Set( "cl_tvdOffer", "" );
+	Cvar_Set( "cl_voteYesKey", "" );
+	Cvar_Set( "cl_voteNoKey", "" );
 
 	// Stop recording any video
 	if ( CL_VideoRecording() ) {
@@ -1347,6 +1355,11 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 }
 
 
+#ifdef USE_CURL
+static void CL_TVDYes_f( void );
+static void CL_TVDNo_f( void );
+#endif
+
 /*
 ===================
 CL_ForwardCommandToServer
@@ -1370,6 +1383,20 @@ void CL_ForwardCommandToServer( const char *string ) {
 	if ( !strcmp( cmd, "userinfo" ) ) {
 		return;
 	}
+
+#ifdef USE_CURL
+	// intercept "vote yes/no" when a TVD offer is pending
+	if ( !Q_stricmp( cmd, "vote" ) && cl_tvdOffer && cl_tvdOffer->string[0] ) {
+		const char *arg = Cmd_Argv( 1 );
+		if ( arg[0] == 'y' || arg[0] == 'Y' || arg[0] == '1' ) {
+			CL_TVDYes_f();
+			return;
+		} else if ( arg[0] == 'n' || arg[0] == 'N' || arg[0] == '0' ) {
+			CL_TVDNo_f();
+			return;
+		}
+	}
+#endif
 
 	if ( clc.demoplaying || cls.state < CA_CONNECTED || cmd[0] == '+' ) {
 		Com_Printf( "Unknown command \"%s" S_COLOR_WHITE "\"\n", cmd );
@@ -3026,6 +3053,45 @@ static void CL_CheckUserinfo( void ) {
 }
 
 
+#ifdef USE_CURL
+/*
+==================
+CL_TVDYes_f
+
+Accept a pending TV demo download.
+==================
+*/
+static void CL_TVDYes_f( void ) {
+	if ( !cl_tvdOffer->string[0] ) {
+		return;
+	}
+	if ( clc.tvDemoPendingUrl[0] && clc.tvDemoPendingLocal[0] ) {
+		CL_TV_BeginDownload( clc.tvDemoPendingLocal, clc.tvDemoPendingUrl );
+	}
+	Cvar_Set( "cl_tvdOffer", "" );
+	clc.tvDemoPendingUrl[0] = '\0';
+	clc.tvDemoPendingLocal[0] = '\0';
+}
+
+
+/*
+==================
+CL_TVDNo_f
+
+Decline a pending TV demo download.
+==================
+*/
+static void CL_TVDNo_f( void ) {
+	if ( !cl_tvdOffer->string[0] ) {
+		return;
+	}
+	Cvar_Set( "cl_tvdOffer", "" );
+	clc.tvDemoPendingUrl[0] = '\0';
+	clc.tvDemoPendingLocal[0] = '\0';
+}
+#endif
+
+
 /*
 ==================
 CL_Frame
@@ -3044,12 +3110,11 @@ void CL_Frame( int msec, int realMsec ) {
 	if ( cls.state == CA_ACTIVE && clc.tvDemoFile[0]
 		&& !Com_DL_InProgress( &tvDownload ) && cl_tvDownload->integer ) {
 		if ( clc.sv_dlURL[0] && CL_cURL_Init() ) {
-			char url[MAX_OSPATH];
-			char localName[MAX_QPATH];
 			time_t now;
 			struct tm *tm_info;
 
-			Com_sprintf( url, sizeof( url ), "%s/%s", clc.sv_dlURL, clc.tvDemoFile );
+			Com_sprintf( clc.tvDemoPendingUrl, sizeof( clc.tvDemoPendingUrl ),
+				"%s/%s", clc.sv_dlURL, clc.tvDemoFile );
 
 			// generate local filename with timestamp and map name
 			now = time( NULL );
@@ -3057,12 +3122,27 @@ void CL_Frame( int msec, int realMsec ) {
 			if ( tm_info && clc.tvDemoMap[0] ) {
 				char timestamp[32];
 				strftime( timestamp, sizeof( timestamp ), "%Y%m%d_%H%M%S", tm_info );
-				Com_sprintf( localName, sizeof( localName ), "demos/%s_%s.tvd", timestamp, clc.tvDemoMap );
+				Com_sprintf( clc.tvDemoPendingLocal, sizeof( clc.tvDemoPendingLocal ),
+					"demos/%s_%s.tvd", timestamp, clc.tvDemoMap );
 			} else {
-				Q_strncpyz( localName, clc.tvDemoFile, sizeof( localName ) );
+				Q_strncpyz( clc.tvDemoPendingLocal, clc.tvDemoFile,
+					sizeof( clc.tvDemoPendingLocal ) );
 			}
 
-			CL_TV_BeginDownload( localName, url );
+			// signal cgame via ROM cvar
+			Cvar_Set( "cl_tvdOffer", clc.tvDemoPendingLocal );
+
+			// resolve vote key bindings for cgame display
+			{
+				int keynum;
+				const char *name;
+				keynum = Key_GetKey( "vote yes" );
+				name = keynum >= 0 ? Key_KeynumToString( keynum ) : NULL;
+				Cvar_Set( "cl_voteYesKey", name && name[0] ? name : "" );
+				keynum = Key_GetKey( "vote no" );
+				name = keynum >= 0 ? Key_KeynumToString( keynum ) : NULL;
+				Cvar_Set( "cl_voteNoKey", name && name[0] ? name : "" );
+			}
 		} else {
 			Com_DPrintf( "TV: sv_dlURL not set, skipping demo download\n" );
 		}
@@ -4056,7 +4136,11 @@ void CL_Init( void ) {
 	Cvar_SetDescription( cl_dlDirectory, s );
 
 	cl_tvDownload = Cvar_Get( "cl_tvDownload", "0", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( cl_tvDownload, "Download TV demo recordings from server via HTTP at end of match." );
+	Cvar_SetDescription( cl_tvDownload, "Download TV demo recordings from server via HTTP at end of match.\n 0 - off\n 1 - prompt (auto-decline)\n 2 - prompt (auto-accept)" );
+
+	cl_tvdOffer = Cvar_Get( "cl_tvdOffer", "", CVAR_ROM );
+	cl_voteYesKey = Cvar_Get( "cl_voteYesKey", "", CVAR_ROM );
+	cl_voteNoKey = Cvar_Get( "cl_voteNoKey", "", CVAR_ROM );
 
 	cl_reconnectArgs = Cvar_Get( "cl_reconnectArgs", "", CVAR_ARCHIVE_ND | CVAR_NOTABCOMPLETE );
 
@@ -4123,6 +4207,8 @@ void CL_Init( void ) {
 #ifdef USE_CURL
 	Cmd_AddCommand( "download", CL_Download_f );
 	Cmd_AddCommand( "dlmap", CL_Download_f );
+	Cmd_AddCommand( "tvdyes", CL_TVDYes_f );
+	Cmd_AddCommand( "tvdno", CL_TVDNo_f );
 #endif
 	Cmd_AddCommand( "modelist", CL_ModeList_f );
 
