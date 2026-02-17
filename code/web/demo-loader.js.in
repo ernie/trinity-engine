@@ -61,6 +61,7 @@ export async function loadDemo({ canvas, statusEl, enginePath, demoUrl, extraPk3
         +set sv_pure 0
         +set net_enabled 0
         +set fs_basegame "${fs_basegame}"
+        +set com_hunkMegs 512
     `;
     if (extraArgs) generatedArguments += ` ${extraArgs} `;
 
@@ -228,13 +229,13 @@ export async function loadDemo({ canvas, statusEl, enginePath, demoUrl, extraPk3
 
                     // Load map pk3 inferred from demo
                     if (demoMapName) {
-                        const mapPk3Url = new URL(`demopk3s/maps/${demoMapName}.pk3`, dataURL).href;
+                        const mapPk3Url = new URL(`demopk3s/maps/${demoMapName.toLowerCase()}.pk3`, dataURL).href;
                         statusEl.textContent = `Loading ${demoMapName} map...`;
                         const mapResp = await cachedFetch(mapPk3Url, `Loading ${demoMapName} map`, statusEl);
                         if (mapResp.ok) {
                             const mapData = await mapResp.arrayBuffer();
                             mod.FS.mkdirTree(`/${fs_basegame}`);
-                            mod.FS.writeFile(`/${fs_basegame}/${demoMapName}.pk3`, new Uint8Array(mapData));
+                            mod.FS.writeFile(`/${fs_basegame}/${demoMapName.toLowerCase()}.pk3`, new Uint8Array(mapData));
                         } else {
                             console.warn(`Map pk3 not found: ${demoMapName}.pk3 (${mapResp.status})`);
                         }
