@@ -2078,7 +2078,8 @@ static void RawImage_UploadTexture(GLuint texture, byte *data, int x, int y, int
 	{
 		int typeSize = (dataType == GL_FLOAT) ? 4 : (dataType == GL_HALF_FLOAT_ARB) ? 2 : 1;
 		int components = (dataFormat == GL_RED) ? 1 : (dataFormat == GL_RG) ? 2 : (dataFormat == GL_RGB) ? 3 : 4;
-		formatBuffer = ri.Hunk_AllocateTempMemory(components * typeSize * width * height);
+		int rowBytes = PAD(components * typeSize * width, 4); // account for GL_UNPACK_ALIGNMENT
+		formatBuffer = ri.Hunk_AllocateTempMemory(rowBytes * height);
 	}
 
 	miplevel = 0;
