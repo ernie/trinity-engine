@@ -243,11 +243,18 @@ jobs:
 
       - name: Install cross-compiler
         run: |
+          sudo dpkg --add-architecture armhf
+          sudo sed -i 's/^Types:/Architectures: amd64\nTypes:/' /etc/apt/sources.list.d/ubuntu.sources
+          sudo sh -c 'cat > /etc/apt/sources.list.d/armhf-ports.list <<EOF
+          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble main universe
+          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble-updates main universe
+          deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble-security main universe
+          EOF'
           sudo apt-get -qq update
-          sudo apt-get -y install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+          sudo apt-get -y install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libcurl4-openssl-dev:armhf mesa-common-dev:armhf libxxf86dga-dev:armhf libxrandr-dev:armhf libxxf86vm-dev:armhf libasound-dev:armhf
 
       - name: Build
-        run: make install -j$(nproc) ARCH=arm CC=arm-linux-gnueabihf-gcc STRIP=arm-linux-gnueabihf-strip DESTDIR=bin
+        run: make install -j$(nproc) ARCH=arm CC=arm-linux-gnueabihf-gcc STRIP=arm-linux-gnueabihf-strip DESTDIR=bin USE_SDL=0
 
       - uses: actions/upload-artifact@v4
         with:
@@ -287,8 +294,43 @@ jobs:
         if-no-files-found: error
         retention-days: 5
 
+  web:
+    name: Release Web
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Setup Emscripten
+      uses: mymindstorm/setup-emsdk@v14
+      with:
+        version: 5.0.1
+
+    - name: Build web client
+      run: make web
+
+    - name: Build demo player
+      run: make demoplayer
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: web-client
+        path: dist/web
+        if-no-files-found: error
+        retention-days: 5
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: web-demoplayer
+        path: dist/demo
+        if-no-files-found: error
+        retention-days: 5
+
   release:
-    needs: [windows-msys, windows-msys32, windows-msvc, ubuntu-x86, ubuntu-arm64, build-armv7, macos-x86]
+    needs: [windows-msys, windows-msys32, windows-msvc, ubuntu-x86, ubuntu-arm64, build-armv7, macos-x86, web]
     runs-on: ubuntu-latest
     steps:
       - name: Download Artifacts
@@ -305,6 +347,8 @@ jobs:
           7z a -r trinity-windows-msvc-arm64.zip   ./windows-msvc-arm64/*
           7z a -r trinity-macos-x86_64.zip         ./macos-x86_64/*
           7z a -r trinity-macos-aarch64.zip        ./macos-aarch64/*
+          7z a -r trinity-web-client.zip            ./web-client/*
+          7z a -r trinity-web-demoplayer.zip        ./web-demoplayer/*
 
       - name: Create release
         uses: softprops/action-gh-release@v2
