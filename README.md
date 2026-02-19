@@ -18,6 +18,9 @@ and seeking via replay from the beginning.
 - `sv_tvDownload` — notify clients to download the completed demo via HTTP at map change (requires `sv_dlURL`)
 - `cl_tvDownload` — opt in to automatic TV demo downloads from the server
 - Client-side viewpoint switching and seek during playback
+    - 0 = No download, ever
+    - 1 = Offer download. Cgame-controlled handling. For Trinity, show a dialog. 1 = default to decline after `cg_tvdTimeout` seconds
+    - 2 = Offer download. Cgame-controlled handling. For Trinity, show a dialog. 2 = default to accept after `cg_tvdTimeout` seconds
 
 ### Web Demo Player (Emscripten/WebAssembly)
 
