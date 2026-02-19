@@ -1,6 +1,6 @@
 # Trinity Engine
 
-Trinity Engine is a fork of [Quake3e](https://github.com/ec-/Quake3e) with features to support a VR-focused Quake III Arena ecosystem. It serves as the engine component alongside the [Trinity](https://github.com/ernie/trinity) game mod and [Trinity Tools](https://github.com/ernie/trinity-tools) server administration and statistics platform.
+Trinity Engine is a fork of [Quake3e](https://github.com/ec-/Quake3e) with features to support a VR-focused Quake III Arena ecosystem. It serves as the engine component alongside the [Trinity](https://github.com/ernie/trinity) game mod and [Trinity Tracker](https://github.com/ernie/trinity-tracker) server administration and statistics platform.
 
 ## Features beyond Quake3e
 
@@ -142,3 +142,4 @@ Discord channel: <https://discordapp.com/invite/X3Exs4C>
 - <https://github.com/ioquake/ioq3>
 - <https://github.com/kennyalive/Quake-III-Arena-Kenny-Edition>
 - <https://github.com/OpenArena/engine>
+
