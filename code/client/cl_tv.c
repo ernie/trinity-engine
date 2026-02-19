@@ -38,9 +38,12 @@ static void CL_TV_ViewNext_f( void );
 static void CL_TV_ViewPrev_f( void );
 static void CL_TV_Seek_f( void );
 
-// playerState_t.persistant[] indices (from game/bg_public.h)
-#define TV_PERS_TEAM					3
-#define TV_TEAM_SPECTATOR				3
+// Read team from configstring rather than persistant[], which is unreliable
+// for spectators in follow mode.
+static int CL_TV_GetPlayerTeam( int clientNum ) {
+	const char *cs = cl.gameState.stringData + cl.gameState.stringOffsets[CS_PLAYERS + clientNum];
+	return atoi( Info_ValueForKey( cs, "t" ) );
+}
 
 
 /*
@@ -251,7 +254,7 @@ static int CL_TV_FindFirstActivePlayer( void ) {
 	int i;
 	for ( i = 0; i < MAX_CLIENTS; i++ ) {
 		if ( ( tvPlay.playerBitmask[i >> 3] & ( 1 << ( i & 7 ) ) )
-				&& tvPlay.players[i].persistant[TV_PERS_TEAM] != TV_TEAM_SPECTATOR ) {
+				&& CL_TV_GetPlayerTeam( i ) != TEAM_SPECTATOR ) {
 			return i;
 		}
 	}
@@ -676,15 +679,17 @@ void CL_TV_ReadFrame( void ) {
 		}
 	}
 
-	// Auto-switch viewpoint if current player disconnected
+	// Auto-switch viewpoint if current player disconnected or became spectator
 	// Skip during seek: early replay frames may not yet contain the followed player
-	if ( !tvPlay.seeking && !( tvPlay.playerBitmask[tvPlay.viewpoint >> 3] & ( 1 << ( tvPlay.viewpoint & 7 ) ) ) ) {
+	if ( !tvPlay.seeking &&
+		 ( !( tvPlay.playerBitmask[tvPlay.viewpoint >> 3] & ( 1 << ( tvPlay.viewpoint & 7 ) ) ) ||
+		   CL_TV_GetPlayerTeam( tvPlay.viewpoint ) == TEAM_SPECTATOR ) ) {
 		int newVp = CL_TV_FindFirstActivePlayer();
 		if ( newVp >= 0 ) {
 			tvPlay.viewpoint = newVp;
 			clc.clientNum = newVp;
 			Cvar_SetIntegerValue( "cl_tvViewpoint", newVp );
-			}
+		}
 	}
 
 	// --- Configstring changes ---
@@ -1234,6 +1239,11 @@ static void CL_TV_View_f( void ) {
 		return;
 	}
 
+	if ( CL_TV_GetPlayerTeam( n ) == TEAM_SPECTATOR ) {
+		Com_Printf( "Client %i is a spectator\n", n );
+		return;
+	}
+
 	tvPlay.viewpoint = n;
 	CL_TV_RebuildSnapshots();
 }
@@ -1256,7 +1266,7 @@ static void CL_TV_ViewNext_f( void ) {
 	for ( i = 1; i <= MAX_CLIENTS; i++ ) {
 		int candidate = ( tvPlay.viewpoint + i ) % MAX_CLIENTS;
 		if ( ( tvPlay.playerBitmask[candidate >> 3] & ( 1 << ( candidate & 7 ) ) )
-				&& tvPlay.players[candidate].persistant[TV_PERS_TEAM] != TV_TEAM_SPECTATOR ) {
+				&& CL_TV_GetPlayerTeam( candidate ) != TEAM_SPECTATOR ) {
 			next = candidate;
 			break;
 		}
@@ -1286,7 +1296,7 @@ static void CL_TV_ViewPrev_f( void ) {
 	for ( i = 1; i <= MAX_CLIENTS; i++ ) {
 		int candidate = ( tvPlay.viewpoint - i + MAX_CLIENTS ) % MAX_CLIENTS;
 		if ( ( tvPlay.playerBitmask[candidate >> 3] & ( 1 << ( candidate & 7 ) ) )
-				&& tvPlay.players[candidate].persistant[TV_PERS_TEAM] != TV_TEAM_SPECTATOR ) {
+				&& CL_TV_GetPlayerTeam( candidate ) != TEAM_SPECTATOR ) {
 			prev = candidate;
 			break;
 		}
@@ -1353,10 +1363,6 @@ const char *CL_TV_GetPlayerList( void ) {
 		if ( !( tvPlay.playerBitmask[i >> 3] & ( 1 << ( i & 7 ) ) ) ) {
 			continue;
 		}
-		if ( tvPlay.players[i].persistant[TV_PERS_TEAM] == TV_TEAM_SPECTATOR ) {
-			continue;
-		}
-
 		cs = cl.gameState.stringData + cl.gameState.stringOffsets[CS_PLAYERS + i];
 
 		// Info_ValueForKey uses a 2-entry static buffer, so copy results
@@ -1366,7 +1372,7 @@ const char *CL_TV_GetPlayerList( void ) {
 		isVR = atoi( Info_ValueForKey( cs, "vr" ) );
 
 		len += Com_sprintf( buf + len, sizeof( buf ) - len, "%i\t%s\t%i\t%s\t%i\n",
-			i, nameBuf, tvPlay.players[i].persistant[TV_PERS_TEAM], modelBuf, isVR );
+			i, nameBuf, CL_TV_GetPlayerTeam( i ), modelBuf, isVR );
 	}
 
 	return buf;
