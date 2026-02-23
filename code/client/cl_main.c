@@ -1904,6 +1904,11 @@ static void CL_Vid_Restart( refShutdownCode_t shutdownCode ) {
 		CL_InitCGame();
 		// send pure checksums
 		CL_SendPureChecksums();
+		// TVD snapshots survive in the ring buffer across vid_restart;
+		// signal that so the CA_PRIMED -> CA_ACTIVE transition proceeds
+		if ( tvPlay.active ) {
+			cl.newSnapshots = qtrue;
+		}
 	}
 
 	cls.startCgame = qfalse;
