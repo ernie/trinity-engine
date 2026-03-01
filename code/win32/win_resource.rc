@@ -54,9 +54,11 @@ END
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
 #ifndef __MINGW32__
-IDI_ICON1               ICON    DISCARDABLE     "qe3.ico"
+IDI_ICON1               ICON    DISCARDABLE     "trinity.ico"
+IDI_ICON2               ICON    DISCARDABLE     "qe3.ico"
 #else
-IDI_ICON1               ICON    DISCARDABLE     "code/win32/qe3.ico"
+IDI_ICON1               ICON    DISCARDABLE     "code/win32/trinity.ico"
+IDI_ICON2               ICON    DISCARDABLE     "code/win32/qe3.ico"
 #endif
 
 
