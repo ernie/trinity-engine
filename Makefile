@@ -569,11 +569,7 @@ else
   endif
 
   ifeq ($(ARCH),arm)
-    ifeq ($(LONG_BIT),32)
-      OPTIMIZE += -march=armv7-a+fp
-    else
-      OPTIMIZE += -march=armv7-a
-    endif
+    OPTIMIZE += -march=armv7-a+fp
     ARCHEXT = .arm
   endif
 

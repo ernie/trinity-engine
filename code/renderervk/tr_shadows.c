@@ -72,6 +72,7 @@ static	int			facing[SHADER_MAX_INDEXES/3];
 static	int			numLitTris;
 static	int			litTriIndexes[SHADER_MAX_INDEXES];
 static	float		clipDists[SHADER_MAX_VERTEXES];
+static	qboolean	needsTrace[SHADER_MAX_VERTEXES];
 
 static void R_AddEdgeDef( int i1, int i2, int f ) {
 	int		c;
@@ -191,6 +192,53 @@ void RB_ShadowTessEnd( void ) {
 		float	extrusionDist = r_shadowDistance->value;
 		vec3_t	worldNegLightDir;
 
+		// decide which triangles face the light (must happen before clip distance
+		// computation so we can identify silhouette edge vertices and only trace those)
+		Com_Memset( numEdgeDefs, 0, tess.numVertexes * sizeof( numEdgeDefs[0] ) );
+
+		numTris = tess.numIndexes / 3;
+		for ( i = 0 ; i < numTris ; i++ ) {
+			int		i1, i2, i3;
+			vec3_t	d1, d2, normal;
+			float	*v1, *v2, *v3;
+			float	d;
+
+			i1 = tess.indexes[ i*3 + 0 ];
+			i2 = tess.indexes[ i*3 + 1 ];
+			i3 = tess.indexes[ i*3 + 2 ];
+
+			v1 = tess.xyz[ i1 ];
+			v2 = tess.xyz[ i2 ];
+			v3 = tess.xyz[ i3 ];
+
+			VectorSubtract( v2, v1, d1 );
+			VectorSubtract( v3, v1, d2 );
+			CrossProduct( d1, d2, normal );
+
+			d = DotProduct( normal, lightDir );
+			if ( d > 0 ) {
+				facing[ i ] = 1;
+			} else {
+				facing[ i ] = 0;
+			}
+
+			// create the edges
+			R_AddEdgeDef( i1, i2, facing[ i ] );
+			R_AddEdgeDef( i2, i3, facing[ i ] );
+			R_AddEdgeDef( i3, i1, facing[ i ] );
+		}
+
+		// save lit-facing triangle indices for back cap
+		numLitTris = 0;
+		for ( i = 0; i < numTris; i++ ) {
+			if ( facing[i] ) {
+				litTriIndexes[ numLitTris*3 + 0 ] = tess.indexes[ i*3 + 0 ];
+				litTriIndexes[ numLitTris*3 + 1 ] = tess.indexes[ i*3 + 1 ];
+				litTriIndexes[ numLitTris*3 + 2 ] = tess.indexes[ i*3 + 2 ];
+				numLitTris++;
+			}
+		}
+
 		if ( r_shadowClip->integer && tr.world ) {
 			int j;
 			// entity-local lightDir to world space, negated for extrusion
@@ -198,13 +246,24 @@ void RB_ShadowTessEnd( void ) {
 				worldNegLightDir[j] = -( lightDir[0] * backEnd.or.axis[0][j]
 									   + lightDir[1] * backEnd.or.axis[1][j]
 									   + lightDir[2] * backEnd.or.axis[2][j] );
+
+			// mark vertices on lit-facing triangles — back-facing vertices
+			// don't contribute to silhouette edges or back caps, so skip them
+			Com_Memset( needsTrace, 0, tess.numVertexes * sizeof( needsTrace[0] ) );
+			for ( i = 0; i < numTris; i++ ) {
+				if ( facing[i] ) {
+					needsTrace[ tess.indexes[ i*3 + 0 ] ] = qtrue;
+					needsTrace[ tess.indexes[ i*3 + 1 ] ] = qtrue;
+					needsTrace[ tess.indexes[ i*3 + 2 ] ] = qtrue;
+				}
+			}
 		}
 
-		// Phase A: compute per-vertex clip distances
+		// Phase A: compute per-vertex clip distances (skip back-facing vertices)
 		for ( i = 0; i < tess.numVertexes; i++ ) {
 			clipDists[i] = extrusionDist;
 
-			if ( r_shadowClip->integer && tr.world ) {
+			if ( r_shadowClip->integer && tr.world && needsTrace[i] ) {
 				int j;
 				vec3_t worldPos;
 				float clipped;
@@ -261,52 +320,6 @@ void RB_ShadowTessEnd( void ) {
 		// Phase C: extrude vertices using final clip distances
 		for ( i = 0; i < tess.numVertexes; i++ ) {
 			VectorMA( tess.xyz[i], -clipDists[i], lightDir, tess.xyz[i+tess.numVertexes] );
-		}
-	}
-
-	// decide which triangles face the light
-	Com_Memset( numEdgeDefs, 0, tess.numVertexes * sizeof( numEdgeDefs[0] ) );
-
-	numTris = tess.numIndexes / 3;
-	for ( i = 0 ; i < numTris ; i++ ) {
-		int		i1, i2, i3;
-		vec3_t	d1, d2, normal;
-		float	*v1, *v2, *v3;
-		float	d;
-
-		i1 = tess.indexes[ i*3 + 0 ];
-		i2 = tess.indexes[ i*3 + 1 ];
-		i3 = tess.indexes[ i*3 + 2 ];
-
-		v1 = tess.xyz[ i1 ];
-		v2 = tess.xyz[ i2 ];
-		v3 = tess.xyz[ i3 ];
-
-		VectorSubtract( v2, v1, d1 );
-		VectorSubtract( v3, v1, d2 );
-		CrossProduct( d1, d2, normal );
-
-		d = DotProduct( normal, lightDir );
-		if ( d > 0 ) {
-			facing[ i ] = 1;
-		} else {
-			facing[ i ] = 0;
-		}
-
-		// create the edges
-		R_AddEdgeDef( i1, i2, facing[ i ] );
-		R_AddEdgeDef( i2, i3, facing[ i ] );
-		R_AddEdgeDef( i3, i1, facing[ i ] );
-	}
-
-	// save lit-facing triangle indices for back cap
-	numLitTris = 0;
-	for ( i = 0; i < numTris; i++ ) {
-		if ( facing[i] ) {
-			litTriIndexes[ numLitTris*3 + 0 ] = tess.indexes[ i*3 + 0 ];
-			litTriIndexes[ numLitTris*3 + 1 ] = tess.indexes[ i*3 + 1 ];
-			litTriIndexes[ numLitTris*3 + 2 ] = tess.indexes[ i*3 + 2 ];
-			numLitTris++;
 		}
 	}
 
