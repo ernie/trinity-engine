@@ -313,7 +313,7 @@ extern const int demo_protocols[];
 #define	PORT_AUTHORIZE		27952
 #endif
 #define	PORT_SERVER			27960
-#define	NUM_SERVER_PORTS	4		// broadcast scan this many ports after
+#define	NUM_SERVER_PORTS	8		// broadcast scan this many ports after
 									// PORT_SERVER so a single machine can
 									// run multiple servers
 
