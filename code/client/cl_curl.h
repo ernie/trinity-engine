@@ -47,6 +47,9 @@ extern cvar_t *cl_cURLLib;
 #ifdef USE_CURL_DLOPEN
 extern char* (*qcurl_version)(void);
 
+extern struct curl_slist *(*qcurl_slist_append)(struct curl_slist *list, const char *data);
+extern void (*qcurl_slist_free_all)(struct curl_slist *list);
+
 extern CURL* (*qcurl_easy_init)(void);
 extern CURLcode (*qcurl_easy_setopt)(CURL *curl, CURLoption option, ...);
 extern CURLcode (*qcurl_easy_perform)(CURL *curl);
@@ -73,6 +76,9 @@ extern CURLMsg *(*qcurl_multi_info_read)(CURLM *multi_handle,
 extern const char *(*qcurl_multi_strerror)(CURLMcode);
 #else
 #define qcurl_version curl_version
+
+#define qcurl_slist_append curl_slist_append
+#define qcurl_slist_free_all curl_slist_free_all
 
 #define qcurl_easy_init curl_easy_init
 #define qcurl_easy_setopt curl_easy_setopt

@@ -311,7 +311,9 @@ ifeq ($(ARCH),ppc64)
   HAVE_VM_COMPILED = true
 endif
 
-BASE_CFLAGS =
+TRINITY_ENGINE_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "unknown")
+
+BASE_CFLAGS = -DTRINITY_ENGINE_VERSION=\\\"$(TRINITY_ENGINE_VERSION)\\\"
 
 ifeq ($(USE_SYSTEM_JPEG),1)
   BASE_CFLAGS += -DUSE_SYSTEM_JPEG
@@ -1068,6 +1070,7 @@ Q3OBJ = \
   $(B)/client/cl_avi.o \
   $(B)/client/cl_jpeg.o \
   $(B)/client/cl_tv.o \
+  $(B)/client/cl_trinity.o \
   \
   $(B)/client/cm_load.o \
   $(B)/client/cm_patch.o \

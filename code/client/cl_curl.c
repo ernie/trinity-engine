@@ -32,6 +32,9 @@ cvar_t *cl_cURLLib;
 
 char* (*qcurl_version)(void);
 
+struct curl_slist *(*qcurl_slist_append)(struct curl_slist *list, const char *data);
+void (*qcurl_slist_free_all)(struct curl_slist *list);
+
 CURL* (*qcurl_easy_init)(void);
 CURLcode (*qcurl_easy_setopt)(CURL *curl, CURLoption option, ...);
 CURLcode (*qcurl_easy_perform)(CURL *curl);
@@ -127,6 +130,9 @@ qboolean CL_cURL_Init( void )
 
 	qcurl_version = GPA("curl_version");
 
+	qcurl_slist_append = GPA("curl_slist_append");
+	qcurl_slist_free_all = GPA("curl_slist_free_all");
+
 	qcurl_easy_init = GPA("curl_easy_init");
 	qcurl_easy_setopt = GPA("curl_easy_setopt");
 	qcurl_easy_perform = GPA("curl_easy_perform");
@@ -175,6 +181,9 @@ void CL_cURL_Shutdown( void )
 		cURLLib = NULL;
 	}
 	qcurl_version = NULL;
+
+	qcurl_slist_append = NULL;
+	qcurl_slist_free_all = NULL;
 
 	qcurl_easy_init = NULL;
 	qcurl_easy_setopt = NULL;

@@ -3962,6 +3962,8 @@ void Com_Init( char *commandLine ) {
 	com_version = Cvar_Get( "version", s, CVAR_PROTECTED | CVAR_ROM | CVAR_SERVERINFO );
 	Cvar_SetDescription( com_version, "Read-only CVAR to see the version of the game." );
 
+	Cvar_Get( "com_engine", va( "trinity-engine/%s", TRINITY_ENGINE_VERSION ), CVAR_ROM | CVAR_NORESTART );
+
 	// this cvar is the single entry point of the entire extension system
 	Cvar_Get( "//trap_GetValue", va( "%i", COM_TRAP_GETVALUE ), CVAR_PROTECTED | CVAR_ROM | CVAR_NOTABCOMPLETE );
 

@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_main.c  -- client main loop
 
 #include "client.h"
+#include "cl_trinity.h"
 #include <limits.h>
 
 cvar_t	*cl_noprint;
@@ -3188,6 +3189,7 @@ void CL_Frame( int msec, int realMsec ) {
 			return;
 		}
 	}
+	CL_TrinityPerformLogin();
 #endif
 
 	if ( cls.cddialog ) {
@@ -4232,6 +4234,7 @@ void CL_Init( void ) {
 	Cmd_AddCommand( "modelist", CL_ModeList_f );
 
 	CL_TV_Init();
+	CL_TrinityInit();
 
 	Cvar_Set( "cl_running", "1" );
 	CL_GenerateQKey();
@@ -4265,6 +4268,7 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	recursive = qtrue;
 
 	noGameRestart = quit;
+	CL_TrinityShutdown();
 	CL_Disconnect( qfalse );
 
 	// clear and mute all sounds until next registration
