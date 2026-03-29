@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "cl_trinity.h"
+#include "../qcommon/autoupdate.h"
 #include <limits.h>
 
 cvar_t	*cl_noprint;
@@ -3121,6 +3122,7 @@ void CL_Frame( int msec, int realMsec ) {
 	if ( tvDownload.cURL ) {
 		CL_TV_PerformDownload();
 	}
+	Update_Frame();
 	// initiate TV demo download once the client has entered the game
 	if ( cls.state == CA_ACTIVE && clc.tvDemoFile[0]
 		&& !Com_DL_InProgress( &tvDownload ) && cl_tvDownload->integer ) {
@@ -4230,6 +4232,7 @@ void CL_Init( void ) {
 	Cmd_AddCommand( "dlmap", CL_Download_f );
 	Cmd_AddCommand( "tvdyes", CL_TVDYes_f );
 	Cmd_AddCommand( "tvdno", CL_TVDNo_f );
+	Update_Init();
 #endif
 	Cmd_AddCommand( "modelist", CL_ModeList_f );
 
@@ -4310,6 +4313,7 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 
 #ifdef USE_CURL
 	Com_DL_Cleanup( &download );
+	Update_Shutdown();
 
 	Cmd_RemoveCommand( "download" );
 	Cmd_RemoveCommand( "dlmap" );

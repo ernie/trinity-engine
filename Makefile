@@ -313,7 +313,14 @@ endif
 
 TRINITY_ENGINE_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "unknown")
 
+UPDATE_GITHUB_OWNER ?= ernie
+UPDATE_GITHUB_REPO ?= trinity-engine
+UPDATE_ASSET_PREFIX ?= trinity
+
 BASE_CFLAGS = -DTRINITY_ENGINE_VERSION=\\\"$(TRINITY_ENGINE_VERSION)\\\"
+BASE_CFLAGS += -DUPDATE_GITHUB_OWNER=\\\"$(UPDATE_GITHUB_OWNER)\\\"
+BASE_CFLAGS += -DUPDATE_GITHUB_REPO=\\\"$(UPDATE_GITHUB_REPO)\\\"
+BASE_CFLAGS += -DUPDATE_ASSET_PREFIX=\\\"$(UPDATE_ASSET_PREFIX)\\\"
 
 ifeq ($(USE_SYSTEM_JPEG),1)
   BASE_CFLAGS += -DUSE_SYSTEM_JPEG
@@ -1214,6 +1221,7 @@ endif
 
 ifeq ($(USE_CURL),1)
   Q3OBJ += $(B)/client/cl_curl.o
+  Q3OBJ += $(B)/client/autoupdate.o
 endif
 
 ifdef MINGW

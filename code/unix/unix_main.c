@@ -41,6 +41,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <sys/mman.h>
 #endif
 #include <errno.h>
+#include <dirent.h>
 #include <libgen.h> // dirname
 
 #ifndef __EMSCRIPTEN__
@@ -1029,6 +1030,238 @@ static void Emscripten_MainLoopStep( void )
 #endif
 
 
+/*
+==================
+Sys_RestartProcess
+
+Relaunch the engine process.
+==================
+*/
+void NORETURN Sys_RestartProcess( void )
+{
+	char exePath[MAX_OSPATH];
+
+	exePath[0] = '\0';
+#ifdef __linux__
+	{
+		ssize_t len = readlink( "/proc/self/exe", exePath, sizeof( exePath ) - 1 );
+		if ( len > 0 )
+			exePath[len] = '\0';
+	}
+#elif defined(__APPLE__)
+	{
+		uint32_t bufSize = sizeof( exePath );
+		_NSGetExecutablePath( exePath, &bufSize );
+	}
+#endif
+
+	if ( exePath[0] ) {
+		char *args[] = { exePath, NULL };
+		execv( exePath, args );
+	}
+	_exit( 0 );
+}
+
+
+/*
+==================
+Sys_RemoveDirectoryRecursive
+
+Recursively delete a directory and all its contents (Unix).
+==================
+*/
+static void Sys_RemoveDirectoryRecursive( const char *path )
+{
+	DIR *dir;
+	struct dirent *ent;
+	char childPath[MAX_OSPATH];
+
+	dir = opendir( path );
+	if ( !dir )
+		return;
+
+	while ( ( ent = readdir( dir ) ) != NULL ) {
+		struct stat st;
+
+		if ( strcmp( ent->d_name, "." ) == 0 || strcmp( ent->d_name, ".." ) == 0 )
+			continue;
+
+		Com_sprintf( childPath, sizeof( childPath ), "%s/%s", path, ent->d_name );
+
+		if ( stat( childPath, &st ) == 0 && S_ISDIR( st.st_mode ) )
+			Sys_RemoveDirectoryRecursive( childPath );
+		else
+			remove( childPath );
+	}
+
+	closedir( dir );
+	rmdir( path );
+}
+
+
+/*
+==================
+Sys_ApplyPendingUpdate
+
+Called before Com_Init to apply a staged update from .updates/pending/.
+Reads the manifest, backs up current files to .updates/previous/,
+moves staged files into place. If the running executable was replaced,
+re-launches itself. On next launch, cleans up the .updates/ tree.
+==================
+*/
+void Sys_ApplyPendingUpdate( void )
+{
+	char pwd[MAX_OSPATH];
+	char updatesDir[MAX_OSPATH];
+	char pendingDir[MAX_OSPATH];
+	char previousDir[MAX_OSPATH];
+	char manifestPath[MAX_OSPATH];
+	char line[MAX_OSPATH * 2];
+	char srcPath[MAX_OSPATH];
+	char dstPath[MAX_OSPATH];
+	char bakPath[MAX_OSPATH];
+	char version[64];
+	FILE *f;
+	qboolean exeSwapped = qfalse;
+	int applied = 0;
+	char exePath[MAX_OSPATH];
+	ssize_t exeLen;
+
+	#define MAX_UPDATE_FILES 256
+	char movedDst[MAX_UPDATE_FILES][MAX_OSPATH];
+	char movedBak[MAX_UPDATE_FILES][MAX_OSPATH];
+	int movedCount = 0;
+
+	Q_strncpyz( pwd, Sys_Pwd(), sizeof( pwd ) );
+
+	Com_sprintf( updatesDir, sizeof( updatesDir ), "%s/.updates", pwd );
+	Com_sprintf( pendingDir, sizeof( pendingDir ), "%s/pending", updatesDir );
+	Com_sprintf( previousDir, sizeof( previousDir ), "%s/previous", updatesDir );
+	Com_sprintf( manifestPath, sizeof( manifestPath ), "%s/update_manifest.dat", pendingDir );
+
+	f = fopen( manifestPath, "r" );
+	if ( !f ) {
+		// no pending update — clean up .updates/ tree from a previous update
+		// Brief delay to let the previous process fully exit and release file locks
+		// on the backed-up exe in .updates/previous/ (race with fork/exec + exit)
+		{
+			struct stat st;
+			if ( stat( updatesDir, &st ) == 0 && S_ISDIR( st.st_mode ) ) {
+				usleep( 1000000 );
+			}
+		}
+		Sys_RemoveDirectoryRecursive( updatesDir );
+		return;
+	}
+
+	// create .updates/previous/ for backups
+	Sys_Mkdir( updatesDir );
+	Sys_Mkdir( previousDir );
+
+	// resolve our own executable path for exe-swap detection
+	exePath[0] = '\0';
+#ifdef __linux__
+	exeLen = readlink( "/proc/self/exe", exePath, sizeof( exePath ) - 1 );
+	if ( exeLen > 0 )
+		exePath[exeLen] = '\0';
+#elif defined(__APPLE__)
+	{
+		uint32_t bufSize = sizeof( exePath );
+		if ( _NSGetExecutablePath( exePath, &bufSize ) != 0 )
+			exePath[0] = '\0';
+	}
+#endif
+
+	version[0] = '\0';
+
+	while ( fgets( line, sizeof( line ), f ) ) {
+		char *nl, *pipe, *sep;
+
+		nl = strchr( line, '\n' );
+		if ( nl ) *nl = '\0';
+		nl = strchr( line, '\r' );
+		if ( nl ) *nl = '\0';
+
+		if ( line[0] == '\0' )
+			continue;
+
+		if ( strncmp( line, "version=", 8 ) == 0 ) {
+			Q_strncpyz( version, line + 8, sizeof( version ) );
+			continue;
+		}
+
+		// parse: relative_path|CRC32
+		pipe = strchr( line, '|' );
+		if ( pipe )
+			*pipe = '\0';
+
+		Com_sprintf( srcPath, sizeof( srcPath ), "%s/%s", pendingDir, line );
+		Com_sprintf( dstPath, sizeof( dstPath ), "%s/%s", pwd, line );
+		Com_sprintf( bakPath, sizeof( bakPath ), "%s/%s", previousDir, line );
+
+		// ensure destination directory exists
+		sep = strrchr( dstPath, '/' );
+		if ( sep ) {
+			char dir[MAX_OSPATH];
+			int dirLen = (int)( sep - dstPath );
+			Q_strncpyz( dir, dstPath, dirLen + 1 );
+			Sys_Mkdir( dir );
+		}
+
+		// ensure backup directory exists
+		sep = strrchr( bakPath, '/' );
+		if ( sep ) {
+			char dir[MAX_OSPATH];
+			int dirLen = (int)( sep - bakPath );
+			Q_strncpyz( dir, bakPath, dirLen + 1 );
+			Sys_Mkdir( dir );
+		}
+
+		// backup current file to .updates/previous/
+		rename( dstPath, bakPath );
+
+		// move staged file into place
+		if ( rename( srcPath, dstPath ) != 0 ) {
+			int i;
+			fprintf( stderr, "Update: failed to move %s -> %s: %s\n",
+				srcPath, dstPath, strerror( errno ) );
+			rename( bakPath, dstPath );
+			for ( i = 0; i < movedCount; i++ ) {
+				remove( movedDst[i] );
+				rename( movedBak[i], movedDst[i] );
+			}
+			fclose( f );
+			remove( manifestPath );
+			return;
+		}
+
+		if ( movedCount < MAX_UPDATE_FILES ) {
+			Q_strncpyz( movedDst[movedCount], dstPath, MAX_OSPATH );
+			Q_strncpyz( movedBak[movedCount], bakPath, MAX_OSPATH );
+			movedCount++;
+		}
+
+		if ( exePath[0] && strcmp( dstPath, exePath ) == 0 )
+			exeSwapped = qtrue;
+
+		applied++;
+	}
+
+	fclose( f );
+
+	// delete the manifest so next launch triggers cleanup
+	remove( manifestPath );
+
+	if ( applied > 0 ) {
+		fprintf( stderr, "Update: applied %d files (version %s)\n", applied, version );
+	}
+
+	if ( exeSwapped ) {
+		Sys_RestartProcess();
+	}
+}
+
+
 int main( int argc, const char* argv[] )
 {
 	char con_title[ MAX_CVAR_VALUE_STRING ];
@@ -1075,6 +1308,8 @@ int main( int argc, const char* argv[] )
 	// bk000306 - clear queues
 //	memset( &eventQue[0], 0, sizeof( eventQue ) );
 //	memset( &sys_packetReceived[0], 0, sizeof( sys_packetReceived ) );
+
+	Sys_ApplyPendingUpdate();
 
 	Com_Init( cmdline );
 

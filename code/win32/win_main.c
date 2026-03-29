@@ -775,6 +775,242 @@ static LONG WINAPI ExceptionFilter( struct _EXCEPTION_POINTERS *ExceptionInfo )
 
 /*
 ==================
+Sys_RestartProcess
+
+Relaunch the engine process.
+==================
+*/
+void NORETURN Sys_RestartProcess( void )
+{
+	TCHAR exePath[MAX_OSPATH];
+	STARTUPINFO si;
+	PROCESS_INFORMATION pi;
+
+	GetModuleFileName( NULL, exePath, MAX_OSPATH );
+	memset( &si, 0, sizeof( si ) );
+	si.cb = sizeof( si );
+
+	if ( CreateProcess( exePath, GetCommandLine(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi ) ) {
+		// allow the child process to set itself as foreground
+		AllowSetForegroundWindow( pi.dwProcessId );
+		CloseHandle( pi.hProcess );
+		CloseHandle( pi.hThread );
+	}
+	ExitProcess( 0 );
+}
+
+
+/*
+==================
+Sys_RemoveDirectoryRecursive
+
+Recursively delete a directory and all its contents (Windows).
+==================
+*/
+static void Sys_RemoveDirectoryRecursive( const char *path )
+{
+	WIN32_FIND_DATA fd;
+	char pattern[MAX_OSPATH];
+	char childPath[MAX_OSPATH];
+	HANDLE hFind;
+
+	Com_sprintf( pattern, sizeof( pattern ), "%s\\*", path );
+	hFind = FindFirstFile( pattern, &fd );
+	if ( hFind == INVALID_HANDLE_VALUE )
+		return;
+
+	do {
+		if ( strcmp( fd.cFileName, "." ) == 0 || strcmp( fd.cFileName, ".." ) == 0 )
+			continue;
+
+		Com_sprintf( childPath, sizeof( childPath ), "%s\\%s", path, fd.cFileName );
+
+		if ( fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY )
+			Sys_RemoveDirectoryRecursive( childPath );
+		else
+			DeleteFile( childPath );
+	} while ( FindNextFile( hFind, &fd ) );
+
+	FindClose( hFind );
+	RemoveDirectory( path );
+}
+
+
+/*
+==================
+Sys_ApplyPendingUpdate
+
+Called before Com_Init to apply a staged update from .updates/pending/.
+Reads the manifest, backs up current files to .updates/previous/,
+moves staged files into place. If the running executable was replaced,
+re-launches itself. On next launch, cleans up the .updates/ tree.
+==================
+*/
+void Sys_ApplyPendingUpdate( void )
+{
+	char pwd[MAX_OSPATH];
+	char updatesDir[MAX_OSPATH];
+	char pendingDir[MAX_OSPATH];
+	char previousDir[MAX_OSPATH];
+	char manifestPath[MAX_OSPATH];
+	char line[MAX_OSPATH * 2];
+	char srcPath[MAX_OSPATH];
+	char dstPath[MAX_OSPATH];
+	char bakPath[MAX_OSPATH];
+	char version[64];
+	FILE *f;
+	qboolean exeSwapped = qfalse;
+	int applied = 0;
+	char *sep;
+
+	#define MAX_UPDATE_FILES 256
+	char movedDst[MAX_UPDATE_FILES][MAX_OSPATH];
+	char movedBak[MAX_UPDATE_FILES][MAX_OSPATH];
+	int movedCount = 0;
+
+	// determine install directory
+	{
+		TCHAR buffer[MAX_OSPATH];
+		char *s;
+		GetModuleFileName( NULL, buffer, MAX_OSPATH );
+		buffer[MAX_OSPATH - 1] = '\0';
+		Q_strncpyz( pwd, buffer, sizeof( pwd ) );
+		s = strrchr( pwd, '\\' );
+		if ( !s ) s = strrchr( pwd, '/' );
+		if ( s ) *s = '\0';
+	}
+
+	Com_sprintf( updatesDir, sizeof( updatesDir ), "%s\\.updates", pwd );
+	Com_sprintf( pendingDir, sizeof( pendingDir ), "%s\\pending", updatesDir );
+	Com_sprintf( previousDir, sizeof( previousDir ), "%s\\previous", updatesDir );
+	Com_sprintf( manifestPath, sizeof( manifestPath ), "%s\\update_manifest.dat", pendingDir );
+
+	f = fopen( manifestPath, "r" );
+	if ( !f ) {
+		// no pending update — clean up .updates/ tree from a previous update
+		// Brief delay to let the previous process fully exit and release file locks
+		// on the backed-up exe in .updates/previous/ (race with CreateProcess/ExitProcess)
+		{
+			DWORD attrs = GetFileAttributes( updatesDir );
+			if ( attrs != INVALID_FILE_ATTRIBUTES && ( attrs & FILE_ATTRIBUTE_DIRECTORY ) ) {
+				Sleep( 1000 );
+			}
+		}
+		Sys_RemoveDirectoryRecursive( updatesDir );
+		return;
+	}
+
+	// create .updates/previous/ for backups
+	CreateDirectory( updatesDir, NULL );
+	CreateDirectory( previousDir, NULL );
+
+	version[0] = '\0';
+
+	while ( fgets( line, sizeof( line ), f ) ) {
+		char *nl, *pipe;
+		int len;
+
+		nl = strchr( line, '\n' );
+		if ( nl ) *nl = '\0';
+		nl = strchr( line, '\r' );
+		if ( nl ) *nl = '\0';
+
+		len = (int)strlen( line );
+		if ( len == 0 )
+			continue;
+
+		if ( strncmp( line, "version=", 8 ) == 0 ) {
+			Q_strncpyz( version, line + 8, sizeof( version ) );
+			continue;
+		}
+
+		// parse file entry: relative_path|CRC32
+		pipe = strchr( line, '|' );
+		if ( pipe )
+			*pipe = '\0';
+
+		// convert forward slashes to backslashes for Windows
+		{
+			char *p;
+			for ( p = line; *p; p++ ) {
+				if ( *p == '/' ) *p = '\\';
+			}
+		}
+
+		Com_sprintf( srcPath, sizeof( srcPath ), "%s\\%s", pendingDir, line );
+		Com_sprintf( dstPath, sizeof( dstPath ), "%s\\%s", pwd, line );
+		Com_sprintf( bakPath, sizeof( bakPath ), "%s\\%s", previousDir, line );
+
+		// ensure destination directory exists
+		sep = strrchr( dstPath, '\\' );
+		if ( sep ) {
+			char dir[MAX_OSPATH];
+			int dirLen = (int)( sep - dstPath );
+			Q_strncpyz( dir, dstPath, dirLen + 1 );
+			CreateDirectory( dir, NULL );
+		}
+
+		// ensure backup directory exists
+		sep = strrchr( bakPath, '\\' );
+		if ( sep ) {
+			char dir[MAX_OSPATH];
+			int dirLen = (int)( sep - bakPath );
+			Q_strncpyz( dir, bakPath, dirLen + 1 );
+			CreateDirectory( dir, NULL );
+		}
+
+		// backup current file to .updates/previous/
+		MoveFile( dstPath, bakPath );
+
+		// move staged file into place
+		if ( !MoveFile( srcPath, dstPath ) ) {
+			int i;
+			fprintf( stderr, "Update: failed to move %s -> %s (error %lu)\n",
+				srcPath, dstPath, GetLastError() );
+			MoveFile( bakPath, dstPath );
+			for ( i = 0; i < movedCount; i++ ) {
+				DeleteFile( movedDst[i] );
+				MoveFile( movedBak[i], movedDst[i] );
+			}
+			fclose( f );
+			DeleteFile( manifestPath );
+			return;
+		}
+
+		if ( movedCount < MAX_UPDATE_FILES ) {
+			Q_strncpyz( movedDst[movedCount], dstPath, MAX_OSPATH );
+			Q_strncpyz( movedBak[movedCount], bakPath, MAX_OSPATH );
+			movedCount++;
+		}
+
+		// check if we just replaced the running executable
+		{
+			char exePath[MAX_OSPATH];
+			GetModuleFileName( NULL, exePath, MAX_OSPATH );
+			if ( Q_stricmp( dstPath, exePath ) == 0 )
+				exeSwapped = qtrue;
+		}
+
+		applied++;
+	}
+
+	fclose( f );
+
+	// delete the manifest so next launch triggers cleanup
+	DeleteFile( manifestPath );
+
+	if ( applied > 0 ) {
+		fprintf( stderr, "Update: applied %d files (version %s)\n", applied, version );
+	}
+
+	if ( exeSwapped ) {
+		Sys_RestartProcess();
+	}
+}
+
+
+/*
+==================
 WinMain
 ==================
 */
@@ -813,6 +1049,8 @@ int WINAPI WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	SetErrorMode( SEM_FAILCRITICALERRORS );
 
 	SetUnhandledExceptionFilter( ExceptionFilter );
+
+	Sys_ApplyPendingUpdate();
 
 	Com_Init( sys_cmdline );
 

@@ -435,6 +435,8 @@ extern	qboolean	cl_oldGameSet;
 
 extern		download_t	download;
 extern		download_t	tvDownload;
+qboolean	Com_DL_Init( download_t *dl );
+void		Com_DL_Done( download_t *dl );
 qboolean	Com_DL_Perform( download_t *dl );
 void		Com_DL_Cleanup( download_t *dl );
 qboolean	Com_DL_Begin( download_t *dl, const char *localName, const char *remoteURL, qboolean autoDownload );
