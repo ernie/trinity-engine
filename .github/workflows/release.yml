@@ -42,6 +42,7 @@ jobs:
       with:
         submodules: recursive
 
+
     - name: Build
       run: |
         make install -j$(nproc) ARCH=${{ matrix.arch }} COMPILE_ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin
@@ -105,9 +106,13 @@ jobs:
       with:
         submodules: recursive
 
+
     - name: Build
       run: |
         mkdir bin
+
+        $version = git describe --tags --always --dirty
+        $env:CL = "/DTRINITY_ENGINE_VERSION=\`"$version\`""
 
         msbuild code\win32\msvc2017\trinity-ded.vcxproj -p:TargetName=trinity.ded,Configuration=Release,Platform=ARM64 /p:PlatformToolset=v143
         copy code\win32\msvc2017\output\trinity.ded.exe bin\trinity.ded.arm64.exe
@@ -160,6 +165,7 @@ jobs:
       with:
         submodules: recursive
 
+
     - name: Build
       run: |
         make install -j$(nproc) ARCH=${{ matrix.arch }} COMPILE_ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin ${{ matrix.use_sdl }}
@@ -192,6 +198,7 @@ jobs:
       with:
         submodules: recursive
 
+
     - name: Build
       run: |
           make install -j$(nproc) ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin
@@ -210,6 +217,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+  
 
       - name: Install cross-compiler
         run: |
@@ -251,6 +259,7 @@ jobs:
       with:
         submodules: recursive
 
+
     - name: Build
       run: |
         make install -j$(sysctl -n hw.logicalcpu) ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin INSTALL=ginstall USE_RENDERER_DLOPEN=1 STRIP=echo
@@ -271,6 +280,7 @@ jobs:
     - uses: actions/checkout@v6
       with:
         submodules: recursive
+
 
     - name: Setup Emscripten
       uses: mymindstorm/setup-emsdk@v14

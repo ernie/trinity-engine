@@ -311,7 +311,7 @@ ifeq ($(ARCH),ppc64)
   HAVE_VM_COMPILED = true
 endif
 
-TRINITY_ENGINE_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "unknown")
+TRINITY_ENGINE_VERSION ?= $(or $(GITHUB_REF_NAME),$(shell git describe --tags --always --dirty 2>/dev/null || echo "unknown"))
 
 UPDATE_GITHUB_OWNER ?= ernie
 UPDATE_GITHUB_REPO ?= trinity-engine

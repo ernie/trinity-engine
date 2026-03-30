@@ -276,6 +276,7 @@
     <ClCompile Include="..\..\client\cl_jpeg.c" />
     <ClCompile Include="..\..\client\cl_keys.c" />
     <ClCompile Include="..\..\client\cl_main.c" />
+    <ClCompile Include="..\..\client\cl_trinity.c" />
     <ClCompile Include="..\..\client\cl_tv.c" />
     <ClCompile Include="..\..\client\cl_net_chan.c" />
     <ClCompile Include="..\..\client\cl_parse.c" />
