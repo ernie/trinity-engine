@@ -803,6 +803,10 @@ void CL_WritePacket( int repeat ) {
 		count = MAX_PACKET_USERCMDS;
 		Com_Printf("MAX_PACKET_USERCMDS\n");
 	}
+#ifdef USE_VOIP
+	CL_WriteVoip( &buf );
+#endif
+
 	if ( count >= 1 ) {
 		if ( cl_showSend->integer ) {
 			Com_Printf( "(%i)", count );
@@ -846,10 +850,6 @@ void CL_WritePacket( int repeat ) {
 	if ( cl_showSend->integer ) {
 		Com_Printf( "%i ", buf.cursize );
 	}
-
-#ifdef USE_VOIP
-	CL_WriteVoip( &buf );
-#endif
 
 	MSG_WriteByte( &buf, clc_EOF );
 

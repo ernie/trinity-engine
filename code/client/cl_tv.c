@@ -518,6 +518,11 @@ qboolean CL_TV_Open( const char *filename ) {
 
 	tvPlay.active = qtrue;
 
+#if defined(USE_VOIP) && !defined(DEDICATED)
+	// Initialize VOIP codecs for TVD playback
+	CL_InitVoip();
+#endif
+
 	// Set up command sequence for cgame init
 	clc.lastExecutedServerCommand = clc.serverCommandSequence;
 
@@ -550,6 +555,10 @@ void CL_TV_Close( void ) {
 	if ( tvPlay.file ) {
 		FS_FCloseFile( tvPlay.file );
 	}
+
+#if defined(USE_VOIP) && !defined(DEDICATED)
+	CL_ShutdownVoip();
+#endif
 
 	Cmd_RemoveCommand( "tv_view" );
 	Cmd_RemoveCommand( "tv_view_next" );
@@ -746,6 +755,68 @@ void CL_TV_ReadFrame( void ) {
 			CL_TV_WriteCommand( csData );
 		}
 	}
+
+#if defined(USE_VOIP) && !defined(DEDICATED)
+	// --- VOIP packets (optional section, absent in older TVD files) ---
+	if ( msg.readcount < msg.cursize ) {
+		int voipCount = MSG_ReadShort( &msg );
+		for ( i = 0; i < voipCount; i++ ) {
+			int sender = MSG_ReadByte( &msg );
+			int generation = MSG_ReadByte( &msg );
+			int sequence = MSG_ReadLong( &msg );
+			int frames = MSG_ReadByte( &msg );
+			int flags = MSG_ReadByte( &msg );
+			uint8_t recips[(MAX_CLIENTS + 7) / 8];
+			int voipLen;
+			byte voipData[4000];
+
+			MSG_ReadData( &msg, recips, sizeof( recips ) );
+			voipLen = MSG_ReadShort( &msg );
+
+			if ( voipLen > 0 && voipLen <= (int)sizeof( voipData ) ) {
+				MSG_ReadData( &msg, voipData, voipLen );
+			} else {
+				// skip invalid packet
+				if ( voipLen > 0 ) {
+					msg.readcount += voipLen;
+				}
+				continue;
+			}
+
+			// Skip during seek to avoid audio artifacts
+			if ( tvPlay.seeking )
+				continue;
+
+			// Viewpoint-aware filtering:
+			// - Always play sender's own voice when spectating them
+			// - Play spatial audio (proximity-based, handled by audio system)
+			// - Play direct/targeted audio only if viewpoint is a recipient
+			if ( sender != tvPlay.viewpoint
+				&& !( flags & VOIP_SPATIAL )
+				&& !Com_IsVoipTarget( recips, sizeof( recips ), tvPlay.viewpoint ) ) {
+				continue;
+			}
+
+			// Build a synthetic svc_voipOpus message and parse it
+			{
+				msg_t voipMsg;
+				byte voipMsgData[4096];
+
+				MSG_Init( &voipMsg, voipMsgData, sizeof( voipMsgData ) );
+				MSG_WriteShort( &voipMsg, sender );
+				MSG_WriteByte( &voipMsg, generation );
+				MSG_WriteLong( &voipMsg, sequence );
+				MSG_WriteByte( &voipMsg, frames );
+				MSG_WriteShort( &voipMsg, voipLen );
+				MSG_WriteBits( &voipMsg, flags, VOIP_FLAGCNT );
+				MSG_WriteData( &voipMsg, voipData, voipLen );
+
+				MSG_BeginReading( &voipMsg );
+				CL_ParseVoip( &voipMsg, qfalse );
+			}
+		}
+	}
+#endif
 
 	tvPlay.serverTime = serverTime;
 

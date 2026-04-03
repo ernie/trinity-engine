@@ -357,12 +357,27 @@ extern	int serverBansCount;
 #define MAX_TV_CMDS        256
 #define MAX_TV_CMDBUF      (64*1024)
 #define ZSTD_OUT_BUF_SIZE  (128*1024)
+#define MAX_TV_VOIP_PACKETS 128
+#define MAX_TV_VOIP_BUF    (64*1024)
 
 typedef struct {
     int         target;     // client index or -1 for broadcast
     int         offset;     // offset into cmdBuf
     int         len;
 } tvCmd_t;
+
+#ifdef USE_VOIP
+typedef struct {
+    int         sender;
+    int         generation;
+    int         sequence;
+    int         frames;
+    int         flags;
+    uint8_t     recips[(MAX_CLIENTS + 7) / 8];
+    int         offset;     // offset into voipBuf
+    int         len;        // encoded data length
+} tvVoipPacket_t;
+#endif
 
 typedef struct {
     qboolean    recording;
@@ -389,6 +404,14 @@ typedef struct {
 
     // Per-frame configstring change tracking
     qboolean    csChanged[MAX_CONFIGSTRINGS];
+
+#ifdef USE_VOIP
+    // Per-frame VOIP capture
+    tvVoipPacket_t voipPackets[MAX_TV_VOIP_PACKETS];
+    int         voipCount;
+    byte        voipBuf[MAX_TV_VOIP_BUF];
+    int         voipBufUsed;
+#endif
 
     // Write buffer
     byte        msgBuf[MAX_TV_MSGLEN];

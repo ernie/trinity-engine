@@ -419,6 +419,26 @@ void SV_TV_WriteFrame( void ) {
 	tv.cmdCount = 0;
 	tv.cmdBufUsed = 0;
 
+#ifdef USE_VOIP
+	// --- VOIP packets ---
+	MSG_WriteShort( &msg, tv.voipCount );
+
+	for ( i = 0; i < tv.voipCount; i++ ) {
+		tvVoipPacket_t *tvp = &tv.voipPackets[i];
+		MSG_WriteByte( &msg, tvp->sender );
+		MSG_WriteByte( &msg, tvp->generation );
+		MSG_WriteLong( &msg, tvp->sequence );
+		MSG_WriteByte( &msg, tvp->frames );
+		MSG_WriteByte( &msg, tvp->flags );
+		MSG_WriteData( &msg, tvp->recips, sizeof( tvp->recips ) );
+		MSG_WriteShort( &msg, tvp->len );
+		MSG_WriteData( &msg, tv.voipBuf + tvp->offset, tvp->len );
+	}
+
+	tv.voipCount = 0;
+	tv.voipBufUsed = 0;
+#endif
+
 	// --- Flush to file ---
 	if ( msg.overflowed ) {
 		Com_Printf( "TV: Frame %i overflowed message buffer, stopping recording.\n", tv.frameCount );

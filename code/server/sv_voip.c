@@ -71,6 +71,23 @@ void SV_UserVoip( client_t *cl, msg_t *msg, qboolean ignoreData )
 	if ( ignoreData || SV_ShouldIgnoreVoipSender( cl ) )
 		return;   // Blacklisted, disabled, etc.
 
+	// Capture for TVD recording (before per-client routing)
+	if ( tv.recording && tv.voipCount < MAX_TV_VOIP_PACKETS
+		&& tv.voipBufUsed + packetsize <= (int)sizeof( tv.voipBuf ) ) {
+		tvVoipPacket_t *tvp = &tv.voipPackets[tv.voipCount];
+		tvp->sender = sender;
+		tvp->generation = generation;
+		tvp->sequence = sequence;
+		tvp->frames = frames;
+		tvp->flags = flags;
+		Com_Memcpy( tvp->recips, recips, sizeof( tvp->recips ) );
+		tvp->offset = tv.voipBufUsed;
+		tvp->len = packetsize;
+		Com_Memcpy( tv.voipBuf + tv.voipBufUsed, encoded, packetsize );
+		tv.voipBufUsed += packetsize;
+		tv.voipCount++;
+	}
+
 	// decide who needs this VoIP packet sent to them...
 	for ( i = 0, client = svs.clients; i < sv_maxclients->integer; i++, client++ ) {
 		if ( client->state != CS_ACTIVE )
