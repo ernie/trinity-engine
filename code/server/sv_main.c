@@ -57,6 +57,11 @@ cvar_t	*sv_lanForceRate; // dedicated 1 (LAN) server forces local client rates t
 cvar_t *sv_levelTimeReset;
 cvar_t *sv_filter;
 
+#ifdef USE_VOIP
+cvar_t *sv_voip;
+cvar_t *sv_voipProtocol;
+#endif
+
 #ifdef USE_BANS
 cvar_t	*sv_banFile;
 serverBan_t serverBans[SERVER_MAXBANS];
@@ -792,6 +797,13 @@ static void SVC_Info( const netadr_t *from ) {
 	Info_SetValueForKey( infostring, "gametype", va( "%i", sv_gametype->integer ) );
 	Info_SetValueForKey( infostring, "pure", va( "%i", sv.pure ) );
 	Info_SetValueForKey( infostring, "g_needpass", va( "%d", Cvar_VariableIntegerValue( "g_needpass" ) ) );
+
+#ifdef USE_VOIP
+	if ( sv_voipProtocol->string && *sv_voipProtocol->string ) {
+		Info_SetValueForKey( infostring, "voip", sv_voipProtocol->string );
+	}
+#endif
+
 	gamedir = Cvar_VariableString( "fs_game" );
 	if ( *gamedir != '\0' ) {
 		Info_SetValueForKey( infostring, "game", gamedir );

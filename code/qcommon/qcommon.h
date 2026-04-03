@@ -87,6 +87,7 @@ struct entityState_s;
 struct playerState_s;
 
 void MSG_WriteBits( msg_t *msg, int value, int bits );
+int  MSG_ReadBits( msg_t *msg, int bits );
 
 void MSG_WriteChar (msg_t *sb, int c);
 void MSG_WriteByte (msg_t *sb, int c);
@@ -983,6 +984,8 @@ int			Com_Filter( const char *filter, const char *name );
 qboolean	Com_FilterExt( const char *filter, const char *name );
 qboolean	Com_HasPatterns( const char *str );
 int			Com_FilterPath( const char *filter, const char *name );
+
+qboolean	Com_IsVoipTarget(uint8_t *voipTargets, int voipTargetsSize, int clientNum);
 int			Com_RealTime(qtime_t *qtime);
 qboolean	Com_SafeMode( void );
 void		Com_RunAndTimeServerPacket( const netadr_t *evFrom, msg_t *buf );

@@ -1466,4 +1466,9 @@ typedef enum _flag_status {
 #define LERP( a, b, w ) ( ( a ) * ( 1.0f - ( w ) ) + ( b ) * ( w ) )
 #define LUMA( red, green, blue ) ( 0.2126f * ( red ) + 0.7152f * ( green ) + 0.0722f * ( blue ) )
 
+// VoIP flags
+#define VOIP_SPATIAL  0x01
+#define VOIP_DIRECT   0x02
+#define VOIP_FLAGCNT  2
+
 #endif	// __Q_SHARED_H

@@ -35,7 +35,17 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cl_curl.h"
 #endif
 
+#if defined(USE_VOIP) && !defined(DEDICATED)
+#include <opus.h>
+#endif
+
 #include "cl_trinity.h"
+
+#ifdef USE_VOIP
+#define VOIP_MAX_FRAME_SAMPLES  (20 * 48)   // 20ms at 48kHz
+#define VOIP_MAX_PACKET_FRAMES  3
+#define VOIP_MAX_PACKET_SAMPLES (VOIP_MAX_FRAME_SAMPLES * VOIP_MAX_PACKET_FRAMES)
+#endif
 
 // file full of random crap that gets used to create cl_guid
 #define QKEY_FILE "qkey"
@@ -319,6 +329,30 @@ typedef struct {
 	int		demoDeltaNum;
 	int		demoMessageSequence;
 
+#if defined(USE_VOIP) && !defined(DEDICATED)
+	qboolean voipEnabled;
+	qboolean voipCodecInitialized;
+
+	// incoming
+	OpusDecoder *opusDecoder[MAX_CLIENTS];
+	byte voipIncomingGeneration[MAX_CLIENTS];
+	int voipIncomingSequence[MAX_CLIENTS];
+	float voipGain[MAX_CLIENTS];
+	qboolean voipIgnore[MAX_CLIENTS];
+	qboolean voipMuteAll;
+
+	// outgoing
+	uint8_t voipTargets[(MAX_CLIENTS + 7) / 8];
+	uint8_t voipFlags;
+	OpusEncoder *opusEncoder;
+	int voipOutgoingDataSize;
+	int voipOutgoingDataFrames;
+	int voipOutgoingSequence;
+	byte voipOutgoingGeneration;
+	byte voipOutgoingData[1024];
+	float voipPower;
+#endif
+
 } clientConnection_t;
 
 extern	clientConnection_t clc;
@@ -487,6 +521,26 @@ extern	cvar_t	*cl_voteNoKey;
 #ifdef __EMSCRIPTEN__
 extern	cvar_t	*cl_demoPlayer;
 #endif
+
+#if defined(USE_VOIP) && !defined(DEDICATED)
+extern cvar_t *cl_voipUseVAD;
+extern cvar_t *cl_voipVADThreshold;
+extern cvar_t *cl_voipSend;
+extern cvar_t *cl_voipSendTarget;
+extern cvar_t *cl_voipGainDuringCapture;
+extern cvar_t *cl_voipCaptureMult;
+extern cvar_t *cl_voipShowMeter;
+extern cvar_t *cl_voip;
+
+void CL_CaptureVoip( void );
+void CL_ParseVoip( msg_t *msg, qboolean ignoreData );
+void CL_WriteVoip( msg_t *msg );
+void CL_InitVoip( void );
+void CL_ShutdownVoip( void );
+void CL_Voip_f( void );
+void CL_VoipCvarInit( void );
+#endif
+
 extern	cvar_t	*cl_conXOffset;
 extern	cvar_t	*cl_conColor;
 extern	cvar_t	*cl_inGameVideo;
@@ -528,6 +582,7 @@ void CL_StartHunkUsers( void );
 
 void CL_Disconnect_f( void );
 void CL_ReadDemoMessage( void );
+void CL_WriteDemoMessage( msg_t *msg, int headerBytes );
 void CL_StopRecord_f( void );
 
 void CL_InitDownloads( void );

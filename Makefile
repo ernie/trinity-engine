@@ -42,6 +42,10 @@ USE_OGG_VORBIS    = 1
 USE_SYSTEM_OGG    = 0
 USE_SYSTEM_VORBIS = 0
 
+USE_VOIP          = 1
+USE_OPENAL        = 1
+USE_OPENAL_DLOPEN = 1
+
 USE_VULKAN       = 1
 USE_OPENGL       = 1
 USE_OPENGL2      = 0
@@ -166,6 +170,22 @@ ifndef USE_OGG_VORBIS
   USE_OGG_VORBIS=1
 endif
 
+ifndef USE_VOIP
+  USE_VOIP=1
+endif
+
+ifndef USE_OPENAL
+  USE_OPENAL=1
+endif
+
+ifndef USE_OPENAL_DLOPEN
+  ifdef MINGW
+    USE_OPENAL_DLOPEN=0
+  else
+    USE_OPENAL_DLOPEN=1
+  endif
+endif
+
 ifndef USE_SYSTEM_OGG
   USE_SYSTEM_OGG=1
 endif
@@ -215,6 +235,7 @@ R2DIR=$(MOUNT_DIR)/renderer2
 RVDIR=$(MOUNT_DIR)/renderervk
 SDLDIR=$(MOUNT_DIR)/sdl
 SDLHDIR=$(MOUNT_DIR)/libsdl/include/SDL2
+OPENALDIR=$(MOUNT_DIR)/libopenal
 
 CMDIR=$(MOUNT_DIR)/qcommon
 UDIR=$(MOUNT_DIR)/unix
@@ -224,6 +245,7 @@ JPDIR=$(MOUNT_DIR)/libjpeg
 OGGDIR=$(MOUNT_DIR)/libogg
 VORBISDIR=$(MOUNT_DIR)/libvorbis
 ZSTDDIR=$(MOUNT_DIR)/libzstd
+OPUSDIR=$(MOUNT_DIR)/thirdparty/opus-1.5.2
 
 bin_path=$(shell which $(1) 2> /dev/null)
 
@@ -278,6 +300,10 @@ ifeq ($(USE_SYSTEM_VORBIS),1)
     VORBIS_LIBS = -lvorbisfile
   endif
 endif
+
+# opus flags for VOIP
+OPUS_FLAGS = -I$(OPUSDIR)/include -I$(OPUSDIR)/celt -I$(OPUSDIR)/silk -I$(OPUSDIR)/silk/float -I$(OPUSDIR)/src
+OPUS_CFLAGS = -DOPUS_BUILD -DHAVE_LRINTF -DFLOATING_POINT -DFLOAT_APPROX -DUSE_ALLOCA
 
 # extract version info
 ifneq ($(COMPILE_PLATFORM),darwin)
@@ -488,6 +514,24 @@ ifdef MINGW
     CLIENT_LDFLAGS += $(OGG_LIBS) $(VORBIS_LIBS)
   endif
 
+  ifeq ($(USE_VOIP),1)
+    BASE_CFLAGS += -DUSE_VOIP -I$(OPUSDIR)/include
+  endif
+
+  ifeq ($(USE_OPENAL),1)
+    BASE_CFLAGS += -DUSE_OPENAL -DUSE_INTERNAL_OPENAL_HEADERS -I$(OPENALDIR)/include
+    ifeq ($(USE_OPENAL_DLOPEN),1)
+      BASE_CFLAGS += -DUSE_OPENAL_DLOPEN
+      ifeq ($(ARCH),x86)
+        CLIENT_EXTRA_FILES += $(OPENALDIR)/windows/mingw/lib32/OpenAL32.dll
+      else
+        CLIENT_EXTRA_FILES += $(OPENALDIR)/windows/mingw/lib64/OpenAL64.dll
+      endif
+    else
+      CLIENT_LDFLAGS += -lOpenAL32
+    endif
+  endif
+
   DEBUG_CFLAGS = $(BASE_CFLAGS) -DDEBUG -D_DEBUG -g -O0
   RELEASE_CFLAGS = $(BASE_CFLAGS) -DNDEBUG $(OPTIMIZE)
 
@@ -547,6 +591,19 @@ ifeq ($(COMPILE_PLATFORM),darwin)
   ifeq ($(USE_OGG_VORBIS),1)
     BASE_CFLAGS += -DUSE_OGG_VORBIS $(OGG_FLAGS) $(VORBIS_FLAGS)
     CLIENT_LDFLAGS += $(OGG_LIBS) $(VORBIS_LIBS)
+  endif
+
+  ifeq ($(USE_VOIP),1)
+    BASE_CFLAGS += -DUSE_VOIP -I$(OPUSDIR)/include
+  endif
+
+  ifeq ($(USE_OPENAL),1)
+    BASE_CFLAGS += -DUSE_OPENAL
+    ifeq ($(USE_OPENAL_DLOPEN),1)
+      BASE_CFLAGS += -DUSE_OPENAL_DLOPEN
+    else
+      CLIENT_LDFLAGS += -framework OpenAL
+    endif
   endif
 
   DEBUG_CFLAGS = $(BASE_CFLAGS) -DDEBUG -D_DEBUG -g -O0
@@ -622,6 +679,19 @@ else
   ifeq ($(USE_OGG_VORBIS),1)
     BASE_CFLAGS += -DUSE_OGG_VORBIS $(OGG_FLAGS) $(VORBIS_FLAGS)
     CLIENT_LDFLAGS += $(OGG_LIBS) $(VORBIS_LIBS)
+  endif
+
+  ifeq ($(USE_VOIP),1)
+    BASE_CFLAGS += -DUSE_VOIP -I$(OPUSDIR)/include
+  endif
+
+  ifeq ($(USE_OPENAL),1)
+    BASE_CFLAGS += -DUSE_OPENAL
+    ifeq ($(USE_OPENAL_DLOPEN),1)
+      BASE_CFLAGS += -DUSE_OPENAL_DLOPEN
+    else
+      CLIENT_LDFLAGS += -lopenal
+    endif
   endif
 
   ifeq ($(PLATFORM),linux)
@@ -813,6 +883,9 @@ ifeq ($(USE_SYSTEM_VORBIS),0)
 	@if [ ! -d $(B)/client/vorbis ];then $(MKDIR) $(B)/client/vorbis;fi
 endif
 	@if [ ! -d $(B)/client/zstd ];then $(MKDIR) $(B)/client/zstd;fi
+ifeq ($(USE_VOIP),1)
+	@$(MKDIR) -p $(sort $(dir $(OPUSOBJ)))
+endif
 	@if [ ! -d $(B)/rend1 ];then $(MKDIR) $(B)/rend1;fi
 	@if [ ! -d $(B)/rend2 ];then $(MKDIR) $(B)/rend2;fi
 	@if [ ! -d $(B)/rend2/glsl ];then $(MKDIR) $(B)/rend2/glsl;fi
@@ -1063,6 +1136,10 @@ VORBISOBJ = \
 endif
 endif
 
+ifeq ($(USE_VOIP),1)
+OPUSOBJ = $(patsubst $(OPUSDIR)/%.c,$(B)/client/opus/%.o,$(shell find $(OPUSDIR) -name '*.c'))
+endif
+
 Q3OBJ = \
   $(B)/client/cl_cgame.o \
   $(B)/client/cl_cin.o \
@@ -1163,6 +1240,18 @@ endif
 ifeq ($(USE_OGG_VORBIS),1)
   Q3OBJ += $(OGGOBJ) $(VORBISOBJ) \
     $(B)/client/snd_codec_ogg.o
+endif
+
+ifeq ($(USE_VOIP),1)
+  Q3OBJ += $(OPUSOBJ) \
+    $(B)/client/cl_voip.o \
+    $(B)/client/sv_voip.o
+endif
+
+ifeq ($(USE_OPENAL),1)
+  Q3OBJ += \
+    $(B)/client/qal.o \
+    $(B)/client/snd_openal.o
 endif
 
 ZSTDOBJ = $(B)/client/zstd/zstd.o
@@ -1387,6 +1476,10 @@ Q3DOBJ = \
 ZSTDDEDOBJ = $(B)/ded/zstd/zstd.o
 Q3DOBJ += $(ZSTDDEDOBJ)
 
+ifeq ($(USE_VOIP),1)
+  Q3DOBJ += $(B)/ded/sv_voip.o
+endif
+
 ifdef MINGW
   Q3DOBJ += \
   $(B)/ded/win_main.o \
@@ -1460,6 +1553,10 @@ $(B)/client/ogg/%.o: $(OGGDIR)/src/%.c
 
 $(B)/client/vorbis/%.o: $(VORBISDIR)/lib/%.c
 	$(DO_CC)
+
+$(B)/client/opus/%.o: $(OPUSDIR)/%.c
+	$(echo_cmd) "OPUS_CC $<"
+	$(Q)$(CC) -O2 $(OPUS_FLAGS) $(OPUS_CFLAGS) -w -o $@ -c $<
 
 $(B)/client/zstd/%.o: $(ZSTDDIR)/%.c
 	$(DO_CC)

@@ -846,6 +846,9 @@ void SV_FreeClient(client_t *client)
 {
 	SV_Netchan_FreeQueue(client);
 	SV_CloseDownload(client);
+#ifdef USE_VOIP
+	SV_FreeVoipPackets(client);
+#endif
 }
 
 
@@ -1854,6 +1857,11 @@ void SV_UserinfoChanged( client_t *cl, qboolean updateUserinfo, qboolean runFilt
 	val = Info_ValueForKey( cl->userinfo, "vr" );
 	cl->isVR = ( atoi( val ) == 1 );
 
+#ifdef USE_VOIP
+	val = Info_ValueForKey( cl->userinfo, "cl_voipProtocol" );
+	cl->hasVoip = *val ? qtrue : qfalse;
+#endif
+
 	if ( runFilter )
 	{
 		val = SV_RunFilters( cl->userinfo, &cl->netchan.remoteAddress );
@@ -1981,6 +1989,10 @@ static const ucmd_t ucmds[] = {
 	{"stopdl", SV_StopDownload_f},
 	{"donedl", SV_DoneDownload_f},
 	{"locations", SV_PrintLocations_f},
+
+#ifdef USE_VOIP
+	{"voip", SV_Voip_f},
+#endif
 
 	{NULL, NULL}
 };
@@ -2375,6 +2387,22 @@ void SV_ExecuteClientMessage( client_t *cl, msg_t *msg ) {
 		} else {
 			return; // cl->state <= CS_CONNECTED
 		}
+	}
+
+	// skip legacy speex voip data
+	if ( c == clc_voipSpeex ) {
+#ifdef USE_VOIP
+		SV_UserVoip( cl, msg, qtrue );
+		c = MSG_ReadByte( msg );
+#endif
+	}
+
+	// read optional voip data
+	if ( c == clc_voipOpus ) {
+#ifdef USE_VOIP
+		SV_UserVoip( cl, msg, qfalse );
+		c = MSG_ReadByte( msg );
+#endif
 	}
 
 	// read the usercmd_t

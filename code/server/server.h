@@ -27,6 +27,20 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../game/g_public.h"
 #include "../game/bg_public.h"
 
+#ifdef USE_VOIP
+#define VOIP_QUEUE_LENGTH 64
+
+typedef struct voipServerPacket_s {
+	int generation;
+	int sequence;
+	int frames;
+	int len;
+	int sender;
+	int flags;
+	byte data[4000];
+} voipServerPacket_t;
+#endif
+
 //=============================================================================
 
 #define	PERS_SCORE				0		// !!! MUST NOT CHANGE, SERVER AND
@@ -235,6 +249,15 @@ typedef struct client_s {
 	// TV demo download notification pending for this client
 	qboolean		tvDemoPending;
 
+#ifdef USE_VOIP
+	qboolean hasVoip;
+	qboolean muteAllVoip;
+	qboolean ignoreVoipFromClient[MAX_CLIENTS];
+	voipServerPacket_t *voipPacket[VOIP_QUEUE_LENGTH];
+	int queuedVoipPackets;
+	int queuedVoipIndex;
+#endif
+
 } client_t;
 
 //=============================================================================
@@ -388,6 +411,15 @@ extern cvar_t *sv_tvAutoMinPlayers;
 extern cvar_t *sv_tvAutoMinPlayersSecs;
 extern cvar_t *sv_tvpath;
 extern cvar_t *sv_tvDownload;
+
+#ifdef USE_VOIP
+extern cvar_t *sv_voip;
+extern cvar_t *sv_voipProtocol;
+void SV_UserVoip( client_t *cl, msg_t *msg, qboolean ignoreData );
+void SV_WriteVoipToClient( client_t *cl, msg_t *msg );
+void SV_Voip_f( client_t *cl );
+void SV_FreeVoipPackets( client_t *cl );
+#endif
 
 //===========================================================
 

@@ -226,7 +226,7 @@ CL_WriteDemoMessage
 Dumps the current net message, prefixed by the length
 ====================
 */
-static void CL_WriteDemoMessage( msg_t *msg, int headerBytes ) {
+void CL_WriteDemoMessage( msg_t *msg, int headerBytes ) {
 	int		len, swlen;
 
 	// write the packet sequence
@@ -1259,6 +1259,10 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 		CL_StopRecord_f();
 	}
 
+#ifdef USE_VOIP
+	CL_ShutdownVoip();
+#endif
+
 	// Stop TV playback
 	if ( tvPlay.active ) {
 		CL_TV_Close();
@@ -1341,6 +1345,11 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 
 	// not connected to a pure server anymore
 	cl_connectedToPureServer = 0;
+
+#ifdef USE_VOIP
+	// not connected to voip server anymore.
+	clc.voipEnabled = qfalse;
+#endif
 
 	CL_UpdateGUID( NULL, 0 );
 
@@ -3297,6 +3306,10 @@ void CL_Frame( int msec, int realMsec ) {
 	// update audio
 	S_Update( realMsec );
 
+#ifdef USE_VOIP
+	CL_CaptureVoip();
+#endif
+
 	// advance local effects for next frame
 	SCR_RunCinematic();
 
@@ -4187,6 +4200,9 @@ void CL_Init( void ) {
 	Cvar_Get ("cg_predictItems", "1", CVAR_USERINFO | CVAR_ARCHIVE );
 	Cvar_Get ("vr", "0", CVAR_USERINFO | CVAR_ROM );
 
+#ifdef USE_VOIP
+	CL_VoipCvarInit();
+#endif
 
 	// cgame might not be initialized before menu is used
 	Cvar_Get ("cg_viewsize", "100", CVAR_ARCHIVE_ND );

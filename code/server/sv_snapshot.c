@@ -733,6 +733,10 @@ void SV_SendClientSnapshot( client_t *client ) {
 	// and the playerState_t
 	SV_WriteSnapshotToClient( client, &msg );
 
+#ifdef USE_VOIP
+	SV_WriteVoipToClient( client, &msg );
+#endif
+
 	// check for overflow
 	if ( msg.overflowed ) {
 		Com_Printf( "WARNING: msg overflowed for %s\n", client->name );

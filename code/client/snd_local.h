@@ -80,6 +80,8 @@ extern byte *dma_buffer2;
 
 #define MAX_DOPPLER_SCALE 50.0f //arbitrary
 
+#define THIRD_PERSON_THRESHOLD_SQ (48.0f*48.0f)
+
 typedef struct loopSound_s {
 	vec3_t		origin;
 	vec3_t		velocity;
@@ -131,7 +133,7 @@ typedef struct
 	void (*StartLocalSound)( sfxHandle_t sfx, int channelNum );
 	void (*StartBackgroundTrack)( const char *intro, const char *loop );
 	void (*StopBackgroundTrack)( void );
-	void (*RawSamples)(int samples, int rate, int width, int channels, const byte *data, float volume);
+	void (*RawSamples)(int stream, int samples, int rate, int width, int channels, const byte *data, float volume, int entityNum);
 	void (*StopAllSounds)( void );
 	void (*ClearLoopingSounds)( qboolean killall );
 	void (*AddLoopingSound)( int entityNum, const vec3_t origin, const vec3_t velocity, sfxHandle_t sfx );
@@ -146,6 +148,13 @@ typedef struct
 	void (*ClearSoundBuffer)( void );
 	void (*SoundInfo)( void );
 	void (*SoundList)( void );
+#ifdef USE_VOIP
+	void (*StartCapture)( void );
+	int (*AvailableCaptureSamples)( void );
+	void (*Capture)( int samples, byte *data );
+	void (*StopCapture)( void );
+	void (*MasterGain)( float gain );
+#endif
 } soundInterface_t;
 
 
@@ -170,6 +179,14 @@ void	SNDDMA_BeginPainting (void);
 
 void	SNDDMA_Submit(void);
 
+#ifdef USE_VOIP
+void	SNDDMA_StartCapture(void);
+int		SNDDMA_AvailableCaptureSamples(void);
+void	SNDDMA_Capture(int samples, byte *data);
+void	SNDDMA_StopCapture(void);
+void	SNDDMA_MasterGain( float val );
+#endif
+
 //====================================================================
 
 #define	MAX_CHANNELS			96
@@ -180,18 +197,20 @@ extern	int		numLoopChannels;
 
 extern	int		s_soundtime;
 extern	int		s_paintedtime;
-extern	int		s_rawend;
 extern	vec3_t	listener_forward;
 extern	vec3_t	listener_right;
 extern	vec3_t	listener_up;
 extern	dma_t	dma;
 
 #define	MAX_RAW_SAMPLES	16384
-extern	portable_samplepair_t	s_rawsamples[MAX_RAW_SAMPLES];
+#define MAX_RAW_STREAMS (MAX_CLIENTS * 2 + 1)
+extern	portable_samplepair_t	s_rawsamples[MAX_RAW_STREAMS][MAX_RAW_SAMPLES];
+extern	int		s_rawend[MAX_RAW_STREAMS];
 
 extern cvar_t *s_volume;
 extern cvar_t *s_musicVolume;
 extern cvar_t *s_doppler;
+extern cvar_t *s_muted;
 extern cvar_t *s_muteWhenUnfocused;
 extern cvar_t *s_muteWhenMinimized;
 
@@ -234,3 +253,19 @@ extern sfx_t *sfxScratchPointer;
 extern int	   sfxScratchIndex;
 
 qboolean S_Base_Init( soundInterface_t *si );
+
+#ifdef USE_OPENAL
+// OpenAL types
+typedef enum
+{
+	SRCPRI_AMBIENT = 0,	// Ambient sound effects
+	SRCPRI_ENTITY,		// Entity sound effects
+	SRCPRI_ONESHOT,		// One-shot sounds
+	SRCPRI_LOCAL,		// Local sounds
+	SRCPRI_STREAM		// Streams (music, cutscenes)
+} alSrcPriority_t;
+
+typedef int srcHandle_t;
+
+qboolean S_AL_Init( soundInterface_t *si );
+#endif

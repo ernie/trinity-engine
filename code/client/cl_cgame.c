@@ -1091,6 +1091,12 @@ static void CL_FirstSnapshot( void ) {
 		Cvar_Set( "activeAction", "" );
 	}
 
+#ifdef USE_VOIP
+	if ( !clc.voipCodecInitialized ) {
+		CL_InitVoip();
+	}
+#endif
+
 	Sys_BeginProfiling();
 }
 

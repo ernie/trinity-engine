@@ -251,6 +251,11 @@ static void IN_SpeedUp(void) {IN_KeyUp(&in_speed);}
 static void IN_StrafeDown(void) {IN_KeyDown(&in_strafe);}
 static void IN_StrafeUp(void) {IN_KeyUp(&in_strafe);}
 
+#ifdef USE_VOIP
+static void IN_VoipRecordDown(void) { Cvar_Set( "cl_voipSend", "1" ); }
+static void IN_VoipRecordUp(void) { Cvar_Set( "cl_voipSend", "0" ); }
+#endif
+
 static void IN_Button0Down(void) {IN_KeyDown(&in_buttons[0]);}
 static void IN_Button0Up(void) {IN_KeyUp(&in_buttons[0]);}
 static void IN_Button1Down(void) {IN_KeyDown(&in_buttons[1]);}
@@ -842,6 +847,10 @@ void CL_WritePacket( int repeat ) {
 		Com_Printf( "%i ", buf.cursize );
 	}
 
+#ifdef USE_VOIP
+	CL_WriteVoip( &buf );
+#endif
+
 	MSG_WriteByte( &buf, clc_EOF );
 
 	if ( buf.overflowed ) {
@@ -961,6 +970,11 @@ void CL_InitInput( void ) {
 	Cmd_AddCommand ("-button15", IN_Button15Up);
 	Cmd_AddCommand ("+mlook", IN_MLookDown);
 	Cmd_AddCommand ("-mlook", IN_MLookUp);
+
+#ifdef USE_VOIP
+	Cmd_AddCommand ("+voiprecord", IN_VoipRecordDown);
+	Cmd_AddCommand ("-voiprecord", IN_VoipRecordUp);
+#endif
 
 	cl_nodelta = Cvar_Get( "cl_nodelta", "0", CVAR_DEVELOPER );
 	Cvar_SetDescription( cl_nodelta, "Flag server to disable delta compression on server snapshots." );

@@ -1,0 +1,222 @@
+// sv_voip.c -- server VOIP implementation
+// Ported from ioq3
+
+#include "server.h"
+
+#ifdef USE_VOIP
+
+/*
+==================
+SV_ShouldIgnoreVoipSender
+
+Blocking of voip packets based on source client
+==================
+*/
+static qboolean SV_ShouldIgnoreVoipSender( const client_t *cl )
+{
+	if ( !sv_voip->integer )
+		return qtrue;  // VoIP disabled on this server.
+	else if ( !cl->hasVoip )  // client doesn't have VoIP support?!
+		return qtrue;
+
+	return qfalse;  // don't ignore.
+}
+
+
+/*
+==================
+SV_UserVoip
+
+Parse clc_voipOpus (or legacy clc_voipSpeex) data from a client message
+and route the encoded packet to all eligible recipients.
+
+The server never decodes the audio -- it just forwards opaque Opus frames.
+==================
+*/
+void SV_UserVoip( client_t *cl, msg_t *msg, qboolean ignoreData )
+{
+	int sender, generation, sequence, frames, packetsize;
+	uint8_t recips[(MAX_CLIENTS + 7) / 8];
+	int flags;
+	byte encoded[sizeof(cl->voipPacket[0]->data)];
+	client_t *client = NULL;
+	voipServerPacket_t *packet = NULL;
+	int i;
+
+	sender = cl - svs.clients;
+	generation = MSG_ReadByte( msg );
+	sequence = MSG_ReadLong( msg );
+	frames = MSG_ReadByte( msg );
+	MSG_ReadData( msg, recips, sizeof( recips ) );
+	flags = MSG_ReadByte( msg );
+	packetsize = MSG_ReadShort( msg );
+
+	if ( msg->readcount > msg->cursize )
+		return;   // short/invalid packet, bail.
+
+	if ( packetsize > (int)sizeof( encoded ) ) {  // overlarge packet?
+		int bytesleft = packetsize;
+		while ( bytesleft ) {
+			int br = bytesleft;
+			if ( br > (int)sizeof( encoded ) )
+				br = sizeof( encoded );
+			MSG_ReadData( msg, encoded, br );
+			bytesleft -= br;
+		}
+		return;   // overlarge packet, bail.
+	}
+
+	MSG_ReadData( msg, encoded, packetsize );
+
+	if ( ignoreData || SV_ShouldIgnoreVoipSender( cl ) )
+		return;   // Blacklisted, disabled, etc.
+
+	// decide who needs this VoIP packet sent to them...
+	for ( i = 0, client = svs.clients; i < sv_maxclients->integer; i++, client++ ) {
+		if ( client->state != CS_ACTIVE )
+			continue;  // not in the game yet, don't send to this guy.
+		else if ( i == sender )
+			continue;  // don't send voice packet back to original author.
+		else if ( !client->hasVoip )
+			continue;  // no VoIP support, or unsupported protocol
+		else if ( client->muteAllVoip )
+			continue;  // client is ignoring everyone.
+		else if ( client->ignoreVoipFromClient[sender] )
+			continue;  // client is ignoring this talker.
+		else if ( *cl->downloadName )
+			continue;  // no VoIP allowed if downloading, to save bandwidth.
+
+		if ( Com_IsVoipTarget( recips, sizeof( recips ), i ) )
+			flags |= VOIP_DIRECT;
+		else
+			flags &= ~VOIP_DIRECT;
+
+		if ( !( flags & ( VOIP_SPATIAL | VOIP_DIRECT ) ) )
+			continue;  // not addressed to this player.
+
+		// Transmit this packet to the client.
+		if ( client->queuedVoipPackets >= ARRAY_LEN( client->voipPacket ) ) {
+			Com_Printf( "Too many VoIP packets queued for client #%d\n", i );
+			continue;  // no room for another packet right now.
+		}
+
+		packet = Z_Malloc( sizeof( *packet ) );
+		packet->sender = sender;
+		packet->frames = frames;
+		packet->len = packetsize;
+		packet->generation = generation;
+		packet->sequence = sequence;
+		packet->flags = flags;
+		memcpy( packet->data, encoded, packetsize );
+
+		client->voipPacket[( client->queuedVoipIndex + client->queuedVoipPackets ) % ARRAY_LEN( client->voipPacket )] = packet;
+		client->queuedVoipPackets++;
+	}
+}
+
+
+/*
+==================
+SV_WriteVoipToClient
+
+Check to see if there is any VoIP queued for a client, and send if there is.
+Limits output to roughly 50% of remaining message space to avoid overflow.
+==================
+*/
+void SV_WriteVoipToClient( client_t *cl, msg_t *msg )
+{
+	int totalbytes = 0;
+	int i;
+	voipServerPacket_t *packet;
+
+	if ( cl->queuedVoipPackets ) {
+		// Write as many VoIP packets as we reasonably can...
+		for ( i = 0; i < cl->queuedVoipPackets; i++ ) {
+			packet = cl->voipPacket[( i + cl->queuedVoipIndex ) % ARRAY_LEN( cl->voipPacket )];
+
+			if ( !*cl->downloadName ) {
+				totalbytes += packet->len;
+				if ( totalbytes > ( msg->maxsize - msg->cursize ) / 2 )
+					break;
+
+				MSG_WriteByte( msg, svc_voipOpus );
+				MSG_WriteShort( msg, packet->sender );
+				MSG_WriteByte( msg, (byte)packet->generation );
+				MSG_WriteLong( msg, packet->sequence );
+				MSG_WriteByte( msg, packet->frames );
+				MSG_WriteShort( msg, packet->len );
+				MSG_WriteBits( msg, packet->flags, VOIP_FLAGCNT );
+				MSG_WriteData( msg, packet->data, packet->len );
+			}
+
+			Z_Free( packet );
+		}
+
+		cl->queuedVoipPackets -= i;
+		cl->queuedVoipIndex += i;
+		cl->queuedVoipIndex %= ARRAY_LEN( cl->voipPacket );
+	}
+}
+
+
+/*
+==================
+SV_UpdateVoipIgnore
+
+Helper to set/clear per-client ignore flag.
+==================
+*/
+static void SV_UpdateVoipIgnore( client_t *cl, const char *idstr, qboolean ignore )
+{
+	if ( ( *idstr >= '0' ) && ( *idstr <= '9' ) ) {
+		const int id = atoi( idstr );
+		if ( ( id >= 0 ) && ( id < MAX_CLIENTS ) ) {
+			cl->ignoreVoipFromClient[id] = ignore;
+		}
+	}
+}
+
+
+/*
+==================
+SV_Voip_f
+
+Handle the "voip" client command.
+Subcommands: ignore <id>, unignore <id>, muteall, unmuteall
+==================
+*/
+void SV_Voip_f( client_t *cl )
+{
+	const char *cmd = Cmd_Argv( 1 );
+
+	if ( strcmp( cmd, "ignore" ) == 0 ) {
+		SV_UpdateVoipIgnore( cl, Cmd_Argv( 2 ), qtrue );
+	} else if ( strcmp( cmd, "unignore" ) == 0 ) {
+		SV_UpdateVoipIgnore( cl, Cmd_Argv( 2 ), qfalse );
+	} else if ( strcmp( cmd, "muteall" ) == 0 ) {
+		cl->muteAllVoip = qtrue;
+	} else if ( strcmp( cmd, "unmuteall" ) == 0 ) {
+		cl->muteAllVoip = qfalse;
+	}
+}
+
+
+/*
+==================
+SV_FreeVoipPackets
+
+Free all queued VoIP packets for a client (called on disconnect).
+==================
+*/
+void SV_FreeVoipPackets( client_t *cl )
+{
+	int index;
+
+	for ( index = cl->queuedVoipIndex; index < cl->queuedVoipIndex + cl->queuedVoipPackets; index++ ) {
+		Z_Free( cl->voipPacket[index % ARRAY_LEN( cl->voipPacket )] );
+	}
+
+	cl->queuedVoipPackets = 0;
+}
+
+#endif // USE_VOIP

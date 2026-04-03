@@ -29,10 +29,15 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 cvar_t *s_volume;
 cvar_t *s_musicVolume;
 cvar_t *s_doppler;
+cvar_t *s_muted;
 cvar_t *s_muteWhenMinimized;
 cvar_t *s_muteWhenUnfocused;
 
 static soundInterface_t si;
+
+#ifdef USE_OPENAL
+extern qboolean S_AL_Init( soundInterface_t *si );
+#endif
 
 /*
 =================
@@ -123,11 +128,11 @@ void S_StopBackgroundTrack( void )
 S_RawSamples
 =================
 */
-void S_RawSamples (int samples, int rate, int width, int channels,
-		   const byte *data, float volume)
+void S_RawSamples (int stream, int samples, int rate, int width, int channels,
+		   const byte *data, float volume, int entityNum)
 {
 	if( si.RawSamples ) {
-		si.RawSamples( samples, rate, width, channels, data, volume );
+		si.RawSamples( stream, samples, rate, width, channels, data, volume, entityNum );
 	}
 }
 
@@ -233,6 +238,25 @@ S_Update
 */
 void S_Update( int msec )
 {
+	if(s_muted->integer)
+	{
+		if(!(s_muteWhenMinimized->integer && gw_minimized) &&
+		   !(s_muteWhenUnfocused->integer && !gw_active && !gw_minimized))
+		{
+			s_muted->integer = qfalse;
+			s_muted->modified = qtrue;
+		}
+	}
+	else
+	{
+		if((s_muteWhenMinimized->integer && gw_minimized) ||
+		   (s_muteWhenUnfocused->integer && !gw_active && !gw_minimized))
+		{
+			s_muted->integer = qtrue;
+			s_muted->modified = qtrue;
+		}
+	}
+
 	if ( si.Update ) {
 		si.Update( msec );
 	}
@@ -250,6 +274,45 @@ void S_DisableSounds( void )
 		si.DisableSounds();
 	}
 }
+
+
+#ifdef USE_VOIP
+void S_StartCapture( void )
+{
+	if( si.StartCapture ) {
+		si.StartCapture();
+	}
+}
+
+int S_AvailableCaptureSamples( void )
+{
+	if( si.AvailableCaptureSamples ) {
+		return si.AvailableCaptureSamples();
+	}
+	return 0;
+}
+
+void S_Capture( int samples, byte *data )
+{
+	if( si.Capture ) {
+		si.Capture( samples, data );
+	}
+}
+
+void S_StopCapture( void )
+{
+	if( si.StopCapture ) {
+		si.StopCapture();
+	}
+}
+
+void S_MasterGain( float gain )
+{
+	if( si.MasterGain ) {
+		si.MasterGain( gain );
+	}
+}
+#endif
 
 
 /*
@@ -425,6 +488,7 @@ void S_Init( void )
 	s_muteWhenMinimized = Cvar_Get( "s_muteWhenMinimized", "1", CVAR_ARCHIVE );
 	Cvar_CheckRange( s_muteWhenMinimized, "0", "1", CV_INTEGER );
 	Cvar_SetDescription( s_muteWhenMinimized, "Mutes all audio while game is minimized." );
+	s_muted = Cvar_Get( "s_muted", "0", CVAR_ROM );
 
 	cv = Cvar_Get( "s_initsound", "1", 0 );
 	Cvar_SetDescription( cv, "Whether or not to startup the sound system." );
@@ -440,6 +504,17 @@ void S_Init( void )
 		Cmd_AddCommand( "s_list", S_SoundList );
 		Cmd_AddCommand( "s_stop", S_StopAllSounds );
 		Cmd_AddCommand( "s_info", S_SoundInfo );
+
+
+#ifdef USE_OPENAL
+		if ( !started ) {
+			cvar_t *s_useOpenAL = Cvar_Get( "s_useOpenAL", "1", CVAR_ARCHIVE | CVAR_LATCH );
+			Cvar_SetDescription( s_useOpenAL, "Use OpenAL sound backend for 3D audio." );
+			if ( s_useOpenAL->integer ) {
+				started = S_AL_Init( &si );
+			}
+		}
+#endif
 
 		if ( !started ) {
 			started = S_Base_Init( &si );
