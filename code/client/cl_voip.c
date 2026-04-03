@@ -330,7 +330,7 @@ void CL_CaptureVoip( void )
 				const float flsamp = (float) sampbuffer[i];
 				const float s = fabs( flsamp );
 				voipPower += s * s;
-				sampbuffer[i] = (int16_t) ((flsamp) * audioMult);
+				sampbuffer[i] = (int16_t) Com_Clamp( -32768.0f, 32767.0f, flsamp * audioMult );
 			}
 
 			// encode raw audio samples into Opus data...

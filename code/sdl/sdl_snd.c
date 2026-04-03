@@ -44,7 +44,7 @@ static int dmasize = 0;
 
 static SDL_AudioDeviceID sdlPlaybackDevice;
 
-#if defined USE_VOIP && SDL_VERSION_ATLEAST( 2, 0, 5 )
+#if defined USE_VOIP && SDL_VERSION_ATLEAST( 2, 0, 5 ) && !defined __EMSCRIPTEN__
 #define USE_SDL_AUDIO_CAPTURE
 
 static SDL_AudioDeviceID sdlCaptureDevice;

@@ -2645,6 +2645,10 @@ qboolean S_AL_Init( soundInterface_t *si )
 	// !!! FIXME: add support for capture device enumeration.
 	// !!! FIXME: add some better error reporting.
 	s_alCapture = Cvar_Get( "s_alCapture", "1", CVAR_ARCHIVE | CVAR_LATCH );
+#ifdef __EMSCRIPTEN__
+	// Web player is playback-only — no microphone capture needed
+	Com_Printf("OpenAL capture support disabled for Emscripten\n");
+#else
 	if (!s_alCapture->integer)
 	{
 		Com_Printf("OpenAL capture support disabled by user ('+set s_alCapture 1' to enable)\n");
@@ -2707,7 +2711,8 @@ qboolean S_AL_Init( soundInterface_t *si )
 				    (alCaptureDevice == NULL) ? "failed to open" : "opened");
 		}
 	}
-#endif
+#endif /* !__EMSCRIPTEN__ */
+#endif /* USE_VOIP */
 
 	si->Shutdown = S_AL_Shutdown;
 	si->StartSound = S_AL_StartSound;
