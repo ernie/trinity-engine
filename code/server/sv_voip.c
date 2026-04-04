@@ -79,7 +79,15 @@ void SV_UserVoip( client_t *cl, msg_t *msg, qboolean ignoreData )
 		tvp->generation = generation;
 		tvp->sequence = sequence;
 		tvp->frames = frames;
+		// Set VOIP_DIRECT if there are any targeted recipients,
+		// since the server routing loop would set it per-client
 		tvp->flags = flags;
+		for ( i = 0; i < (int)sizeof( recips ); i++ ) {
+			if ( recips[i] ) {
+				tvp->flags |= VOIP_DIRECT;
+				break;
+			}
+		}
 		Com_Memcpy( tvp->recips, recips, sizeof( tvp->recips ) );
 		tvp->offset = tv.voipBufUsed;
 		tvp->len = packetsize;

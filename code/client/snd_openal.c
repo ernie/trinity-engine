@@ -1791,7 +1791,7 @@ void S_AL_RawSamples(int stream, int samples, int rate, int width, int channels,
 
 	if (numBuffers == MAX_STREAM_BUFFERS)
 	{
-		Com_DPrintf(S_COLOR_RED"WARNING: Steam dropping raw samples, reached MAX_STREAM_BUFFERS\n");
+		Com_DPrintf(S_COLOR_RED"WARNING: Stream dropping raw samples, reached MAX_STREAM_BUFFERS\n");
 		return;
 	}
 
@@ -1831,12 +1831,25 @@ void S_AL_RawSamples(int stream, int samples, int rate, int width, int channels,
         	// Volume
         	S_AL_Gain (streamSources[stream], volume * s_volume->value * s_alGain->value);
         }
+	else
+	{
+		// Update curGain so S_AL_ScaleGain picks up volume changes
+		srcList[streamSourceHandles[stream]].curGain = volume * s_alGain->value * s_volume->value;
+	}
 
 	// Start stream
 	if(!streamPlaying[stream])
 	{
 		qalSourcePlay( streamSources[stream] );
 		streamPlaying[stream] = qtrue;
+	}
+	else
+	{
+		// Restart on underrun
+		ALint state;
+		qalGetSourcei(streamSources[stream], AL_SOURCE_STATE, &state);
+		if(state == AL_STOPPED)
+			qalSourcePlay( streamSources[stream] );
 	}
 }
 

@@ -13,6 +13,7 @@ cvar_t *cl_voipSendTarget;
 cvar_t *cl_voipGainDuringCapture;
 cvar_t *cl_voipCaptureMult;
 cvar_t *cl_voipShowMeter;
+cvar_t *cl_voipVolume;
 cvar_t *cl_voip;
 
 static cvar_t *cl_voipProtocol;
@@ -34,6 +35,9 @@ void CL_VoipCvarInit( void )
 	cl_voipUseVAD = Cvar_Get( "cl_voipUseVAD", "0", CVAR_ARCHIVE );
 	cl_voipVADThreshold = Cvar_Get( "cl_voipVADThreshold", "0.25", CVAR_ARCHIVE );
 	cl_voipShowMeter = Cvar_Get( "cl_voipShowMeter", "1", CVAR_ARCHIVE );
+	cl_voipVolume = Cvar_Get( "cl_voipVolume", "1.0", CVAR_ARCHIVE );
+	Cvar_CheckRange( cl_voipVolume, "0", "2", CV_FLOAT );
+	Cvar_SetDescription( cl_voipVolume, "Sets volume for incoming VOIP audio (0.0 - 2.0, allows boost)." );
 
 	cl_voip = Cvar_Get( "cl_voip", "1", CVAR_ARCHIVE );
 	Cvar_CheckRange( cl_voip, "0", "1", CV_INTEGER );
@@ -461,14 +465,16 @@ relative to the sender's entity.
 */
 static void CL_PlayVoip( int sender, int samplecnt, const byte *data, int flags )
 {
+	float vol = cl_voipVolume->value;
+
 	if ( flags & VOIP_DIRECT ) {
 		S_RawSamples( sender + 1, samplecnt, 48000, 2, 1,
-			data, clc.voipGain[sender], -1 );
+			data, clc.voipGain[sender] * vol, -1 );
 	}
 
 	if ( flags & VOIP_SPATIAL ) {
 		S_RawSamples( sender + MAX_CLIENTS + 1, samplecnt, 48000, 2, 1,
-			data, 1.0f, sender );
+			data, vol, sender );
 	}
 }
 
