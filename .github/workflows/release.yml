@@ -144,9 +144,11 @@ jobs:
         include:
           - arch: x86
             use_sdl: USE_SDL=0
+            use_voip: USE_VOIP=0
 
           - arch: x86_64
             use_sdl: USE_SDL=1
+            use_voip: USE_VOIP=1
 
     steps:
 
@@ -168,7 +170,7 @@ jobs:
 
     - name: Build
       run: |
-        make install -j$(nproc) ARCH=${{ matrix.arch }} COMPILE_ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin ${{ matrix.use_sdl }}
+        make install -j$(nproc) ARCH=${{ matrix.arch }} COMPILE_ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin ${{ matrix.use_sdl }} ${{ matrix.use_voip }}
 
     - uses: actions/upload-artifact@v7
       with:
@@ -232,7 +234,7 @@ jobs:
           sudo apt-get -y install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libcurl4-openssl-dev:armhf mesa-common-dev:armhf libxxf86dga-dev:armhf libxrandr-dev:armhf libxxf86vm-dev:armhf libasound-dev:armhf
 
       - name: Build
-        run: make install -j$(nproc) ARCH=arm CC=arm-linux-gnueabihf-gcc STRIP=arm-linux-gnueabihf-strip DESTDIR=bin USE_SDL=0
+        run: make install -j$(nproc) ARCH=arm CC=arm-linux-gnueabihf-gcc STRIP=arm-linux-gnueabihf-strip DESTDIR=bin USE_SDL=0 USE_VOIP=0
 
       - uses: actions/upload-artifact@v7
         with:
@@ -262,7 +264,14 @@ jobs:
 
     - name: Build
       run: |
-        make install -j$(sysctl -n hw.logicalcpu) ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin INSTALL=ginstall USE_RENDERER_DLOPEN=1 STRIP=echo
+        make -j$(sysctl -n hw.logicalcpu) ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} USE_RENDERER_DLOPEN=0 STRIP=echo
+
+    - name: Create app bundle
+      run: |
+        chmod +x make-macosx-app.sh
+        ./make-macosx-app.sh release ${{ matrix.arch }}
+        mkdir -p bin
+        cp -R build/release-darwin-${{ matrix.arch }}/trinity.app bin/
 
     - uses: actions/upload-artifact@v7
       with:

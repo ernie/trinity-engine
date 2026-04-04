@@ -304,6 +304,7 @@ endif
 # opus flags for VOIP
 OPUS_FLAGS = -I$(OPUSDIR)/include -I$(OPUSDIR)/celt -I$(OPUSDIR)/silk -I$(OPUSDIR)/silk/float -I$(OPUSDIR)/src
 OPUS_CFLAGS = -DOPUS_BUILD -DHAVE_LRINTF -DFLOATING_POINT -DFLOAT_APPROX -DUSE_ALLOCA
+OPUS_ARCH_FLAGS =
 
 # extract version info
 ifneq ($(COMPILE_PLATFORM),darwin)
@@ -563,10 +564,12 @@ ifeq ($(COMPILE_PLATFORM),darwin)
   ifeq ($(ARCH),x86_64)
     BASE_CFLAGS += -arch x86_64
     LDFLAGS += -arch x86_64
+    OPUS_ARCH_FLAGS += -arch x86_64
   endif
   ifeq ($(ARCH),aarch64)
     BASE_CFLAGS += -arch arm64
     LDFLAGS += -arch arm64
+    OPUS_ARCH_FLAGS += -arch arm64
   endif
 
   ifeq ($(USE_LOCAL_HEADERS),1)
@@ -598,7 +601,7 @@ ifeq ($(COMPILE_PLATFORM),darwin)
   endif
 
   ifeq ($(USE_OPENAL),1)
-    BASE_CFLAGS += -DUSE_OPENAL
+    BASE_CFLAGS += -DUSE_OPENAL -DUSE_INTERNAL_OPENAL_HEADERS -I$(OPENALDIR)/include
     ifeq ($(USE_OPENAL_DLOPEN),1)
       BASE_CFLAGS += -DUSE_OPENAL_DLOPEN
     else
@@ -686,7 +689,7 @@ else
   endif
 
   ifeq ($(USE_OPENAL),1)
-    BASE_CFLAGS += -DUSE_OPENAL
+    BASE_CFLAGS += -DUSE_OPENAL -DUSE_INTERNAL_OPENAL_HEADERS -I$(OPENALDIR)/include
     ifeq ($(USE_OPENAL_DLOPEN),1)
       BASE_CFLAGS += -DUSE_OPENAL_DLOPEN
     else
@@ -700,6 +703,7 @@ else
       # linux32 make ...
       BASE_CFLAGS += -m32
       LDFLAGS += -m32
+      OPUS_ARCH_FLAGS += -m32
     endif
   endif
 
@@ -1556,7 +1560,7 @@ $(B)/client/vorbis/%.o: $(VORBISDIR)/lib/%.c
 
 $(B)/client/opus/%.o: $(OPUSDIR)/%.c
 	$(echo_cmd) "OPUS_CC $<"
-	$(Q)$(CC) -O2 $(OPUS_FLAGS) $(OPUS_CFLAGS) -w -o $@ -c $<
+	$(Q)$(CC) -O2 $(OPUS_ARCH_FLAGS) $(OPUS_FLAGS) $(OPUS_CFLAGS) -w -o $@ -c $<
 
 $(B)/client/zstd/%.o: $(ZSTDDIR)/%.c
 	$(DO_CC)

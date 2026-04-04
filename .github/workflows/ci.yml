@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -21,3 +21,16 @@ jobs:
 
       - name: Build
         run: make -j$(nproc)
+
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: brew install coreutils sdl2
+
+      - name: Build
+        run: make -j$(sysctl -n hw.logicalcpu) CC=clang STRIP=echo
