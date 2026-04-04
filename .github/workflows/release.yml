@@ -273,6 +273,13 @@ jobs:
         mkdir -p bin
         cp -R build/release-darwin-${{ matrix.arch }}/trinity.app bin/
 
+    - name: Sign app bundle
+      run: |
+        codesign --force --options runtime --deep \
+          --entitlements misc/xcode/trinity/trinity.entitlements \
+          --sign - \
+          bin/trinity.app
+
     - uses: actions/upload-artifact@v7
       with:
         name: macos-${{ matrix.arch }}

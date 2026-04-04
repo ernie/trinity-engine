@@ -315,3 +315,14 @@ function action()
 # executables
 action "${BUNDLEBINDIR}/${EXECUTABLE_NAME}"				"${TRINITY_CLIENT_ARCHS}"
 action "${BUNDLEBINDIR}/${DEDICATED_NAME}"				"${TRINITY_SERVER_ARCHS}"
+
+# ad-hoc sign if codesign is available
+HAS_CODESIGN=`command -v codesign`
+if [ -x "${HAS_CODESIGN}" ]; then
+	ENTITLEMENTS_FILE="misc/xcode/trinity/trinity.entitlements"
+	if [ -f "${ENTITLEMENTS_FILE}" ]; then
+		${HAS_CODESIGN} --force --options runtime --deep --entitlements "${ENTITLEMENTS_FILE}" --sign - "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
+	else
+		${HAS_CODESIGN} --force --deep --sign - "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
+	fi
+fi

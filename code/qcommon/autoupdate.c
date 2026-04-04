@@ -573,11 +573,11 @@ static void Update_BeginDownload( void )
 	}
 
 	// write to a temp file in the install directory (raw filesystem, not engine FS)
-	Com_sprintf( updateZipPath, sizeof( updateZipPath ), "%s/update_download.zip.tmp", Sys_Pwd() );
+	Com_sprintf( updateZipPath, sizeof( updateZipPath ), "%s/update_download.zip.tmp", Sys_DefaultBasePath() );
 
 	updateZipFile = fopen( updateZipPath, "wb" );
 	if ( !updateZipFile ) {
-		Update_SetError( va( "Cannot write to install directory: %s", Sys_Pwd() ) );
+		Update_SetError( va( "Cannot write to install directory: %s", Sys_DefaultBasePath() ) );
 		Com_DL_Cleanup( dl );
 		return;
 	}
@@ -776,7 +776,7 @@ static qboolean Update_ExtractAndStage( void )
 	int extracted = 0;
 	int ret;
 
-	Com_sprintf( pendingDir, sizeof( pendingDir ), "%s/%s", Sys_Pwd(), PENDING_DIR );
+	Com_sprintf( pendingDir, sizeof( pendingDir ), "%s/%s", Sys_DefaultBasePath(), PENDING_DIR );
 	Com_sprintf( manifestPath, sizeof( manifestPath ), "%s/%s", pendingDir, MANIFEST_NAME );
 
 	uf = unzOpen( updateZipPath );
@@ -791,7 +791,7 @@ static qboolean Update_ExtractAndStage( void )
 	// create .updates/pending/ directory
 	{
 		char updatesDir[MAX_OSPATH];
-		Com_sprintf( updatesDir, sizeof( updatesDir ), "%s/%s", Sys_Pwd(), UPDATES_DIR );
+		Com_sprintf( updatesDir, sizeof( updatesDir ), "%s/%s", Sys_DefaultBasePath(), UPDATES_DIR );
 		Sys_Mkdir( updatesDir );
 	}
 	Sys_Mkdir( pendingDir );
