@@ -444,6 +444,9 @@ qboolean CL_TV_Open( const char *filename ) {
 	{
 		const char *si = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SERVERINFO];
 		CL_TV_UpdateConfigstring( CS_SERVERINFO, si, (int)strlen( si ) );
+#ifdef USE_VOIP
+		clc.svVoipVersion = atoi( Info_ValueForKey( si, "sv_voipVersion" ) );
+#endif
 	}
 
 	// Read trailer for duration (before saving frame offset)
@@ -808,7 +811,8 @@ void CL_TV_ReadFrame( void ) {
 				MSG_WriteLong( &voipMsg, sequence );
 				MSG_WriteByte( &voipMsg, frames );
 				MSG_WriteShort( &voipMsg, voipLen );
-				MSG_WriteBits( &voipMsg, flags, VOIP_FLAGCNT );
+				MSG_WriteBits( &voipMsg, flags,
+					(clc.svVoipVersion >= 2) ? VOIP_FLAGCNT : VOIP_FLAGCNT_V1 );
 				MSG_WriteData( &voipMsg, voipData, voipLen );
 
 				MSG_BeginReading( &voipMsg );

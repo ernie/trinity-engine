@@ -251,6 +251,7 @@ typedef struct client_s {
 
 #ifdef USE_VOIP
 	qboolean hasVoip;
+	int voipVersion;
 	qboolean muteAllVoip;
 	qboolean ignoreVoipFromClient[MAX_CLIENTS];
 	voipServerPacket_t *voipPacket[VOIP_QUEUE_LENGTH];

@@ -42,6 +42,7 @@ void CL_VoipCvarInit( void )
 	cl_voip = Cvar_Get( "cl_voip", "1", CVAR_ARCHIVE );
 	Cvar_CheckRange( cl_voip, "0", "1", CV_INTEGER );
 	cl_voipProtocol = Cvar_Get( "cl_voipProtocol", cl_voip->integer ? "opus" : "", CVAR_USERINFO | CVAR_ROM );
+	Cvar_Get( "cl_voipVersion", "2", CVAR_USERINFO | CVAR_ROM );
 }
 
 
@@ -161,7 +162,7 @@ static void CL_VoipParseTargets( void )
 	int val;
 
 	Com_Memset( clc.voipTargets, 0, sizeof( clc.voipTargets ) );
-	clc.voipFlags &= ~VOIP_SPATIAL;
+	clc.voipFlags &= ~( VOIP_SPATIAL | VOIP_TEAM | VOIP_ALL );
 
 	while ( target ) {
 		while ( *target == ',' || *target == ' ' )
@@ -175,15 +176,38 @@ static void CL_VoipParseTargets( void )
 			target = end;
 		} else {
 			if ( !Q_stricmpn( target, "all", 3 ) ) {
+				clc.voipFlags |= VOIP_ALL;
 				Com_Memset( clc.voipTargets, ~0, sizeof( clc.voipTargets ) );
-				return;
+				target += 3;
+				continue;
 			}
 			if ( !Q_stricmpn( target, "spatial", 7 ) ) {
 				clc.voipFlags |= VOIP_SPATIAL;
 				target += 7;
 				continue;
 			} else {
-				if ( !Q_stricmpn( target, "attacker", 8 ) ) {
+				if ( !Q_stricmpn( target, "team", 4 ) ) {
+					clc.voipFlags |= VOIP_TEAM;
+					// fallback: populate recips bitmask for old servers
+					if ( VM_Call( cgvm, 0, CG_VOIP_TEAM ) == 0 ) {
+						char teamIds[256];
+						const char *p;
+						char *e;
+						Cvar_VariableStringBuffer( "cl_voipTeamTargets", teamIds, sizeof( teamIds ) );
+						p = teamIds;
+						while ( *p ) {
+							while ( *p == ',' || *p == ' ' ) p++;
+							if ( !*p ) break;
+							val = strtol( p, &e, 10 );
+							p = e;
+							if ( val >= 0 && val < MAX_CLIENTS ) {
+								clc.voipTargets[val / 8] |= 1 << (val % 8);
+							}
+						}
+					}
+					target += 4;
+					continue;
+				} else if ( !Q_stricmpn( target, "attacker", 8 ) ) {
 					val = VM_Call( cgvm, 0, CG_LAST_ATTACKER );
 					target += 8;
 				} else if ( !Q_stricmpn( target, "crosshair", 9 ) ) {
@@ -495,7 +519,8 @@ void CL_ParseVoip( msg_t *msg, qboolean ignoreData )
 	const int sequence = MSG_ReadLong( msg );
 	const int frames = MSG_ReadByte( msg );
 	const int packetsize = MSG_ReadShort( msg );
-	const int flags = MSG_ReadBits( msg, VOIP_FLAGCNT );
+	const int flagBits = ( clc.svVoipVersion >= 2 ) ? VOIP_FLAGCNT : VOIP_FLAGCNT_V1;
+	const int flags = MSG_ReadBits( msg, flagBits );
 	unsigned char encoded[4000];
 	int numSamples;
 	int seqdiff;
@@ -540,6 +565,9 @@ void CL_ParseVoip( msg_t *msg, qboolean ignoreData )
 	}
 
 	Com_DPrintf( "VoIP: packet accepted!\n" );
+
+	clc.voipLastPacketTime[sender] = cls.realtime;
+	clc.voipLastChannel[sender] = flags & ( VOIP_TEAM | VOIP_ALL | VOIP_SPATIAL | VOIP_DIRECT );
 
 	seqdiff = sequence - clc.voipIncomingSequence[sender];
 

@@ -463,6 +463,19 @@ static void *VM_ArgPtr( intptr_t intValue ) {
 }
 
 
+#if defined(USE_VOIP) && !defined(DEDICATED)
+#define VOIP_TALKING_TIMEOUT 500 // milliseconds
+
+static void CL_BuildVoipHexMask( const byte *mask, char *hex, int hexSize ) {
+	int i, len = 0;
+	int maskSize = (MAX_CLIENTS + 7) / 8;
+
+	for ( i = 0; i < maskSize; i++ ) {
+		len += Com_sprintf( hex + len, hexSize - len, "%02x", mask[i] );
+	}
+}
+#endif
+
 static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
 
 	if ( !Q_stricmp( key, "trap_R_AddRefEntityToScene2" ) ) {
@@ -489,6 +502,64 @@ static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
 		Com_sprintf( value, valueSize, "%i", CG_CVAR_SETDESCRIPTION );
 		return qtrue;
 	}
+
+#if defined(USE_VOIP) && !defined(DEDICATED)
+	if ( !Q_stricmp( key, "voip_talking" ) ) {
+		byte mask[(MAX_CLIENTS + 7) / 8];
+		char hex[MAX_CLIENTS / 4 + 2];
+		int i;
+
+		Com_Memset( mask, 0, sizeof(mask) );
+		for ( i = 0; i < MAX_CLIENTS; i++ ) {
+			if ( cls.realtime - clc.voipLastPacketTime[i] < VOIP_TALKING_TIMEOUT )
+				mask[i / 8] |= 1 << (i % 8);
+		}
+
+		CL_BuildVoipHexMask( mask, hex, sizeof(hex) );
+		Q_strncpyz( value, hex, valueSize );
+		return qtrue;
+	}
+
+	if ( !Q_stricmp( key, "voip_muted" ) ) {
+		byte mask[(MAX_CLIENTS + 7) / 8];
+		char hex[MAX_CLIENTS / 4 + 2];
+		int i;
+
+		Com_Memset( mask, 0, sizeof(mask) );
+		for ( i = 0; i < MAX_CLIENTS; i++ ) {
+			if ( clc.voipIgnore[i] )
+				mask[i / 8] |= 1 << (i % 8);
+		}
+
+		CL_BuildVoipHexMask( mask, hex, sizeof(hex) );
+		Q_strncpyz( value, hex, valueSize );
+		return qtrue;
+	}
+
+	if ( !Q_stricmp( key, "voip_version" ) ) {
+		int effective = MIN( 2, clc.svVoipVersion );
+		Com_sprintf( value, valueSize, "%d", effective );
+		return qtrue;
+	}
+
+	if ( !Q_stricmp( key, "voip_channels" ) ) {
+		char hex[MAX_CLIENTS * 2 + 2];
+		int i, len = 0;
+
+		for ( i = 0; i < MAX_CLIENTS; i++ ) {
+			byte ch;
+			if ( cls.realtime - clc.voipLastPacketTime[i] < VOIP_TALKING_TIMEOUT ) {
+				ch = (byte)clc.voipLastChannel[i];
+			} else {
+				ch = 0;
+			}
+			len += Com_sprintf( hex + len, sizeof(hex) - len, "%02x", ch );
+		}
+
+		Q_strncpyz( value, hex, valueSize );
+		return qtrue;
+	}
+#endif
 
 	return qfalse;
 }

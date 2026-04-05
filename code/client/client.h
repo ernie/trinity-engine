@@ -337,9 +337,12 @@ typedef struct {
 	OpusDecoder *opusDecoder[MAX_CLIENTS];
 	byte voipIncomingGeneration[MAX_CLIENTS];
 	int voipIncomingSequence[MAX_CLIENTS];
+	int voipLastPacketTime[MAX_CLIENTS];
+	int voipLastChannel[MAX_CLIENTS];
 	float voipGain[MAX_CLIENTS];
 	qboolean voipIgnore[MAX_CLIENTS];
 	qboolean voipMuteAll;
+	int svVoipVersion;
 
 	// outgoing
 	uint8_t voipTargets[(MAX_CLIENTS + 7) / 8];

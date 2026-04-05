@@ -357,6 +357,14 @@ void CL_SystemInfoChanged( qboolean onlyGame ) {
 	clc.voipEnabled = !Q_stricmp( s, "opus" );
 #endif
 
+	// check serverinfo for voip version
+#ifdef USE_VOIP
+	{
+		const char *serverInfo = cl.gameState.stringData + cl.gameState.stringOffsets[ CS_SERVERINFO ];
+		clc.svVoipVersion = atoi( Info_ValueForKey( serverInfo, "sv_voipVersion" ) );
+	}
+#endif
+
 	// don't set any vars when playing a demo
 	if ( clc.demoplaying ) {
 		return;

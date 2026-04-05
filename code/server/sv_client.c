@@ -1860,6 +1860,7 @@ void SV_UserinfoChanged( client_t *cl, qboolean updateUserinfo, qboolean runFilt
 #ifdef USE_VOIP
 	val = Info_ValueForKey( cl->userinfo, "cl_voipProtocol" );
 	cl->hasVoip = *val ? qtrue : qfalse;
+	cl->voipVersion = atoi( Info_ValueForKey( cl->userinfo, "cl_voipVersion" ) );
 #endif
 
 	if ( runFilter )

@@ -38,6 +38,7 @@ void SV_UserVoip( client_t *cl, msg_t *msg, qboolean ignoreData )
 	int sender, generation, sequence, frames, packetsize;
 	uint8_t recips[(MAX_CLIENTS + 7) / 8];
 	int flags;
+	int senderTeam = 0;
 	byte encoded[sizeof(cl->voipPacket[0]->data)];
 	client_t *client = NULL;
 	voipServerPacket_t *packet = NULL;
@@ -70,6 +71,11 @@ void SV_UserVoip( client_t *cl, msg_t *msg, qboolean ignoreData )
 
 	if ( ignoreData || SV_ShouldIgnoreVoipSender( cl ) )
 		return;   // Blacklisted, disabled, etc.
+
+	if ( flags & VOIP_TEAM ) {
+		playerState_t *senderPs = SV_GameClientNum( sender );
+		senderTeam = senderPs->persistant[PERS_TEAM];
+	}
 
 	// Capture for TVD recording (before per-client routing)
 	if ( tv.recording && tv.voipCount < MAX_TV_VOIP_PACKETS
@@ -111,31 +117,44 @@ void SV_UserVoip( client_t *cl, msg_t *msg, qboolean ignoreData )
 		else if ( *cl->downloadName )
 			continue;  // no VoIP allowed if downloading, to save bandwidth.
 
-		if ( Com_IsVoipTarget( recips, sizeof( recips ), i ) )
-			flags |= VOIP_DIRECT;
-		else
-			flags &= ~VOIP_DIRECT;
+		{
+			int pflags = flags;
+			if ( pflags & VOIP_ALL ) {
+				pflags |= VOIP_DIRECT;
+			} else if ( pflags & VOIP_TEAM ) {
+				playerState_t *recipPs = SV_GameClientNum( i );
+				if ( recipPs->persistant[PERS_TEAM] == senderTeam ) {
+					pflags |= VOIP_DIRECT;
+				} else {
+					pflags &= ~VOIP_DIRECT;
+				}
+			} else if ( Com_IsVoipTarget( recips, sizeof( recips ), i ) ) {
+				pflags |= VOIP_DIRECT;
+			} else {
+				pflags &= ~VOIP_DIRECT;
+			}
 
-		if ( !( flags & ( VOIP_SPATIAL | VOIP_DIRECT ) ) )
-			continue;  // not addressed to this player.
+			if ( !( pflags & ( VOIP_SPATIAL | VOIP_DIRECT ) ) )
+				continue;  // not addressed to this player.
 
-		// Transmit this packet to the client.
-		if ( client->queuedVoipPackets >= ARRAY_LEN( client->voipPacket ) ) {
-			Com_Printf( "Too many VoIP packets queued for client #%d\n", i );
-			continue;  // no room for another packet right now.
+			// Transmit this packet to the client.
+			if ( client->queuedVoipPackets >= ARRAY_LEN( client->voipPacket ) ) {
+				Com_Printf( "Too many VoIP packets queued for client #%d\n", i );
+				continue;  // no room for another packet right now.
+			}
+
+			packet = Z_Malloc( sizeof( *packet ) );
+			packet->sender = sender;
+			packet->frames = frames;
+			packet->len = packetsize;
+			packet->generation = generation;
+			packet->sequence = sequence;
+			packet->flags = pflags;
+			memcpy( packet->data, encoded, packetsize );
+
+			client->voipPacket[( client->queuedVoipIndex + client->queuedVoipPackets ) % ARRAY_LEN( client->voipPacket )] = packet;
+			client->queuedVoipPackets++;
 		}
-
-		packet = Z_Malloc( sizeof( *packet ) );
-		packet->sender = sender;
-		packet->frames = frames;
-		packet->len = packetsize;
-		packet->generation = generation;
-		packet->sequence = sequence;
-		packet->flags = flags;
-		memcpy( packet->data, encoded, packetsize );
-
-		client->voipPacket[( client->queuedVoipIndex + client->queuedVoipPackets ) % ARRAY_LEN( client->voipPacket )] = packet;
-		client->queuedVoipPackets++;
 	}
 }
 
@@ -170,7 +189,11 @@ void SV_WriteVoipToClient( client_t *cl, msg_t *msg )
 				MSG_WriteLong( msg, packet->sequence );
 				MSG_WriteByte( msg, packet->frames );
 				MSG_WriteShort( msg, packet->len );
-				MSG_WriteBits( msg, packet->flags, VOIP_FLAGCNT );
+				if ( cl->voipVersion >= 2 ) {
+					MSG_WriteBits( msg, packet->flags, VOIP_FLAGCNT );
+				} else {
+					MSG_WriteBits( msg, packet->flags & 0x03, VOIP_FLAGCNT_V1 );
+				}
 				MSG_WriteData( msg, packet->data, packet->len );
 			}
 

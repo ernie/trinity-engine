@@ -1467,8 +1467,11 @@ typedef enum _flag_status {
 #define LUMA( red, green, blue ) ( 0.2126f * ( red ) + 0.7152f * ( green ) + 0.0722f * ( blue ) )
 
 // VoIP flags
-#define VOIP_SPATIAL  0x01
-#define VOIP_DIRECT   0x02
-#define VOIP_FLAGCNT  2
+#define VOIP_SPATIAL    0x01
+#define VOIP_DIRECT     0x02
+#define VOIP_TEAM       0x04
+#define VOIP_ALL        0x08
+#define VOIP_FLAGCNT    4       // flag width (v2+)
+#define VOIP_FLAGCNT_V1 2       // legacy flag width (v0/v1)
 
 #endif	// __Q_SHARED_H
