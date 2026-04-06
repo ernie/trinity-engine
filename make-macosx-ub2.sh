@@ -72,7 +72,7 @@ if [ "$1" == "notarize" ]; then
 	RELEASE_LOCATION="build/release-darwin-universal2"
 
 	# release build name
-	RELEASE_BUILD="trinity.app"
+	RELEASE_BUILD="Trinity.app"
 
 	# Pre-notarized zip file (not what is shipped)
 	PRE_NOTARIZED_ZIP="trinity_prenotarized.zip"

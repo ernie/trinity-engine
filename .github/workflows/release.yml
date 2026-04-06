@@ -243,7 +243,7 @@ jobs:
           if-no-files-found: error
           retention-days: 5
 
-  macos-x86:
+  macos:
     name: Release macOS ${{ matrix.arch }}
     runs-on: macos-14
     strategy:
@@ -271,14 +271,7 @@ jobs:
         chmod +x make-macosx-app.sh
         ./make-macosx-app.sh release ${{ matrix.arch }}
         mkdir -p bin
-        cp -R build/release-darwin-${{ matrix.arch }}/trinity.app bin/
-
-    - name: Sign app bundle
-      run: |
-        codesign --force --options runtime --deep \
-          --entitlements misc/xcode/trinity/trinity.entitlements \
-          --sign - \
-          bin/trinity.app
+        cp -R build/release-darwin-${{ matrix.arch }}/Trinity.app bin/
 
     - uses: actions/upload-artifact@v7
       with:
@@ -314,7 +307,7 @@ jobs:
         retention-days: 5
 
   release:
-    needs: [windows-msys, windows-msys32, windows-msvc, ubuntu-x86, ubuntu-arm64, build-armv7, macos-x86, web]
+    needs: [windows-msys, windows-msys32, windows-msvc, ubuntu-x86, ubuntu-arm64, build-armv7, macos, web]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

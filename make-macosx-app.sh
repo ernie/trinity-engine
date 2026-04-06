@@ -158,8 +158,9 @@ PKGINFO="APPLTRNT"
 OBJROOT="build"
 #BUILT_PRODUCTS_DIR="${OBJROOT}/${TARGET_NAME}-darwin-${CURRENT_ARCH}"
 PRODUCT_NAME="trinity"
+BUNDLE_NAME="Trinity"
 WRAPPER_EXTENSION="app"
-WRAPPER_NAME="${PRODUCT_NAME}.${WRAPPER_EXTENSION}"
+WRAPPER_NAME="${BUNDLE_NAME}.${WRAPPER_EXTENSION}"
 CONTENTS_FOLDER_PATH="${WRAPPER_NAME}/Contents"
 UNLOCALIZED_RESOURCES_FOLDER_PATH="${CONTENTS_FOLDER_PATH}/Resources"
 EXECUTABLE_FOLDER_PATH="${CONTENTS_FOLDER_PATH}/MacOS"
@@ -255,7 +256,7 @@ PLIST="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>${PRODUCT_NAME}</string>
+    <string>${BUNDLE_NAME}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -316,13 +317,19 @@ function action()
 action "${BUNDLEBINDIR}/${EXECUTABLE_NAME}"				"${TRINITY_CLIENT_ARCHS}"
 action "${BUNDLEBINDIR}/${DEDICATED_NAME}"				"${TRINITY_SERVER_ARCHS}"
 
-# ad-hoc sign if codesign is available
+# ad-hoc sign if codesign is available (required on Apple Silicon for the
+# app to launch at all). Hardened Runtime is intentionally NOT used here:
+# ad-hoc signatures cannot carry the restricted entitlements
+# (cs.allow-unsigned-executable-memory, cs.disable-library-validation) that
+# the runtime would need to honor, so enabling it here would break launch.
+# The real notarization path in make-macosx-ub2.sh uses a Developer ID and
+# the entitlements file, which is where Hardened Runtime belongs.
 HAS_CODESIGN=`command -v codesign`
 if [ -x "${HAS_CODESIGN}" ]; then
-	ENTITLEMENTS_FILE="misc/xcode/trinity/trinity.entitlements"
-	if [ -f "${ENTITLEMENTS_FILE}" ]; then
-		${HAS_CODESIGN} --force --options runtime --deep --entitlements "${ENTITLEMENTS_FILE}" --sign - "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
-	else
-		${HAS_CODESIGN} --force --deep --sign - "${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
-	fi
+	BUNDLE="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}"
+	# sign nested content first (inside-out): dylibs and any executable files
+	find "${BUNDLE}/Contents/MacOS" -type f \( -name '*.dylib' -o -perm +111 \) \
+		-exec ${HAS_CODESIGN} --force --sign - {} \;
+	# then the bundle itself
+	${HAS_CODESIGN} --force --sign - "${BUNDLE}"
 fi
