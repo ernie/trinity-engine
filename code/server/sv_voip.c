@@ -85,13 +85,15 @@ void SV_UserVoip( client_t *cl, msg_t *msg, qboolean ignoreData )
 		tvp->generation = generation;
 		tvp->sequence = sequence;
 		tvp->frames = frames;
-		// Set VOIP_DIRECT if there are any targeted recipients,
-		// since the server routing loop would set it per-client
+		// For targeted sends with no channel flag (just recipient bits),
+		// set VOIP_DIRECT so the TVD player knows to play it as direct audio.
 		tvp->flags = flags;
-		for ( i = 0; i < (int)sizeof( recips ); i++ ) {
-			if ( recips[i] ) {
-				tvp->flags |= VOIP_DIRECT;
-				break;
+		if ( !( flags & ( VOIP_SPATIAL | VOIP_TEAM | VOIP_ALL ) ) ) {
+			for ( i = 0; i < (int)sizeof( recips ); i++ ) {
+				if ( recips[i] ) {
+					tvp->flags |= VOIP_DIRECT;
+					break;
+				}
 			}
 		}
 		Com_Memcpy( tvp->recips, recips, sizeof( tvp->recips ) );
@@ -190,7 +192,14 @@ void SV_WriteVoipToClient( client_t *cl, msg_t *msg )
 				MSG_WriteByte( msg, packet->frames );
 				MSG_WriteShort( msg, packet->len );
 				if ( cl->voipVersion >= 2 ) {
-					MSG_WriteBits( msg, packet->flags, VOIP_FLAGCNT );
+					// v2 clients handle channel flags (VOIP_ALL, VOIP_TEAM)
+					// natively, so don't send the server-added VOIP_DIRECT.
+					int wflags = packet->flags & ~VOIP_DIRECT;
+					// For targeted packets (no channel flag), set VOIP_DIRECT
+					// so the client knows to play it.
+					if ( !( wflags & ( VOIP_SPATIAL | VOIP_TEAM | VOIP_ALL ) ) )
+						wflags |= VOIP_DIRECT;
+					MSG_WriteBits( msg, wflags, VOIP_FLAGCNT );
 				} else {
 					MSG_WriteBits( msg, packet->flags & 0x03, VOIP_FLAGCNT_V1 );
 				}

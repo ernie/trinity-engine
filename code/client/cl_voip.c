@@ -17,6 +17,10 @@ cvar_t *cl_voipVolume;
 cvar_t *cl_voip;
 
 static cvar_t *cl_voipProtocol;
+static cvar_t *cl_voipMuteSpatial;
+static cvar_t *cl_voipMuteDirect;
+static cvar_t *cl_voipMuteTeam;
+static cvar_t *cl_voipMuteAll;
 
 
 
@@ -44,6 +48,10 @@ void CL_VoipCvarInit( void )
 	Cvar_CheckRange( cl_voip, "0", "1", CV_INTEGER );
 	cl_voipProtocol = Cvar_Get( "cl_voipProtocol", cl_voip->integer ? "opus" : "", CVAR_USERINFO | CVAR_ROM );
 	Cvar_Get( "cl_voipVersion", "2", CVAR_USERINFO | CVAR_ROM );
+	cl_voipMuteSpatial = Cvar_Get( "cl_voipMuteSpatial", "0", CVAR_ARCHIVE_ND );
+	cl_voipMuteDirect = Cvar_Get( "cl_voipMuteDirect", "0", CVAR_ARCHIVE_ND );
+	cl_voipMuteTeam = Cvar_Get( "cl_voipMuteTeam", "0", CVAR_ARCHIVE_ND );
+	cl_voipMuteAll = Cvar_Get( "cl_voipMuteAll", "0", CVAR_ARCHIVE_ND );
 }
 
 
@@ -163,7 +171,7 @@ static void CL_VoipParseTargets( void )
 	int val;
 
 	Com_Memset( clc.voipTargets, 0, sizeof( clc.voipTargets ) );
-	clc.voipFlags &= ~( VOIP_SPATIAL | VOIP_TEAM | VOIP_ALL );
+	clc.voipFlags = 0;
 
 	while ( target ) {
 		while ( *target == ',' || *target == ' ' )
@@ -235,6 +243,7 @@ static void CL_VoipParseTargets( void )
 		}
 
 		clc.voipTargets[val / 8] |= 1 << (val % 8);
+		clc.voipFlags |= VOIP_DIRECT;
 	}
 }
 
@@ -542,7 +551,16 @@ static void CL_PlayVoip( int sender, int samplecnt, const byte *data, int flags 
 {
 	float vol = cl_voipVolume->value;
 
-	if ( flags & VOIP_DIRECT ) {
+	// Filter out muted channels
+	if ( cl_voipMuteSpatial->integer ) flags &= ~VOIP_SPATIAL;
+	if ( cl_voipMuteDirect->integer )  flags &= ~VOIP_DIRECT;
+	if ( cl_voipMuteTeam->integer )    flags &= ~VOIP_TEAM;
+	if ( cl_voipMuteAll->integer )     flags &= ~VOIP_ALL;
+
+	// Play as non-spatialized (direct) audio if any non-spatial flag is set.
+	// VOIP_DIRECT, VOIP_TEAM, and VOIP_ALL all play the same way — the
+	// distinction is routing metadata, not a playback mode.
+	if ( flags & ( VOIP_DIRECT | VOIP_TEAM | VOIP_ALL ) ) {
 		S_RawSamples( sender + 1, samplecnt, 48000, 2, 1,
 			data, clc.voipGain[sender] * vol, -1 );
 	}
