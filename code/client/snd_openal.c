@@ -1787,6 +1787,19 @@ void S_AL_RawSamples(int stream, int samples, int rate, int width, int channels,
 		}
 	}
 
+	// Unqueue any processed buffers before reusing them.
+	// Without this, the ring index can wrap to a buffer that's still queued
+	// on the source (ref > 0), causing alBufferData to silently fail and
+	// alSourceQueueBuffers to re-queue stale audio data.
+	{
+		ALint processed = 0;
+		qalGetSourcei(streamSources[stream], AL_BUFFERS_PROCESSED, &processed);
+		while ( processed-- ) {
+			ALuint buf;
+			qalSourceUnqueueBuffers(streamSources[stream], 1, &buf);
+		}
+	}
+
 	qalGetSourcei(streamSources[stream], AL_BUFFERS_QUEUED, &numBuffers);
 
 	if (numBuffers == MAX_STREAM_BUFFERS)

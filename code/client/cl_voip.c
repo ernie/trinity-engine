@@ -19,6 +19,7 @@ cvar_t *cl_voip;
 static cvar_t *cl_voipProtocol;
 
 
+
 /*
 ===============
 CL_VoipCvarInit
@@ -319,6 +320,7 @@ void CL_CaptureVoip( void )
 			return;
 		}
 		S_MasterGain( Com_Clamp( 0.0f, 1.0f, cl_voipGainDuringCapture->value ) );
+
 		S_StartCapture();
 		CL_VoipNewGeneration();
 		CL_VoipParseTargets();
@@ -334,27 +336,47 @@ void CL_CaptureVoip( void )
 		}
 
 		// enough data buffered in audio hardware to process yet?
-		if ( samples >= packetSamples ) {
+		// On finalFrame, accept any samples > 0 and zero-pad to frame boundary
+		if ( samples >= packetSamples || (finalFrame && samples > 0) ) {
 			// audio capture is always MONO16.
 			static int16_t sampbuffer[VOIP_MAX_PACKET_SAMPLES];
 			float voipPower = 0.0f;
 			int voipFrames;
 			int i, bytes;
+			int actualSamples;
 
 			if ( samples > VOIP_MAX_PACKET_SAMPLES )
 				samples = VOIP_MAX_PACKET_SAMPLES;
 
-			samples -= samples % VOIP_MAX_FRAME_SAMPLES;
-			if ( samples != 120 && samples != 240 && samples != 480 && samples != 960 && samples != 1920 && samples != 2880 ) {
-				Com_Printf( "Voip: bad number of samples %d\n", samples );
+			// Capture the real samples first, then handle rounding
+			actualSamples = samples;
+
+			if ( finalFrame ) {
+				// Round UP to next frame boundary so we don't lose the tail
+				samples = ((samples + VOIP_MAX_FRAME_SAMPLES - 1) / VOIP_MAX_FRAME_SAMPLES) * VOIP_MAX_FRAME_SAMPLES;
+				if ( samples > VOIP_MAX_PACKET_SAMPLES )
+					samples = VOIP_MAX_PACKET_SAMPLES;
+			} else {
+				// Normal path: round down to frame boundary
+				samples -= samples % VOIP_MAX_FRAME_SAMPLES;
+				actualSamples = samples;  // only capture the rounded amount
+			}
+
+			if ( samples <= 0 ) {
+				Com_DPrintf( "VoIP: no complete frames to encode\n" );
 				return;
 			}
 			voipFrames = samples / VOIP_MAX_FRAME_SAMPLES;
 
-			S_Capture( samples, (byte *) sampbuffer );  // grab from audio card.
+			S_Capture( actualSamples, (byte *) sampbuffer );  // grab from audio card.
+
+			// Zero-pad any remainder on the final frame
+			if ( actualSamples < samples ) {
+				Com_Memset( sampbuffer + actualSamples, 0, (samples - actualSamples) * sizeof( int16_t ) );
+			}
 
 			// check the "power" of this packet...
-			for ( i = 0; i < samples; i++ ) {
+			for ( i = 0; i < actualSamples; i++ ) {
 				const float flsamp = (float) sampbuffer[i];
 				const float s = fabs( flsamp );
 				voipPower += s * s;
@@ -371,7 +393,7 @@ void CL_CaptureVoip( void )
 			}
 
 			clc.voipPower = (voipPower / (32768.0f * 32768.0f *
-			                 ((float) samples))) * 100.0f;
+			                 ((float) (actualSamples ? actualSamples : 1)))) * 100.0f;
 
 			if ( (useVad) && (clc.voipPower < cl_voipVADThreshold->value) ) {
 				CL_VoipNewGeneration();  // no "talk" for at least 1/4 second.
@@ -597,7 +619,8 @@ void CL_ParseVoip( msg_t *msg, qboolean ignoreData )
 		            seqdiff, sender );
 		// tell opus that we're missing frames...
 		for ( i = 0; i < seqdiff; i++ ) {
-			assert( (written + VOIP_MAX_PACKET_SAMPLES) * 2 < (int) sizeof( decoded ) );
+			if ( (written + VOIP_MAX_PACKET_SAMPLES) * 2 >= (int) sizeof( decoded ) )
+				break;
 			numSamples = opus_decode( clc.opusDecoder[sender], NULL, 0, decoded + written, VOIP_MAX_PACKET_SAMPLES, 0 );
 			if ( numSamples <= 0 ) {
 				Com_DPrintf( "VoIP: Error decoding frame %d from client #%d\n", i, sender );
