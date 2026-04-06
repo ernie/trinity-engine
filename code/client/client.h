@@ -233,6 +233,10 @@ demo through a file.
 =============================================================================
 */
 
+#ifdef USE_VOIP
+#define VOIP_TALKING_TIMEOUT 500	// ms; drives both the HUD "talking" icon decay and the VAD hang-over window
+#endif
+
 typedef struct {
 
 	int			clientNum;
@@ -354,6 +358,7 @@ typedef struct {
 	byte voipOutgoingGeneration;
 	byte voipOutgoingData[1024];
 	float voipPower;
+	int voipLastSelfSendTime;
 #endif
 
 } clientConnection_t;

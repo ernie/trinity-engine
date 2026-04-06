@@ -464,7 +464,6 @@ static void *VM_ArgPtr( intptr_t intValue ) {
 
 
 #if defined(USE_VOIP) && !defined(DEDICATED)
-#define VOIP_TALKING_TIMEOUT 500 // milliseconds
 
 static void CL_BuildVoipHexMask( const byte *mask, char *hex, int hexSize ) {
 	int i, len = 0;
@@ -507,12 +506,20 @@ static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
 	if ( !Q_stricmp( key, "voip_talking" ) ) {
 		byte mask[(MAX_CLIENTS + 7) / 8];
 		char hex[MAX_CLIENTS / 4 + 2];
+		int self = clc.clientNum;
 		int i;
 
 		Com_Memset( mask, 0, sizeof(mask) );
 		for ( i = 0; i < MAX_CLIENTS; i++ ) {
 			if ( cls.realtime - clc.voipLastPacketTime[i] < VOIP_TALKING_TIMEOUT )
 				mask[i / 8] |= 1 << (i % 8);
+		}
+
+		// Self bit: voipLastPacketTime only tracks incoming packets.
+		if ( self >= 0 && self < MAX_CLIENTS
+			&& clc.voipLastSelfSendTime > 0
+			&& cls.realtime - clc.voipLastSelfSendTime < VOIP_TALKING_TIMEOUT ) {
+			mask[self / 8] |= 1 << (self % 8);
 		}
 
 		CL_BuildVoipHexMask( mask, hex, sizeof(hex) );
