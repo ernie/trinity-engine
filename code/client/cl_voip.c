@@ -322,6 +322,20 @@ void CL_CaptureVoip( void )
 		S_MasterGain( Com_Clamp( 0.0f, 1.0f, cl_voipGainDuringCapture->value ) );
 
 		S_StartCapture();
+
+		// Drain stale samples that arrived between stop and start
+		{
+			int stale = S_AvailableCaptureSamples();
+			if ( stale > 0 ) {
+				static int16_t devnull[VOIP_MAX_PACKET_SAMPLES];
+				while ( stale > 0 ) {
+					int chunk = (stale > VOIP_MAX_PACKET_SAMPLES) ? VOIP_MAX_PACKET_SAMPLES : stale;
+					S_Capture( chunk, (byte *) devnull );
+					stale -= chunk;
+				}
+			}
+		}
+
 		CL_VoipNewGeneration();
 		CL_VoipParseTargets();
 	}
@@ -411,6 +425,21 @@ void CL_CaptureVoip( void )
 	//  any previously-buffered data. Pause the capture device, etc.
 	if ( finalFrame ) {
 		S_StopCapture();
+
+		// Drain any remaining samples so they don't leak into the next
+		// generation — alcCaptureStop does not discard buffered data.
+		{
+			int remaining = S_AvailableCaptureSamples();
+			if ( remaining > 0 ) {
+				static int16_t devnull[VOIP_MAX_PACKET_SAMPLES];
+				while ( remaining > 0 ) {
+					int chunk = (remaining > VOIP_MAX_PACKET_SAMPLES) ? VOIP_MAX_PACKET_SAMPLES : remaining;
+					S_Capture( chunk, (byte *) devnull );
+					remaining -= chunk;
+				}
+			}
+		}
+
 		S_MasterGain( 1.0f );
 		clc.voipPower = 0.0f;  // force this value so it doesn't linger.
 	}

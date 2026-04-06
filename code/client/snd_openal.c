@@ -1459,8 +1459,11 @@ void S_AL_SrcUpdate( void )
 			continue;
 
 		// Update source parameters
+		// Stream sources (VOIP, cinematics) manage their own gain
+		// via the volume parameter in S_AL_RawSamples.
 		if((s_alGain->modified) || (s_volume->modified))
-			curSource->curGain = s_alGain->value * s_volume->value;
+			if(!curSource->isStream)
+				curSource->curGain = s_alGain->value * s_volume->value;
 		if((s_alRolloff->modified) && (!curSource->local))
 			qalSourcef(curSource->alSource, AL_ROLLOFF_FACTOR, s_alRolloff->value);
 		if(s_alMinDistance->modified)
@@ -1841,13 +1844,11 @@ void S_AL_RawSamples(int stream, int samples, int rate, int width, int channels,
 
 	if(entityNum < 0)
 	{
-        	// Volume
-        	S_AL_Gain (streamSources[stream], volume * s_volume->value * s_alGain->value);
-        }
+		S_AL_Gain (streamSources[stream], volume * s_alGain->value);
+	}
 	else
 	{
-		// Update curGain so S_AL_ScaleGain picks up volume changes
-		srcList[streamSourceHandles[stream]].curGain = volume * s_alGain->value * s_volume->value;
+		srcList[streamSourceHandles[stream]].curGain = volume * s_alGain->value;
 	}
 
 	// Start stream
