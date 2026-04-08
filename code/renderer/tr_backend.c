@@ -445,6 +445,7 @@ static void RB_Hyperspace( void ) {
 
 	if ( tess.shader != tr.whiteShader ) {
 		RB_EndSurface();
+		RB_SetGL2D();
 		RB_BeginSurface( tr.whiteShader, 0 );
 	}
 
@@ -986,6 +987,11 @@ RB_SetGL2D
 ================
 */
 void RB_SetGL2D( void ) {
+
+	if ( backEnd.projection2D ) {
+		return;
+	}
+
 	backEnd.projection2D = qtrue;
 
 	// set 2D virtual screen size
@@ -1114,9 +1120,8 @@ static const void *RB_StretchPic( const void *data ) {
 
 	shader = cmd->shader;
 	if ( shader != tess.shader ) {
-		if ( tess.numIndexes ) {
-			RB_EndSurface();
-		}
+		RB_EndSurface();
+		RB_SetGL2D(); // set correct shader time before RB_BeginSurface() on 3D->2D transition
 		backEnd.currentEntity = &backEnd.entity2D;
 		RB_BeginSurface( shader, 0 );
 	}
@@ -1125,9 +1130,7 @@ static const void *RB_StretchPic( const void *data ) {
 	VBO_UnBind();
 #endif
 
-	if ( !backEnd.projection2D ) {
-		RB_SetGL2D();
-	}
+	RB_SetGL2D();
 
 #ifdef USE_FBO
 	//Check if it's time for BLOOM!
@@ -1369,9 +1372,7 @@ void RB_ShowImages( void ) {
 	const vec2_t t[4] = { {0,0}, {1,0}, {0,1}, {1,1} };
 	vec3_t v[4];
 
-	if ( !backEnd.projection2D ) {
-		RB_SetGL2D();
-	}
+	RB_SetGL2D();
 
 	qglClear( GL_COLOR_BUFFER_BIT );
 
@@ -1506,8 +1507,7 @@ static const void *RB_FinishBloom( const void *data )
 		{
 			if ( !backEnd.doneBloom && backEnd.doneSurfaces )
 			{
-				if ( !backEnd.projection2D )
-					RB_SetGL2D();
+				RB_SetGL2D();
 				qglColor4f( 1, 1, 1, 1 );
 				FBO_Bloom( 0, 0, qfalse );
 			}

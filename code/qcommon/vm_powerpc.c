@@ -69,9 +69,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define USE_ISA_3_0 0
 #endif
 
-#define NUM_PASSES		2
+#define NUM_PASSES		3 // INIT, EXPAND, FINAL + alloc + FINAL
 
 #define PASS_INIT		0
+#define PASS_EXPAND		1
+#define PASS_FINAL		2
 
 // additional integrity checks
 #define DEBUG_VM
@@ -83,8 +85,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define CONST_CACHE_SX
 
 #define REGS_OPTIMIZE
-//#define ADDR_OPTIMIZE
-//#define LOAD_OPTIMIZE
+#define ADDR_OPTIMIZE
+#define LOAD_OPTIMIZE
 #define FPU_OPTIMIZE
 #define CONST_OPTIMIZE
 
@@ -195,6 +197,7 @@ static instruction_t *inst = NULL;
 
 static uint32_t ip;
 static uint32_t pass;
+static uint32_t jumpSizeChanged;
 
 static uint32_t savedOffset[ OFFSET_T_LAST ];
 
@@ -889,7 +892,7 @@ static void mov_sx_local( uint32_t reg, const uint32_t addr )
 
 static void load4_rx( uint32_t reg, uint32_t offset )
 {
-	emit( PPC_LWZ( reg, offset, rOPSTACK ) ); // load
+	emit( PPC_LWZ( reg, offset, rOPSTACK ) );
 }
 
 
@@ -947,7 +950,7 @@ static void VM_Destroy_Compiled( vm_t *vm )
 	if ( vm->codeBase.ptr )
 	{
 		if ( munmap( vm->codeBase.ptr, vm->codeLength ) )
-			Com_Printf( S_COLOR_RED "%s(): memory unmap failed, possible memory leak!\n", __func__ );
+			Com_Printf( S_COLOR_ERROR "%s(): memory unmap failed, possible memory leak!\n", __func__ );
 	}
 	vm->codeBase.ptr = NULL;
 }
@@ -1312,21 +1315,49 @@ static void emit_branchConditional( vm_t *vm, instruction_t *ci, int op )
 #endif
 
 
-static void emit_branchConditionalShort( vm_t* vm, instruction_t* ci )
+static qboolean isLongOffset( int32_t offset ) {
+	if ( (int16_t)offset != offset ) {
+		return qtrue;
+	}
+	//if ( (int8_t)offset != offset ) {
+	//	return qtrue; // easy trigger
+	//}
+	return qfalse;
+}
+
+
+static qboolean emit_branchConditionalShort( vm_t* vm, instruction_t* ci )
 {
-	int32_t targetOfs = vm->instructionPointers[ ci->value ] - compiledOfs;
+	int32_t targetOfs;
 	int bo, bi;
 
 	get_branch_cond( ci->op, &bo, &bi );
 
 	if ( pass != PASS_INIT ) {
-		if ( (int16_t)targetOfs != targetOfs ) {
-			// TODO: add/switch to expansion pass?
-			DROP( "offset is too large" );
+		targetOfs = vm->instructionPointers[ ci->value ] - compiledOfs;
+		if ( isLongOffset( targetOfs ) ) {
+			if ( ci->njump ) {
+				ci->njump = 0;
+				if ( targetOfs > 0 ) {
+					jumpSizeChanged |= 1;
+				} else {
+					// backward jumps can be safely expanded
+				}
+			}
 		}
+	} else {
+		targetOfs = 0; // unknown at PASS_INIT
 	}
 
-	emit( PPC_BC( bo, bi, targetOfs ) );
+	if ( ci->njump ) {
+		emit( PPC_BC( bo, bi, targetOfs ) );
+		return qtrue;
+	} else {
+		const int inv_bo = (bo == BO_TRUE) ? BO_FALSE : BO_TRUE;
+		emit( PPC_BC( inv_bo, bi, +8 ) );  // skip next instruction if NOT condition
+		emit( PPC_B( targetOfs - 4 ) );    // -4 because compiledOfs advanced by 4
+		return qfalse;
+	}
 }
 
 
@@ -1384,8 +1415,8 @@ static qboolean ConstOptimize( vm_t* vm, instruction_t* ci, instruction_t* ni )
 			inc_opstack(); // opstack += 4
 			if ( ci->value == ~TRAP_SQRT ) {
 				uint32_t sx = alloc_sx( F0 | TEMP );
-				emit( PPC_LFS( sx, 8, rPROCBASE ) ); // f0 = [procBase + 8]
-				emit( PPC_FSQRTS( sx, sx ) );        // f0 = fsqrts(s0)
+				emit( PPC_LFS( sx, 8, rPROCBASE ) ); // F0 = [procBase + 8]
+				emit( PPC_FSQRTS( sx, sx ) );        // F0 = fsqrts(F0)
 				store_sx_opstack( sx );
 				ip += 1; // OP_CALL
 				return qtrue;
@@ -1475,7 +1506,7 @@ qboolean VM_Compile( vm_t *vm, vmHeader_t *header )
 
 	if ( errMsg ) {
 		VM_FreeBuffers();
-		Com_Printf( S_COLOR_YELLOW "%s(%s) error: %s\n", __func__, vm->name, errMsg );
+		Com_Printf( S_COLOR_WARNING "%s(%s) error: %s\n", __func__, vm->name, errMsg );
 		return qfalse;
 	}
 
@@ -1484,6 +1515,11 @@ qboolean VM_Compile( vm_t *vm, vmHeader_t *header )
 	}
 
 	VM_ReplaceInstructions( vm, inst );
+
+	// assume near jumps by default, do expansion on demand
+	for ( i = 0; i < header->instructionCount; i++ ) {
+		inst[i].njump = 1;
+	}
 
 	memset( savedOffset, 0, sizeof( savedOffset ) );
 
@@ -1496,6 +1532,7 @@ __recompile:
 	// translate all instructions
 	ip = 0;
 	compiledOfs = 0;
+	jumpSizeChanged = 0;
 
 	proc_base = -1;
 	proc_len = 0;
@@ -1650,6 +1687,7 @@ __recompile:
 				if ( proc_len == 0 ) {
 					// empty function, just return
 					emit( PPC_BLR() );
+					proc_base = -1;
 					ip += 2; // skip OP_PUSH + OP_LEAVE
 					break;
 				}
@@ -1743,6 +1781,17 @@ __recompile:
 			case OP_PUSH:
 				inc_opstack();			// opstack -= 4
 				if ( (ci + 1)->op == OP_LEAVE ) {
+					if ( jumpSizeChanged != 0 ) {
+						// repeat last pass to handle jump size expansion
+						if ( proc_base >= 0 ) {
+							compiledOfs = vm->instructionPointers[ proc_base ];
+							ip = proc_base;
+							init_opstack();
+							jumpSizeChanged = 0;
+							pass = PASS_EXPAND;
+							break;
+						}
+					}
 					proc_base = -1;
 				}
 				break;
@@ -1805,7 +1854,7 @@ __recompile:
 						emit( PPC_CMPLW( 0, rx[1], rx[0] ) ); break;
 					default:
 						emit( PPC_CMPW( 0, rx[1], rx[0] ) ); break;
-				};
+				}
 				emit_branchConditionalShort( vm, ci );
 				break;
 
@@ -1833,35 +1882,178 @@ __recompile:
 			case OP_LOAD1:
 			case OP_LOAD2:
 			case OP_LOAD4:
-				// rx[0] = rx[1] = load_rx_opstack( R3 ); // target, address = *opstack
-				load_rx_opstack2( &rx[0], R3, &rx[1], R4 );
-				emit_CheckReg( vm, rx[1], FUNC_BADR );
-				switch ( ci->op ) {
-					case OP_LOAD1: emit( PPC_LBZX( rx[0], rDATABASE, rx[1] ) );  break; // R3 = dataBase[R4] (byte)
-					case OP_LOAD2: emit( PPC_LHZX( rx[0], rDATABASE, rx[1] ) );  break; // R3 = dataBase[R4] (halfword)
-					case OP_LOAD4: emit( PPC_LWZX( rx[0], rDATABASE, rx[1] ) );  break; // R3 = dataBase[R4] (word)
+#ifdef FPU_OPTIMIZE
+				if ( ci->fpu && ci->op == OP_LOAD4 ) {
+					// fpu-optimized path
+					if ( addr_on_top( &var, rDATABASE, rPROCBASE ) ) {
+						// address specified by CONST/LOCAL
+						discard_top();
+						var.size = 4;
+						if ( find_sx_var( &sx[0], &var ) ) {
+							// already cached in some register
+							mask_sx( sx[0] );
+						} else {
+							// not cached, perform load
+							sx[0] = alloc_sx( F0 );
+							if ( var.addr == (int16_t)var.addr ) {
+								// short offset
+								emit( PPC_LFS( sx[0], var.addr, var.base ) );	// F0 = varBase[var.addr]
+							} else {
+								// long offset
+								rx[0] = alloc_rx_const( R4, var.addr );			// R4 = var.addr
+								emit( PPC_LFSX( sx[0], rx[0], var.base ) );		// F0 = var.base[R4]
+								unmask_rx( rx[0] );
+							}
+							set_sx_var( sx[0], &var );				// update metadata
+						}
+						store_sx_opstack( sx[0] );					// *opStack = F0
+					} else {
+						// address specified by a register
+						rx[0] = load_rx_opstack( R4 );					// R4 = *opStack
+						emit_CheckReg( vm, rx[0], FUNC_BADR );			// check for (R4 < dataMask)
+						sx[0] = alloc_sx( F0 );
+						emit( PPC_LFSX( sx[0], rx[0], rDATABASE ) );	// F0 = dataBase[R4]
+						store_sx_opstack( sx[0] );						// *opStack = F0
+						unmask_rx( rx[0] );
+					}
+					break;
 				}
-				if ( rx[1] != rx[0] ) {
-					unmask_rx( rx[1] );
+#endif // FPU_OPTIMIZE
+				if ( addr_on_top( &var, rDATABASE, rPROCBASE ) ) {
+					// address specified by CONST/LOCAL thus no validation needed
+					reg_t *reg;
+					discard_top();
+					switch ( ci->op ) {
+						case OP_LOAD1: var.size = 1; break;
+						case OP_LOAD2: var.size = 2; break;
+						default:       var.size = 4; break;
+					}
+					if ( (reg = find_rx_var( &rx[0], &var )) != NULL ) {
+						// already cached in some register, do zero extension if needed
+						switch ( ci->op ) {
+							case OP_LOAD1:
+								if ( reg->ext != Z_EXT8 ) {
+									emit( PPC_EXTSB( rx[0], rx[0] ) ); // RX = (unsigned byte) RX
+									reduce_map_size( reg, 1 );
+								} break;
+							case OP_LOAD2:
+								if ( reg->ext != Z_EXT16 ) {
+									emit( PPC_EXTSH( rx[0], rx[0] ) ); // RX = (unsigned short) RX
+									reduce_map_size( reg, 2 );
+								} break;
+							case OP_LOAD4:
+								reg->ext = Z_NONE;
+								break;
+						}
+						mask_rx( rx[0] );
+					} else {
+						// not found in vars, perform load
+						rx[0] = alloc_rx( R3 );	// allocate target register
+						if ( var.addr == (int16_t)var.addr ) {
+							// short offset
+							switch ( ci->op ) {
+								case OP_LOAD1: emit( PPC_LBZ( rx[0], var.addr, var.base ) ); var.size = 1; set_rx_ext( rx[0], Z_EXT8 ); break;  // R3 = (unsigned byte)var.base[var.addr]
+								case OP_LOAD2: emit( PPC_LHZ( rx[0], var.addr, var.base ) ); var.size = 2; set_rx_ext( rx[0], Z_EXT16 ); break; // R3 = (unsigned short)var.base[var.addr]
+								case OP_LOAD4: emit( PPC_LWZ( rx[0], var.addr, var.base ) ); var.size = 4; set_rx_ext( rx[0], Z_NONE ); break;  // R3 = (dword)var.base[var.addr]
+							}
+						} else {
+							// long offset, use indexed form
+							rx[1] = alloc_rx_const( R4, var.addr ); // R4 = var.addr
+							switch ( ci->op ) {
+								case OP_LOAD1: emit( PPC_LBZX( rx[0], rx[1], var.base ) ); var.size = 1; set_rx_ext( rx[0], Z_EXT8 ); break;	// R3 = var.base[R4] (byte)
+								case OP_LOAD2: emit( PPC_LHZX( rx[0], rx[1], var.base ) ); var.size = 2; set_rx_ext( rx[0], Z_EXT16 ); break;	// R3 = var.base[R4] (halfword)
+								case OP_LOAD4: emit( PPC_LWZX( rx[0], rx[1], var.base ) ); var.size = 4; set_rx_ext( rx[0], Z_NONE ); break;	// R3 = var.base[R4] (word)
+							}
+							unmask_rx( rx[1] );
+						}
+						set_rx_var( rx[0], &var ); // update metadata for destination register
+					}
+				} else {
+					// address specified by a register
+					// rx[0] = rx[1] = load_rx_opstack( R3 );	// target, address = *opStack
+					load_rx_opstack2( &rx[0], R3, &rx[1], R4 );
+					emit_CheckReg( vm, rx[1], FUNC_BADR );
+					switch ( ci->op ) {
+						case OP_LOAD1: emit( PPC_LBZX( rx[0], rx[1], rDATABASE ) ); set_rx_ext( rx[0], Z_EXT8 ); break;		// R3 = dataBase[R4] (byte)
+						case OP_LOAD2: emit( PPC_LHZX( rx[0], rx[1], rDATABASE ) ); set_rx_ext( rx[0], Z_EXT16 ); break;	// R3 = dataBase[R4] (halfword)
+						case OP_LOAD4: emit( PPC_LWZX( rx[0], rx[1], rDATABASE ) ); set_rx_ext( rx[0], Z_NONE ); break;		// R3 = dataBase[R4] (word)
+					}
+					if ( rx[1] != rx[0] ) {
+						unmask_rx( rx[1] );
+					}
 				}
-				store_rx_opstack( rx[0] ); // *opstack = R3
+				store_rx_opstack( rx[0] ); // *opStack = R3
 				break;
 
 			case OP_STORE1:
 			case OP_STORE2:
 			case OP_STORE4:
-				rx[0] = load_rx_opstack( R3 | RCONST ); dec_opstack(); // r3 = *opstack; opstack -= 4
-				// address specified by register
-				rx[1] = load_rx_opstack( R4 | RCONST ); dec_opstack(); // r4 = *opstack; opstack -= 4
-				if ( !ci->safe )
-					emit_CheckReg( vm, rx[1], FUNC_BADW );
-				switch ( ci->op ) {
-					case OP_STORE1: emit( PPC_STBX( rx[0], rDATABASE, rx[1] ) ); break; // (byte) dataBase[R3] = R4
-					case OP_STORE2: emit( PPC_STHX( rx[0], rDATABASE, rx[1] ) ); break; // (short) dataBase[R3] = R4
-					case OP_STORE4: emit( PPC_STWX( rx[0], rDATABASE, rx[1] ) ); break; // (word) dataBase[R3] = R4
+#ifdef FPU_OPTIMIZE
+				if ( scalar_on_top() && ci->op == OP_STORE4 ) {
+					// fpu-optimized path
+					sx[0] = load_sx_opstack( F0 | RCONST ); dec_opstack();	// F0 = *opStack; opStack -= 4
+					if ( addr_on_top( &var, rDATABASE, rPROCBASE ) ) {
+						// address specified by CONST/LOCAL
+						discard_top(); dec_opstack();
+						var.size = 4;
+						if ( var.addr == (int16_t)var.addr ) {
+							// short offset
+							emit( PPC_STFS( sx[0], var.addr, var.base ) );	// var.base[var.addr] = F0
+						} else {
+							// long offset
+							rx[0] = alloc_rx_const( R4, var.addr );			// R4 = var.addr
+							emit( PPC_STFSX( sx[0], rx[0], var.base ) );	// var.base[R4] = F0
+							unmask_rx( rx[0] );
+						}
+						wipe_var_range( &var );		// clear mappings for affected area
+						set_sx_var( sx[0], &var );	// update metadata
+					} else {
+						// address specified by register
+						rx[0] = load_rx_opstack( R4 | RCONST ); dec_opstack();	// R4 = *opStack; opStack -= 4
+						emit_CheckReg( vm, rx[0], FUNC_BADW );					// check for (R4 < dataMask)
+						emit( PPC_STFSX( sx[0], rx[0], rDATABASE ) );			// dataBase[R4] = F0
+						unmask_rx( rx[0] );
+						wipe_vars(); // unknown/dynamic address, wipe all register mappings
+					}
+					unmask_sx( sx[0] );
+					break;
 				}
-				wipe_vars(); // unknown/dynamic address, wipe all register mappings
-				unmask_rx( rx[1] );
+#endif // FPU_OPTIMIZE
+				rx[0] = load_rx_opstack( R3 | RCONST ); dec_opstack(); // R3 = *opStack; opStack -= 4
+				if ( addr_on_top( &var, rDATABASE, rPROCBASE ) ) {
+					// address specified by CONST/LOCAL
+					discard_top(); dec_opstack();
+					if ( var.addr == (int16_t)var.addr ) {
+						//short offset
+						switch ( ci->op ) {
+							case OP_STORE1: emit( PPC_STB( rx[0], var.addr, var.base ) ); var.size = 1; break; // (byte) var.base[var.addr] = R3
+							case OP_STORE2: emit( PPC_STH( rx[0], var.addr, var.base ) ); var.size = 2; break; // (short) var.base[var.addr] = R3
+							default:        emit( PPC_STW( rx[0], var.addr, var.base ) ); var.size = 4; break; // (word) var.base[var.addr] = R3
+						}
+					} else {
+						// long offset
+						rx[1] = alloc_rx_const( R4, var.addr );	// R4 = var.addr
+						switch ( ci->op ) {
+							case OP_STORE1: emit( PPC_STBX( rx[0], rx[1], var.base ) ); var.size = 1; break; // (byte) var.base[R4] = R3
+							case OP_STORE2: emit( PPC_STHX( rx[0], rx[1], var.base ) ); var.size = 2; break; // (short) var.base[R4] = R3
+							default:        emit( PPC_STWX( rx[0], rx[1], var.base ) ); var.size = 4; break; // (word) var.base[R4] = R3
+						}
+						unmask_rx( rx[1] );
+					}
+					wipe_var_range( &var );		// erase mappings for written memory area
+					set_rx_var( rx[0], &var );	// update metadata for memory
+				} else {
+					// address specified by register
+					rx[1] = load_rx_opstack( R4 | RCONST ); dec_opstack(); // R4 = *opStack; opStack -= 4
+					emit_CheckReg( vm, rx[1], FUNC_BADW );
+					switch ( ci->op ) {
+						case OP_STORE1: emit( PPC_STBX( rx[0], rx[1], rDATABASE ) ); break; // (byte) dataBase[R4] = R3
+						case OP_STORE2: emit( PPC_STHX( rx[0], rx[1], rDATABASE ) ); break; // (short) dataBase[R4] = R3
+						default:        emit( PPC_STWX( rx[0], rx[1], rDATABASE ) ); break; // (word) dataBase[R4] = R3
+					}
+					wipe_vars(); // unknown/dynamic address, wipe all register mappings
+					unmask_rx( rx[1] );
+				}
 				unmask_rx( rx[0] );
 				break;
 
@@ -1937,7 +2129,7 @@ __recompile:
 				switch ( ci->op ) {
 					case OP_ADD:  emit( PPC_ADD( rx[0], rx[2], rx[1] ) ); break;
 					case OP_SUB:  emit( PPC_SUB( rx[0], rx[2], rx[1] ) ); break;
-					case OP_MULI: emit( PPC_MULLW( rx[0], rx[2], rx[1] ) ); break;
+					case OP_MULI: // emit( PPC_MULLW( rx[0], rx[2], rx[1] ) ); break;
 					case OP_MULU: emit( PPC_MULLW( rx[0], rx[2], rx[1] ) ); break; // unsigned multiply - same instruction for low word
 					case OP_DIVI: emit( PPC_DIVW( rx[0], rx[2], rx[1] ) ); break;
 					case OP_DIVU: emit( PPC_DIVWU( rx[0], rx[2], rx[1] ) ); break;
@@ -1994,7 +2186,7 @@ __recompile:
 			case OP_SUBF:
 			case OP_MULF:
 			case OP_DIVF:
-				//sx[0] = sx[1] = load_sx_opstack( S0 ); dec_opstack();	// F0 = F1 = *opstack
+				//sx[0] = sx[1] = load_sx_opstack( F0 ); dec_opstack();	// F0 = F1 = *opstack
 				load_sx_opstack2( &sx[0], F0, &sx[1], F1 ); dec_opstack();
 				sx[2] = load_sx_opstack( F2 | RCONST );	// opstack -= 4; F2 = *opstack
 				switch ( ci->op ) {
@@ -2072,6 +2264,12 @@ __recompile:
 
 	flush_opstack();
 
+	if ( jumpSizeChanged != 0 ) {
+		// in case if there were no proc/leave
+		pass = PASS_EXPAND;
+		goto __recompile;
+	}
+
 #ifdef FUNC_ALIGN
 	emitAlign( FUNC_ALIGN );
 #endif
@@ -2112,7 +2310,7 @@ __recompile:
 		vm->codeBase.ptr = mmap( NULL, allocSize, PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0 );
 		if ( vm->codeBase.ptr == MAP_FAILED ) {
 			VM_FreeBuffers();
-			Com_Printf( S_COLOR_YELLOW "%s(%s): mmap failed\n", __func__, vm->name );
+			Com_Printf( S_COLOR_WARNING "%s(%s): mmap failed\n", __func__, vm->name );
 			return qfalse;
 		}
 
@@ -2136,7 +2334,7 @@ __recompile:
 
 	if ( mprotect( vm->codeBase.ptr, vm->codeLength, PROT_READ | PROT_EXEC ) ) {
 		VM_Destroy_Compiled( vm );
-		Com_Printf( S_COLOR_YELLOW "%s(%s): mprotect failed\n", __func__, vm->name );
+		Com_Printf( S_COLOR_WARNING "%s(%s): mprotect failed\n", __func__, vm->name );
 		return qfalse;
 	}
 
