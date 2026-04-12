@@ -604,6 +604,7 @@ ifeq ($(COMPILE_PLATFORM),darwin)
     BASE_CFLAGS += -DUSE_OPENAL -DUSE_INTERNAL_OPENAL_HEADERS -I$(OPENALDIR)/include
     ifeq ($(USE_OPENAL_DLOPEN),1)
       BASE_CFLAGS += -DUSE_OPENAL_DLOPEN
+      CLIENT_EXTRA_FILES += $(OPENALDIR)/macosx/libopenal.1.dylib
     else
       CLIENT_LDFLAGS += -framework OpenAL
     endif
