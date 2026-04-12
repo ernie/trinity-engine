@@ -84,6 +84,14 @@ Requires the [Emscripten SDK](https://emscripten.org/docs/getting_started/downlo
 
 Game DLL callbacks for server startup and shutdown events, enabling integration with external tooling for statistics tracking and server management.
 
+## macOS
+
+Downloaded builds will be quarantined by Gatekeeper. Before launching for the first time, remove the quarantine attribute:
+
+```bash
+xattr -cr Trinity.app
+```
+
 ## The Trinity Ecosystem
 
 **[Trinity](https://github.com/ernie/trinity)** — A unified Quake III Arena / Team Arena game mod featuring unlagged weapons, VR head and torso tracking, an orbital follow camera for spectating and demo playback, Quake Live-style damage indicators, and visual enhancements. This mod provides server-side support for VR clients (Q3VR or Quake 3 Quest) and attempts to replicate what features it can for flatscreen players.
