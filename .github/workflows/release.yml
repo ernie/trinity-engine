@@ -377,6 +377,15 @@ jobs:
             [ -d "$dir" ] && cp misc/update-trinity.sh "$dir/"
           done
 
+      - name: Restore executable permissions
+        run: |
+          for dir in linux-x86 linux-x86_64 linux-arm64 linux-armv7; do
+            [ -d "$dir" ] && chmod +x "$dir"/trinity "$dir"/trinity.ded 2>/dev/null || true
+          done
+          for dir in macos-x86_64 macos-aarch64; do
+            [ -d "$dir" ] && find "$dir/Trinity.app/Contents/MacOS" -type f -exec chmod +x {} + 2>/dev/null || true
+          done
+
       - name: Create binary archives
         run: |
           zip -r -y trinity-linux-x86.zip            ./linux-x86/
