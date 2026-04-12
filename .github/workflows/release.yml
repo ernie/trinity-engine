@@ -379,15 +379,15 @@ jobs:
 
       - name: Create binary archives
         run: |
-          7z a -r trinity-linux-x86.zip            ./linux-x86/*
-          7z a -r trinity-linux-x86_64.zip         ./linux-x86_64/*
-          7z a -r trinity-linux-arm64.zip          ./linux-arm64/*
-          7z a -r trinity-linux-armv7.zip          ./linux-armv7/*
+          zip -r -y trinity-linux-x86.zip            ./linux-x86/
+          zip -r -y trinity-linux-x86_64.zip         ./linux-x86_64/
+          zip -r -y trinity-linux-arm64.zip          ./linux-arm64/
+          zip -r -y trinity-linux-armv7.zip          ./linux-armv7/
           7z a -r trinity-windows-mingw-x86.zip    ./windows-mingw-x86/*
           7z a -r trinity-windows-mingw-x86_64.zip ./windows-mingw-x86_64/*
           7z a -r trinity-windows-msvc-arm64.zip   ./windows-msvc-arm64/*
-          7z a -r trinity-macos-x86_64.zip         ./macos-x86_64/*
-          7z a -r trinity-macos-aarch64.zip        ./macos-aarch64/*
+          zip -r -y trinity-macos-x86_64.zip       ./macos-x86_64/
+          zip -r -y trinity-macos-aarch64.zip      ./macos-aarch64/
           7z a -r trinity-web-engine.zip           ./web-engine/*
 
       - name: Create release
