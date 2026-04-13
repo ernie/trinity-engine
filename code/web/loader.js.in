@@ -155,6 +155,26 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
     // Resolve with the module as soon as preRun fires so callers can abort early
     let resolveModule;
     const modulePromise = new Promise((resolve) => { resolveModule = resolve; });
+
+    // Track all AudioContexts created by the engine (OpenAL and SDL2 both
+    // create contexts inside the Emscripten module closure where we can't
+    // reach them directly).  We patch the constructor temporarily so
+    // shutdown() can close every context the engine opened.
+    const audioContexts = new Set();
+    const _OrigAC = globalThis.AudioContext;
+    const _OrigWebkitAC = globalThis.webkitAudioContext;
+    function patchedAC(...args) {
+        const ctx = new _OrigAC(...args);
+        audioContexts.add(ctx);
+        return ctx;
+    }
+    if (_OrigAC) {
+        Object.setPrototypeOf(patchedAC, _OrigAC);
+        patchedAC.prototype = _OrigAC.prototype;
+        globalThis.AudioContext = patchedAC;
+    }
+    if (_OrigWebkitAC) globalThis.webkitAudioContext = patchedAC;
+
     // iOS Safari requires a user gesture to resume a suspended AudioContext.
     // Emscripten's SDL2 attempts this internally but can miss edge cases.
     function resumeAudio() {
@@ -188,6 +208,9 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
         canvas: canvas,
         arguments: generatedArguments.trim().split(/\s+/),
         locateFile: (file) => enginePath + file,
+        onExit: () => {
+            modulePromise.then(mod => { if (mod.shutdown) mod.shutdown(); });
+        },
         postMainLoop: () => {
             // Fire one-shot onNextFrame callbacks after each engine frame
             if (modulePromise._nextFrameCbs && modulePromise._nextFrameCbs.length) {
@@ -205,6 +228,24 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
             // Provide onNextFrame helper: queues a callback for after the next engine frame
             modulePromise._nextFrameCbs = [];
             mod.onNextFrame = (cb) => { modulePromise._nextFrameCbs.push(cb); };
+            mod.shutdown = function shutdown() {
+                if (mod._shuttingDown) return;
+                mod._shuttingDown = true;
+                // Close every AudioContext the engine created (OpenAL and/or SDL2)
+                for (const ctx of audioContexts) {
+                    try { ctx.close(); } catch (e) {}
+                }
+                audioContexts.clear();
+                // Restore the original AudioContext constructor
+                if (_OrigAC) globalThis.AudioContext = _OrigAC;
+                if (_OrigWebkitAC) globalThis.webkitAudioContext = _OrigWebkitAC;
+                // Clean up event listeners added by this loader
+                document.removeEventListener('click', resumeAudio, true);
+                document.removeEventListener('touchstart', resumeAudio, true);
+                if (document.pointerLockElement === canvas) {
+                    document.exitPointerLock();
+                }
+            };
             mod.addRunDependency('setup-trinity-filesystem');
             try {
                     const config = await configPromise;
