@@ -706,7 +706,16 @@ static void GLSL_InitUniforms(shaderProgram_t *program)
 		}
 	}
 
+	// The uniform buffer doubles as a per-uniform cache: GLSL_SetUniform*
+	// compares the incoming value against this buffer and skips the GPU
+	// upload when they match. Uninitialized bytes can alias a caller's
+	// intended value and cause uploads to be silently skipped, leaving the
+	// freshly-linked program's GPU-side uniforms at their zero defaults.
+	// Manifested after vid_restart on Safari/WebAssembly as a white screen;
+	// native and Chrome escaped it because their heap reuse happened to
+	// leave these bytes at zero in practice.
 	program->uniformBuffer = ri.Malloc(size);
+	Com_Memset(program->uniformBuffer, 0, size);
 }
 
 static void GLSL_FinishGPUShader(shaderProgram_t *program)
