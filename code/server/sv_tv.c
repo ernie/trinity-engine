@@ -95,6 +95,46 @@ static void SV_TV_CompressWrite( const void *data, int len ) {
 
 /*
 ===============
+SV_TV_LogEvent
+
+Append a structured event line to the active g_log file (the same
+log the game module writes Kill:/Award:/etc. lines to). Used by the
+demo lifecycle to surface DemoSaved / DemoDiscarded events that
+trinity-tracker's collector log parser keys on. Format matches the
+existing log convention: "<ISO-local> <EventType>: <args>" — the QVM
+uses localtime() in G_LogPrintf, so we follow suit to keep lines
+chronologically interleaved.
+
+No-op if g_log is empty (server isn't logging) or the file can't be
+opened. The FS layer is single-threaded, so the brief append-and-close
+won't collide with the QVM's G_LogPrintf writes.
+===============
+*/
+static void SV_TV_LogEvent( const char *line ) {
+	const char *gLog;
+	fileHandle_t f;
+	time_t now;
+	struct tm *tm_info;
+	char ts[32];
+
+	gLog = Cvar_VariableString( "g_log" );
+	if ( !gLog[0] ) {
+		return;
+	}
+	f = FS_FOpenFileAppend( gLog );
+	if ( !f ) {
+		return;
+	}
+	now = time( NULL );
+	tm_info = localtime( &now );
+	strftime( ts, sizeof( ts ), "%Y-%m-%dT%H:%M:%S", tm_info );
+	FS_Printf( f, "%s %s\n", ts, line );
+	FS_FCloseFile( f );
+}
+
+
+/*
+===============
 SV_TV_DefaultName
 
 Generate a default recording name: prefer g_matchUUID, fall back to timestamp.
@@ -494,6 +534,8 @@ void SV_TV_StopRecord( qboolean discard ) {
 	Com_sprintf( tmpPath, sizeof( tmpPath ), "%s.tvd.tmp", tv.recordingPath );
 
 	if ( discard ) {
+		const char *uuid;
+
 		// Free compressor, close and delete the file without finalizing
 		if ( tv.cstream ) {
 			ZSTD_freeCStream( tv.cstream );
@@ -502,6 +544,11 @@ void SV_TV_StopRecord( qboolean discard ) {
 		FS_FCloseFile( tv.file );
 		FS_HomeRemove( tmpPath );
 		Com_Printf( "TV: Recording discarded, file deleted.\n" );
+
+		uuid = Cvar_VariableString( "g_matchUUID" );
+		if ( uuid[0] ) {
+			SV_TV_LogEvent( va( "DemoDiscarded: %s", uuid ) );
+		}
 	} else {
 		char finalPath[MAX_QPATH];
 		int durationMsec;
@@ -559,6 +606,14 @@ void SV_TV_StopRecord( qboolean discard ) {
 
 		Com_Printf( "TV: Recording stopped. %i frames (%.1f seconds), %u bytes.\n",
 			tv.frameCount, duration, tv.fileOffset );
+
+		{
+			const char *uuid = Cvar_VariableString( "g_matchUUID" );
+			if ( uuid[0] ) {
+				SV_TV_LogEvent( va( "DemoSaved: %s frames=%d duration_ms=%d bytes=%u",
+					uuid, tv.frameCount, durationMsec, tv.fileOffset ) );
+			}
+		}
 	}
 
 	tv.recording = qfalse;
