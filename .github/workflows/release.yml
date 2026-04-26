@@ -347,11 +347,6 @@ jobs:
             if [ -d "$dir" ]; then
               echo "Bundling game data into $dir/"
 
-              # Shareware demo → demoq3/
-              mkdir -p "$dir/demoq3"
-              cp assets/third_party/demo/pak0.pk3 "$dir/demoq3/"
-              cp assets/third_party/demo/DEMO_LICENSE.txt "$dir/demoq3/"
-
               # Point release → baseq3/
               mkdir -p "$dir/baseq3"
               cp assets/third_party/point_release_v1.32/pak*.pk3 "$dir/baseq3/"
