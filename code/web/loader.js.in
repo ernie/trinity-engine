@@ -14,6 +14,36 @@ function authHeaders(url, authToken) {
     return { 'Authorization': `Bearer ${authToken}` };
 }
 
+// Read a Response body chunk-by-chunk, calling onChunk(byteCount) for each
+// piece received. Used by loadEngine to drive a real-bytes progress bar
+// instead of one that jumps to "done" the moment headers arrive.
+async function readBodyWithProgress(response, expectedLength, onChunk) {
+    if (!expectedLength || !response.body || !response.body.getReader) {
+        // Without a Content-Length or a streaming body we can't report
+        // partial progress; buffer the whole thing and credit it at the end.
+        const buf = await response.arrayBuffer();
+        if (expectedLength) onChunk(expectedLength);
+        return new Uint8Array(buf);
+    }
+    const reader = response.body.getReader();
+    const chunks = [];
+    let received = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        received += value.byteLength;
+        onChunk(value.byteLength);
+    }
+    // Reconcile any drift between Content-Length and bytes actually
+    // delivered so the bar settles at exactly 100%.
+    if (received !== expectedLength) onChunk(expectedLength - received);
+    const out = new Uint8Array(received);
+    let off = 0;
+    for (const c of chunks) { out.set(c, off); off += c.byteLength; }
+    return out;
+}
+
 async function cachedFetch(url, label, statusEl, authToken) {
     const auth = authHeaders(url, authToken);
     if (cacheAvailable) {
@@ -250,86 +280,68 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
             try {
                     const config = await configPromise;
 
-                    // Count total assets to load for progress reporting
-                    let totalAssets = 0;
-                    let loadedAssets = 0;
-                    const gamedirs = [fs_basegame, fs_game];
-                    for (const gamedir of gamedirs) {
-                        if (gamedir === '') continue;
-                        if (config[gamedir]?.files) totalAssets += config[gamedir].files.length;
-                    }
-                    totalAssets += extraPk3s.length;
-                    if (demoMapName) totalAssets++;
-                    // Engine WASM counts as 1
-                    totalAssets++;
-                    loadedAssets++;
-                    progress(loadedAssets, totalAssets);
-
-                    for (let g = 0; g < gamedirs.length; g++) {
-                        const gamedir = gamedirs[g];
+                    // Flatten everything we need to fetch from the network
+                    // (gamedir files, caller-supplied extras, demo map pk3)
+                    // so progress is tracked uniformly across all of them.
+                    const assets = [];
+                    for (const gamedir of [fs_basegame, fs_game]) {
                         if (gamedir === '') continue;
                         if (!config[gamedir] || !config[gamedir].files) {
                             console.warn(`Game directory '${gamedir}' not found in ${configFilename}.`);
                             continue;
                         }
-                        const files = config[gamedir].files;
-                        const urls = files.map(file => new URL(file.src, dataURL).href);
-                        const fetches = urls.map((url, i) => {
-                            const name = files[i].src.match(/[^/]+$/)[0];
-                            statusEl.textContent = `Loading ${name}...`;
-                            return cachedFetch(url, `Loading ${name}`, statusEl, authToken);
-                        });
-                        for (let i = 0; i < files.length; i++) {
-                            const name = files[i].src.match(/[^/]+$/)[0];
-                            statusEl.textContent = `Loading ${name}...`;
-                            const response = await fetches[i];
-                            loadedAssets++;
-                            progress(loadedAssets, totalAssets);
-                            if (!response.ok) continue;
-                            const data = await response.arrayBuffer();
-                            let dir = files[i].dst;
-                            mod.FS.mkdirTree(dir);
-                            mod.FS.writeFile(`${dir}/${name}`, new Uint8Array(data));
+                        for (const file of config[gamedir].files) {
+                            const name = file.src.match(/[^/]+$/)[0];
+                            assets.push({ url: new URL(file.src, dataURL).href, dir: file.dst, name });
                         }
                     }
-
-                    // Load extra pk3 files
-                    if (extraPk3s.length > 0) {
-                        const pk3Urls = extraPk3s.map(url => new URL(url, window.location.href).href);
-                        const pk3Fetches = pk3Urls.map((url, i) => {
-                            const name = url.split('/').pop();
-                            return cachedFetch(url, `Loading ${name}`, statusEl, authToken);
-                        });
-                        for (let i = 0; i < extraPk3s.length; i++) {
-                            const filename = pk3Urls[i].split('/').pop();
-                            statusEl.textContent = `Loading ${filename}...`;
-                            const response = await pk3Fetches[i];
-                            loadedAssets++;
-                            progress(loadedAssets, totalAssets);
-                            if (!response.ok) {
-                                console.warn(`Failed to fetch pk3: ${extraPk3s[i]} (${response.status})`);
-                                continue;
-                            }
-                            const data = await response.arrayBuffer();
-                            mod.FS.mkdirTree(`/${fs_basegame}`);
-                            mod.FS.writeFile(`/${fs_basegame}/${filename}`, new Uint8Array(data));
-                        }
+                    for (const url of extraPk3s) {
+                        const u = new URL(url, window.location.href).href;
+                        assets.push({ url: u, dir: `/${fs_basegame}`, name: u.split('/').pop() });
                     }
-
-                    // Load map pk3 inferred from demo
                     if (demoMapName) {
-                        const mapPk3Url = new URL(`demopk3s/maps/${demoMapName.toLowerCase()}.pk3`, dataURL).href;
-                        statusEl.textContent = `Loading ${demoMapName} map...`;
-                        const mapResp = await cachedFetch(mapPk3Url, `Loading ${demoMapName} map`, statusEl, authToken);
-                        if (mapResp.ok) {
-                            const mapData = await mapResp.arrayBuffer();
-                            mod.FS.mkdirTree(`/${fs_basegame}`);
-                            mod.FS.writeFile(`/${fs_basegame}/${demoMapName.toLowerCase()}.pk3`, new Uint8Array(mapData));
-                        } else {
-                            console.warn(`Map pk3 not found: ${demoMapName}.pk3 (${mapResp.status})`);
+                        const name = `${demoMapName.toLowerCase()}.pk3`;
+                        assets.push({ url: new URL(`demopk3s/maps/${name}`, dataURL).href, dir: `/${fs_basegame}`, name, optional: true });
+                    }
+
+                    // Kick off every fetch in parallel; cachedFetch returns a
+                    // ready Response from CacheStorage when possible.
+                    const fetches = assets.map(a => cachedFetch(a.url, `Loading ${a.name}`, statusEl, authToken));
+
+                    // Wait for every header before reading any body, so
+                    // totalBytes is fixed up front and the bar can't
+                    // momentarily decrease as later Content-Lengths arrive.
+                    const responses = await Promise.all(fetches);
+                    const lengths = responses.map(r => parseInt(r.headers.get('Content-Length') || '0', 10));
+                    let totalBytes = lengths.reduce((a, b) => a + b, 0);
+                    let loadedBytes = 0;
+                    progress(loadedBytes, totalBytes);
+
+                    // Stream every body in parallel so progress reflects real
+                    // network throughput. Reading them serially would let
+                    // later bodies pile up in the browser's HTTP buffer and
+                    // "instantly complete" when finally drained.
+                    const bodies = responses.map((r, i) => {
+                        if (!r.ok) return Promise.resolve(null);
+                        return readBodyWithProgress(r, lengths[i], (delta) => {
+                            loadedBytes += delta;
+                            progress(loadedBytes, totalBytes);
+                        });
+                    });
+
+                    // Drain bodies in fetch order so FS writes stay deterministic.
+                    for (let i = 0; i < assets.length; i++) {
+                        const a = assets[i];
+                        statusEl.textContent = `Loading ${a.name}...`;
+                        if (!responses[i].ok) {
+                            const tag = a.optional ? 'Optional asset not found' : 'Failed to fetch';
+                            console.warn(`${tag}: ${a.url} (${responses[i].status})`);
+                            continue;
                         }
-                        loadedAssets++;
-                        progress(loadedAssets, totalAssets);
+                        const data = await bodies[i];
+                        if (!data) continue;
+                        mod.FS.mkdirTree(a.dir);
+                        mod.FS.writeFile(`${a.dir}/${a.name}`, data);
                     }
 
                     // Load demo file into virtual filesystem
