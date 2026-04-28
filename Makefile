@@ -556,6 +556,13 @@ ifeq ($(COMPILE_PLATFORM),darwin)
   SHLIBCFLAGS = -fPIC -fvisibility=hidden
   SHLIBLDFLAGS = -dynamiclib $(LDFLAGS)
 
+  # macOS keeps the .$(ARCH) suffix on intermediate per-arch builds so
+  # make-macosx-app.sh can find them (`lipo` merges trinity.x86_64 and
+  # trinity.aarch64 into one universal binary). The final binary inside
+  # Trinity.app/Contents/MacOS has no suffix; the suffix lives only in
+  # build/release-darwin-<arch>/.
+  ARCHEXT = .$(ARCH)
+
   LDFLAGS +=
 
   ifeq ($(ARCH),x86_64)
