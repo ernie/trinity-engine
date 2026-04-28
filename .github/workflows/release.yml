@@ -394,8 +394,15 @@ jobs:
           zip -r -y trinity-macos-aarch64.zip      ./macos-aarch64/
           7z a -r trinity-web-engine.zip           ./web-engine/*
 
+      - name: Generate checksums
+        run: |
+          set -euxo pipefail
+          sha256sum trinity-*.zip > sha256sums.txt
+          cat sha256sums.txt
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             *.zip
+            sha256sums.txt
