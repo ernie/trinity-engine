@@ -115,7 +115,7 @@ jobs:
         $env:CL = "/DTRINITY_ENGINE_VERSION=\`"$version\`""
 
         msbuild code\win32\msvc2017\trinity-ded.vcxproj -p:TargetName=trinity.ded,Configuration=Release,Platform=ARM64 /p:PlatformToolset=v143
-        copy code\win32\msvc2017\output\trinity.ded.exe bin\trinity.ded.arm64.exe
+        copy code\win32\msvc2017\output\trinity.ded.exe bin\trinity.ded.exe
 
         msbuild code\win32\msvc2017\renderer.vcxproj -p:Configuration=Release,Platform=ARM64 /p:PlatformToolset=v143
         copy code\win32\msvc2017\output\trinity_opengl_arm64.dll bin\
@@ -124,7 +124,7 @@ jobs:
         copy code\win32\msvc2017\output\trinity_vulkan_arm64.dll bin\
 
         msbuild code\win32\msvc2017\trinity.vcxproj -p:TargetName=trinity,Configuration=Release,Platform=ARM64,UseWasapi=USE_WASAPI=0 /p:PlatformToolset=v143
-        copy code\win32\msvc2017\output\trinity.exe bin\trinity.arm64.exe
+        copy code\win32\msvc2017\output\trinity.exe bin\trinity.exe
 
     - uses: actions/upload-artifact@v7
       with:

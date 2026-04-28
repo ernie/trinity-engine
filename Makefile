@@ -464,7 +464,6 @@ ifdef MINGW
   BASE_CFLAGS += -ffunction-sections -flto
 
   ifeq ($(ARCH),x86_64)
-    ARCHEXT = .x64
     BASE_CFLAGS += -m64
     OPTIMIZE = -O2 -ffast-math
   endif
@@ -557,8 +556,6 @@ ifeq ($(COMPILE_PLATFORM),darwin)
   SHLIBCFLAGS = -fPIC -fvisibility=hidden
   SHLIBLDFLAGS = -dynamiclib $(LDFLAGS)
 
-  ARCHEXT = .$(ARCH)
-
   LDFLAGS +=
 
   ifeq ($(ARCH),x86_64)
@@ -630,29 +627,12 @@ else
 
   OPTIMIZE = -O2 -fvisibility=hidden
 
-  ifeq ($(ARCH),x86_64)
-    ARCHEXT = .x64
-  else
   ifeq ($(ARCH),x86)
     OPTIMIZE += -march=i586 -mtune=i686
-  endif
   endif
 
   ifeq ($(ARCH),arm)
     OPTIMIZE += -march=armv7-a+fp
-    ARCHEXT = .arm
-  endif
-
-  ifeq ($(ARCH),aarch64)
-    ARCHEXT = .aarch64
-  endif
-
-  ifeq ($(ARCH),ppc64le)
-    ARCHEXT = .ppc64le
-  endif
-
-  ifeq ($(ARCH),ppc64)
-    ARCHEXT = .ppc64
   endif
 
   SHLIBEXT = so
