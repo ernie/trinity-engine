@@ -84,6 +84,16 @@ Requires the [Emscripten SDK](https://emscripten.org/docs/getting_started/downlo
 
 Game DLL callbacks for server startup and shutdown events, enabling integration with external tooling for statistics tracking and server management.
 
+## Game Data
+
+Trinity Engine binaries do not ship with Quake III Arena game content. To play, drop the engine alongside an existing Quake III Arena installation, or assemble the required pk3s yourself:
+
+- **Original game data** — `pak0.pk3` from your retail Quake III Arena CD (and the Team Arena `pak0.pk3` if you want to play missionpack maps). Place in `baseq3/` and `missionpack/` respectively.
+- **Quake III Arena 1.32 point release** — `pak1.pk3` through `pak8.pk3` for `baseq3/`, plus `pak1.pk3` through `pak3.pk3` for `missionpack/`. If you don't already have these, the ioquake3 project hosts the patch data here: <https://ioquake3.org/extras/patch-data/>.
+- **Trinity mod pk3s** — `pak8t.pk3` (baseq3) and `pak3t.pk3` (missionpack) ship with each release. Run the bundled `update-trinity` script to refresh them between Trinity Engine releases.
+
+Earlier Trinity Engine releases bundled the point release pk3s directly. They have been removed to keep download sizes small for the common case where players already have a Quake III installation.
+
 ## macOS
 
 Downloaded builds will be quarantined by Gatekeeper. Before launching for the first time, remove the quarantine attribute:

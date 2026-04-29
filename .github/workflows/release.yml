@@ -314,7 +314,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           sparse-checkout: |
-            assets/third_party
             misc/update-trinity.bat
             misc/update-trinity.sh
 
@@ -347,17 +346,10 @@ jobs:
             if [ -d "$dir" ]; then
               echo "Bundling game data into $dir/"
 
-              # Point release → baseq3/
-              mkdir -p "$dir/baseq3"
-              cp assets/third_party/point_release_v1.32/pak*.pk3 "$dir/baseq3/"
-
               # Trinity assets → baseq3/ and missionpack/
-              mkdir -p "$dir/missionpack"
+              mkdir -p "$dir/baseq3" "$dir/missionpack"
               cp trinity-assets/pak8t.pk3 "$dir/baseq3/"
               cp trinity-assets/pak3t.pk3 "$dir/missionpack/"
-
-              # License files at zip root
-              cp assets/third_party/point_release_v1.32/Q3A_PR_v132_EULA.txt "$dir/"
             else
               echo "Warning: $dir not found, skipping"
             fi
