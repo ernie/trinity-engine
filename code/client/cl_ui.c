@@ -119,9 +119,12 @@ static void LAN_ResetPings(int source) {
 			servers = &cls.localServers[0];
 			count = MAX_OTHER_SERVERS;
 			break;
-		case AS_MPLAYER:
 		case AS_GLOBAL :
 			servers = &cls.globalServers[0];
+			count = MAX_GLOBAL_SERVERS;
+			break;
+		case AS_MPLAYER:
+			servers = &cls.mplayerServers[0];
 			count = MAX_GLOBAL_SERVERS;
 			break;
 		case AS_FAVORITES :
@@ -154,11 +157,15 @@ static int LAN_AddServer(int source, const char *name, const char *address) {
 			count = &cls.numlocalservers;
 			servers = &cls.localServers[0];
 			break;
-		case AS_MPLAYER:
 		case AS_GLOBAL :
 			max = MAX_GLOBAL_SERVERS;
 			count = &cls.numglobalservers;
 			servers = &cls.globalServers[0];
+			break;
+		case AS_MPLAYER:
+			max = MAX_GLOBAL_SERVERS;
+			count = &cls.nummplayerservers;
+			servers = &cls.mplayerServers[0];
 			break;
 		case AS_FAVORITES :
 			count = &cls.numfavoriteservers;
@@ -199,10 +206,13 @@ static void LAN_RemoveServer(int source, const char *addr) {
 			count = &cls.numlocalservers;
 			servers = &cls.localServers[0];
 			break;
-		case AS_MPLAYER:
 		case AS_GLOBAL :
 			count = &cls.numglobalservers;
 			servers = &cls.globalServers[0];
+			break;
+		case AS_MPLAYER:
+			count = &cls.nummplayerservers;
+			servers = &cls.mplayerServers[0];
 			break;
 		case AS_FAVORITES :
 			count = &cls.numfavoriteservers;
@@ -237,9 +247,11 @@ static int LAN_GetServerCount( int source ) {
 		case AS_LOCAL :
 			return cls.numlocalservers;
 			break;
-		case AS_MPLAYER:
 		case AS_GLOBAL :
 			return cls.numglobalservers;
+			break;
+		case AS_MPLAYER:
+			return cls.nummplayerservers;
 			break;
 		case AS_FAVORITES :
 			return cls.numfavoriteservers;
@@ -262,10 +274,15 @@ static void LAN_GetServerAddressString( int source, int n, char *buf, int buflen
 				return;
 			}
 			break;
-		case AS_MPLAYER:
 		case AS_GLOBAL :
 			if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
 				Q_strncpyz(buf, NET_AdrToStringwPort( &cls.globalServers[n].adr) , buflen );
+				return;
+			}
+			break;
+		case AS_MPLAYER:
+			if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
+				Q_strncpyz(buf, NET_AdrToStringwPort( &cls.mplayerServers[n].adr) , buflen );
 				return;
 			}
 			break;
@@ -295,10 +312,14 @@ static void LAN_GetServerInfo( int source, int n, char *buf, int buflen ) {
 				server = &cls.localServers[n];
 			}
 			break;
-		case AS_MPLAYER:
 		case AS_GLOBAL :
 			if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
 				server = &cls.globalServers[n];
+			}
+			break;
+		case AS_MPLAYER:
+			if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
+				server = &cls.mplayerServers[n];
 			}
 			break;
 		case AS_FAVORITES :
@@ -345,10 +366,14 @@ static int LAN_GetServerPing( int source, int n ) {
 				server = &cls.localServers[n];
 			}
 			break;
-		case AS_MPLAYER:
 		case AS_GLOBAL :
 			if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
 				server = &cls.globalServers[n];
+			}
+			break;
+		case AS_MPLAYER:
+			if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
+				server = &cls.mplayerServers[n];
 			}
 			break;
 		case AS_FAVORITES :
@@ -375,10 +400,14 @@ static serverInfo_t *LAN_GetServerPtr( int source, int n ) {
 				return &cls.localServers[n];
 			}
 			break;
-		case AS_MPLAYER:
 		case AS_GLOBAL :
 			if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
 				return &cls.globalServers[n];
+			}
+			break;
+		case AS_MPLAYER:
+			if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
+				return &cls.mplayerServers[n];
 			}
 			break;
 		case AS_FAVORITES :
@@ -514,9 +543,12 @@ static void LAN_MarkServerVisible(int source, int n, qboolean visible ) {
 			case AS_LOCAL :
 				server = &cls.localServers[0];
 				break;
-			case AS_MPLAYER:
 			case AS_GLOBAL :
 				server = &cls.globalServers[0];
+				count = MAX_GLOBAL_SERVERS;
+				break;
+			case AS_MPLAYER:
+				server = &cls.mplayerServers[0];
 				count = MAX_GLOBAL_SERVERS;
 				break;
 			case AS_FAVORITES :
@@ -536,10 +568,14 @@ static void LAN_MarkServerVisible(int source, int n, qboolean visible ) {
 					cls.localServers[n].visible = visible;
 				}
 				break;
-			case AS_MPLAYER:
 			case AS_GLOBAL :
 				if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
 					cls.globalServers[n].visible = visible;
+				}
+				break;
+			case AS_MPLAYER:
+				if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
+					cls.mplayerServers[n].visible = visible;
 				}
 				break;
 			case AS_FAVORITES :
@@ -564,10 +600,14 @@ static int LAN_ServerIsVisible(int source, int n ) {
 				return cls.localServers[n].visible;
 			}
 			break;
-		case AS_MPLAYER:
 		case AS_GLOBAL :
 			if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
 				return cls.globalServers[n].visible;
+			}
+			break;
+		case AS_MPLAYER:
+			if (n >= 0 && n < MAX_GLOBAL_SERVERS) {
+				return cls.mplayerServers[n].visible;
 			}
 			break;
 		case AS_FAVORITES :

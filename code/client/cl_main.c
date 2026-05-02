@@ -2517,9 +2517,15 @@ typedef struct hash_chain_s {
 	struct hash_chain_s *next;
 } hash_chain_t;
 
-static hash_chain_t *hash_table[1024];
-static hash_chain_t hash_list[MAX_GLOBAL_SERVERS];
-static unsigned int hash_count = 0;
+// One hash per bucket so AS_GLOBAL and AS_MPLAYER dedup independently.
+typedef struct {
+	hash_chain_t *table[1024];
+	hash_chain_t  list[MAX_GLOBAL_SERVERS];
+	unsigned int  count;
+} server_hash_t;
+
+static server_hash_t global_hash;
+static server_hash_t mplayer_hash;
 
 static unsigned int hash_func( const netadr_t *addr ) {
 
@@ -2544,15 +2550,15 @@ static unsigned int hash_func( const netadr_t *addr ) {
 	return (hash & 1023);
 }
 
-static void hash_insert( const netadr_t *addr )
+static void hash_insert( server_hash_t *h, const netadr_t *addr )
 {
 	hash_chain_t **tab, *cur;
 	unsigned int hash;
-	if ( hash_count >= MAX_GLOBAL_SERVERS )
+	if ( h->count >= MAX_GLOBAL_SERVERS )
 		return;
 	hash = hash_func( addr );
-	tab = &hash_table[ hash ];
-	cur = &hash_list[ hash_count++ ];
+	tab = &h->table[ hash ];
+	cur = &h->list[ h->count++ ];
 	cur->addr = *addr;
 	if ( cur != *tab )
 		cur->next = *tab;
@@ -2561,17 +2567,17 @@ static void hash_insert( const netadr_t *addr )
 	*tab = cur;
 }
 
-static void hash_reset( void )
+static void hash_reset( server_hash_t *h )
 {
-	hash_count = 0;
-	memset( hash_list, 0, sizeof( hash_list ) );
-	memset( hash_table, 0, sizeof( hash_table ) );
+	h->count = 0;
+	memset( h->list, 0, sizeof( h->list ) );
+	memset( h->table, 0, sizeof( h->table ) );
 }
 
-static hash_chain_t *hash_find( const netadr_t *addr )
+static hash_chain_t *hash_find( server_hash_t *h, const netadr_t *addr )
 {
 	hash_chain_t *cur;
-	cur = hash_table[ hash_func( addr ) ];
+	cur = h->table[ hash_func( addr ) ];
 	while ( cur != NULL ) {
 		if ( NET_CompareAdr( addr, &cur->addr ) )
 			return cur;
@@ -2593,14 +2599,21 @@ static void CL_ServersResponsePacket( const netadr_t* from, msg_t *msg, qboolean
 	byte*			buffptr;
 	byte*			buffend;
 	serverInfo_t	*server;
+	// Route by source address: sv_master2 → AS_MPLAYER, others → AS_GLOBAL.
+	qboolean		toMplayer = NET_CompareAdr( from, &cls.masterAdr[1] );
+	int				*numServersPtr   = toMplayer ? &cls.nummplayerservers       : &cls.numglobalservers;
+	int				*numAddressesPtr = toMplayer ? &cls.numMplayerServerAddresses : &cls.numGlobalServerAddresses;
+	serverInfo_t	*serverList      = toMplayer ? cls.mplayerServers          : cls.globalServers;
+	netadr_t		*addressList     = toMplayer ? cls.mplayerServerAddresses  : cls.globalServerAddresses;
+	server_hash_t	*hash            = toMplayer ? &mplayer_hash               : &global_hash;
 
 	//Com_Printf("CL_ServersResponsePacket\n"); // moved down
 
-	if (cls.numglobalservers == -1) {
+	if (*numServersPtr == -1) {
 		// state to detect lack of servers or lack of response
-		cls.numglobalservers = 0;
-		cls.numGlobalServerAddresses = 0;
-		hash_reset();
+		*numServersPtr = 0;
+		*numAddressesPtr = 0;
+		hash_reset( hash );
 	}
 
 	// parse through server response string
@@ -2666,20 +2679,20 @@ static void CL_ServersResponsePacket( const netadr_t* from, msg_t *msg, qboolean
 			break;
 	}
 
-	count = cls.numglobalservers;
+	count = *numServersPtr;
 
 	for (i = 0; i < numservers && count < MAX_GLOBAL_SERVERS; i++) {
 
 		// Tequila: It's possible to have sent many master server requests. Then
 		// we may receive many times the same addresses from the master server.
 		// We just avoid to add a server if it is still in the global servers list.
-		if ( hash_find( &addresses[i] ) )
+		if ( hash_find( hash, &addresses[i] ) )
 			continue;
 
-		hash_insert( &addresses[i] );
+		hash_insert( hash, &addresses[i] );
 
 		// build net address
-		server = &cls.globalServers[count];
+		server = &serverList[count];
 
 		CL_InitServerInfo( server, &addresses[i] );
 		// advance to next slot
@@ -2687,18 +2700,18 @@ static void CL_ServersResponsePacket( const netadr_t* from, msg_t *msg, qboolean
 	}
 
 	// if getting the global list
-	if ( count >= MAX_GLOBAL_SERVERS && cls.numGlobalServerAddresses < MAX_GLOBAL_SERVERS )
+	if ( count >= MAX_GLOBAL_SERVERS && *numAddressesPtr < MAX_GLOBAL_SERVERS )
 	{
 		// if we couldn't store the servers in the main list anymore
-		for (; i < numservers && cls.numGlobalServerAddresses < MAX_GLOBAL_SERVERS; i++)
+		for (; i < numservers && *numAddressesPtr < MAX_GLOBAL_SERVERS; i++)
 		{
 			// just store the addresses in an additional list
-			cls.globalServerAddresses[cls.numGlobalServerAddresses++] = addresses[i];
+			addressList[(*numAddressesPtr)++] = addresses[i];
 		}
 	}
 
-	cls.numglobalservers = count;
-	total = count + cls.numGlobalServerAddresses;
+	*numServersPtr = count;
+	total = count + *numAddressesPtr;
 
 	Com_Printf( "getserversResponse:%3d servers parsed (total %d)\n", numservers, total);
 }
@@ -4383,6 +4396,12 @@ static void CL_SetServerInfoByAddress(const netadr_t *from, const char *info, in
 		}
 	}
 
+	for (i = 0; i < MAX_GLOBAL_SERVERS; i++) {
+		if (NET_CompareAdr(from, &cls.mplayerServers[i].adr)) {
+			CL_SetServerInfo(&cls.mplayerServers[i], info, ping);
+		}
+	}
+
 	for (i = 0; i < MAX_OTHER_SERVERS; i++) {
 		if (NET_CompareAdr(from, &cls.favoriteServers[i].adr)) {
 			CL_SetServerInfo(&cls.favoriteServers[i], info, ping);
@@ -4801,8 +4820,16 @@ static void CL_GlobalServers_f( void ) {
 
 	Com_Printf( "Requesting servers from %s (%s)...\n", masteraddress, NET_AdrToStringwPort( &to ) );
 
-	cls.numglobalservers = -1;
-	cls.pingUpdateSource = AS_GLOBAL;
+	cls.masterAdr[masterNum - 1] = to;
+
+	// sv_master2 → AS_MPLAYER bucket (Trinity directory).
+	if ( masterNum == 2 ) {
+		cls.nummplayerservers = -1;
+		cls.pingUpdateSource = AS_MPLAYER;
+	} else {
+		cls.numglobalservers = -1;
+		cls.pingUpdateSource = AS_GLOBAL;
+	}
 
 	// Use the extended query for IPv6 masters
 #ifdef USE_IPV6
@@ -5078,6 +5105,10 @@ qboolean CL_UpdateVisiblePings_f(int source) {
 			case AS_GLOBAL :
 				server = &cls.globalServers[0];
 				max = cls.numglobalservers;
+			break;
+			case AS_MPLAYER :
+				server = &cls.mplayerServers[0];
+				max = cls.nummplayerservers;
 			break;
 			case AS_FAVORITES :
 				server = &cls.favoriteServers[0];

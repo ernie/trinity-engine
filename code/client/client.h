@@ -429,6 +429,16 @@ typedef struct {
 	int			numGlobalServerAddresses;
 	netadr_t		globalServerAddresses[MAX_GLOBAL_SERVERS];
 
+	// AS_MPLAYER bucket: Trinity directory results.
+	int			nummplayerservers;
+	serverInfo_t  mplayerServers[MAX_GLOBAL_SERVERS];
+	int			numMplayerServerAddresses;
+	netadr_t		mplayerServerAddresses[MAX_GLOBAL_SERVERS];
+
+	// Resolved sv_masterN addresses, populated on demand by
+	// CL_GlobalServers_f. Used to route responses by source.
+	netadr_t		masterAdr[MAX_MASTER_SERVERS];
+
 	int			numfavoriteservers;
 	serverInfo_t	favoriteServers[MAX_OTHER_SERVERS];
 

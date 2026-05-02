@@ -810,10 +810,8 @@ void SV_Init( void )
 	Cvar_SetDescription( sv_allowDownload, "Toggle the ability for clients to download files maps etc. from server." );
 	Cvar_Get ("sv_dlURL", "", CVAR_SERVERINFO | CVAR_ARCHIVE);
 
-	sv_master[0] = Cvar_Get( "sv_master1", MASTER_SERVER_NAME, CVAR_ARCHIVE_ND );
-	sv_master[1] = Cvar_Get( "sv_master2", "master.ioquake3.org", CVAR_ARCHIVE_ND );
-	sv_master[2] = Cvar_Get( "sv_master3", "master.maverickservers.com", CVAR_ARCHIVE_ND );
-	for ( index = 3; index < MAX_MASTER_SERVERS; index++ )
+	// sv_master defaults registered in Com_Init.
+	for ( index = 0; index < MAX_MASTER_SERVERS; index++ )
 		sv_master[ index ] = Cvar_Get( va( "sv_master%d", index + 1 ), "", CVAR_ARCHIVE_ND );
 
 	sv_reconnectlimit = Cvar_Get( "sv_reconnectlimit", "3", 0 );
