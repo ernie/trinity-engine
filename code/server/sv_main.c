@@ -702,6 +702,10 @@ static void SVC_Status( const netadr_t *from ) {
 	// to prevent timed spoofed reply packets that add ghost servers
 	Info_SetValueForKey( infostring, "challenge", Cmd_Argv( 1 ) );
 
+	// Self-identify as trinity-engine so masters and trackers can
+	// distinguish this fork from stock ioquake3. Same key as SVC_Info.
+	Info_SetValueForKey( infostring, "engine", Cvar_VariableString( "com_engine" ) );
+
 	s = status;
 	status[0] = '\0';
 	statusLength = strlen( infostring ) + 16; // strlen( "statusResponse\n\n" )
@@ -789,6 +793,7 @@ static void SVC_Info( const netadr_t *from ) {
 	Info_SetValueForKey( infostring, "challenge", Cmd_Argv(1) );
 
 	Info_SetValueForKey( infostring, "protocol", va( "%i", com_protocol->integer ) );
+	Info_SetValueForKey( infostring, "engine", Cvar_VariableString( "com_engine" ) );
 	Info_SetValueForKey( infostring, "hostname", sv_hostname->string );
 	Info_SetValueForKey( infostring, "mapname", sv_mapname->string );
 	Info_SetValueForKey( infostring, "clients", va("%i", count) );

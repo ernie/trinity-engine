@@ -292,7 +292,7 @@ void CL_TrinityInit( void ) {
 	cl_trinityUser = Cvar_Get( "cl_trinityUser", "", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( cl_trinityUser, "Trinity logged-in username." );
 
-	cl_trinityTracker = Cvar_Get( "cl_trinityTracker", "https://trinity.ernie.io", CVAR_ARCHIVE_ND );
+	cl_trinityTracker = Cvar_Get( "cl_trinityTracker", "https://trinity.run", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( cl_trinityTracker, "Trinity Tracker server URL." );
 
 	cl_trinityLoginStatus = Cvar_Get( "cl_trinityLoginStatus", "none", CVAR_ROM );
