@@ -41,13 +41,15 @@
   "baseq3": {
     "files": [
       { "src": "demopk3s/baseq3.pk3", "dst": "/baseq3" },
-      { "src": "q3/baseq3/pak8t.pk3", "dst": "/baseq3" }
+      { "src": "q3/baseq3/pak8t.pk3", "dst": "/baseq3" },
+      { "src": "q3/baseq3/pak9hqq37.pk3", "dst": "/baseq3" }
     ]
   },
   "missionpack": {
     "files": [
       { "src": "demopk3s/missionpack.pk3", "dst": "/missionpack" },
-      { "src": "q3/missionpack/pak3t.pk3", "dst": "/missionpack" }
+      { "src": "q3/missionpack/pak3t.pk3", "dst": "/missionpack" },
+      { "src": "q3/missionpack/pak4hqqtest.pk3", "dst": "/missionpack" }
     ]
   }
 }
