@@ -852,6 +852,7 @@ void Sys_PrintBinVersion( const char* name )
 	const char *sep = "==============================================================";
 
 	fprintf( stdout, "\n\n%s\n", sep );
+	fprintf( stdout, "Trinity Engine: %s\n", TRINITY_ENGINE_VERSION );
 #ifdef DEDICATED
 	fprintf( stdout, "Linux Quake3 Dedicated Server [%s %s]\n", date, time );
 #else
