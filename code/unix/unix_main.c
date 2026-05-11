@@ -1350,6 +1350,12 @@ int main( int argc, const char* argv[] )
 	while (1)
 	{
 #ifdef __linux__
+		// Drain any async signal (TERM/HUP/QUIT) caught since the
+		// last iteration. NORETURN when a signal was pending — runs
+		// SV_Shutdown from non-signal context so VM_Call(GAME_SHUTDOWN)
+		// is a top-level invocation, not a reentry into a G_RunFrame
+		// already on the stack.
+		Sys_CheckPendingSignal();
 		Sys_ConfigureFPU();
 #endif
 
