@@ -375,7 +375,7 @@ IF(EMSCRIPTEN)
 		"SHELL:-s MIN_WEBGL_VERSION=2"
 		"SHELL:-s MAX_WEBGL_VERSION=2"
 		"SHELL:-s EXPORTED_RUNTIME_METHODS=['FS','addRunDependency','removeRunDependency','ccall']"
-		"SHELL:-s EXPORTED_FUNCTIONS=['_main','_exit','_Cbuf_AddText','_CL_TV_GetPlayerList']"
+		"SHELL:-s EXPORTED_FUNCTIONS=['_main','_exit','_Cbuf_AddText','_CL_TV_GetPlayerList','_Cvar_VariableValue','_Cvar_VariableString']"
 		"SHELL:-s EXIT_RUNTIME=1"
 		"SHELL:-s EXPORT_ES6"
 		"SHELL:-s EXPORT_NAME=TrinityEngine"
