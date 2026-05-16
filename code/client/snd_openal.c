@@ -1003,6 +1003,7 @@ static void S_AL_SrcKill(srcHandle_t src)
 
 	// Detach any buffers
 	qalSourcei(curSource->alSource, AL_BUFFER, 0);
+	qalSourcei(curSource->alSource, AL_LOOPING, AL_FALSE);
 
 	curSource->sfx = 0;
 	curSource->lastUsedTime = 0;
@@ -1976,6 +1977,7 @@ static void S_AL_MusicSourceGet( void )
 	qalSource3f(musicSource, AL_DIRECTION,       0.0, 0.0, 0.0);
 	qalSourcef (musicSource, AL_ROLLOFF_FACTOR,  0.0          );
 	qalSourcei (musicSource, AL_SOURCE_RELATIVE, AL_TRUE      );
+	qalSourcei (musicSource, AL_LOOPING,         AL_FALSE     );
 }
 
 /*
