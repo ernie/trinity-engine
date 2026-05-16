@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "cl_trinity.h"
+#include "cl_trinity_rconset.h"
 #include "../qcommon/autoupdate.h"
 #include <limits.h>
 
@@ -4267,6 +4268,7 @@ void CL_Init( void ) {
 
 	CL_TV_Init();
 	CL_TrinityInit();
+	CL_TrinityRconsetSelfTest();
 
 	Cvar_Set( "cl_running", "1" );
 	CL_GenerateQKey();

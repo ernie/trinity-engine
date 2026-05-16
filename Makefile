@@ -1147,6 +1147,7 @@ Q3OBJ = \
   $(B)/client/cl_jpeg.o \
   $(B)/client/cl_tv.o \
   $(B)/client/cl_trinity.o \
+  $(B)/client/cl_trinity_rconset.o \
   \
   $(B)/client/cm_load.o \
   $(B)/client/cm_patch.o \

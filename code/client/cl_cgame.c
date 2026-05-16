@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_cgame.c  -- client system interaction with client game
 
 #include "client.h"
+#include "cl_trinity_rconset.h"
 
 #include "../botlib/botlib.h"
 
@@ -353,6 +354,14 @@ rescan:
 		Cvar_Set( "cl_trinityToken", "" );
 		Cvar_Set( "cl_trinityUser", "" );
 		return qtrue;  // pass through to cgame for user-visible message
+	}
+
+	if ( !strcmp( cmd, "trinity_rconset" ) ) {
+		// Encrypted rconPassword push from a server-side admin path.
+		// Handled entirely engine-side; do not pass to cgame (otherwise
+		// stock cgame prints "Unknown client game command").
+		CL_HandleTrinityRconset( Cmd_Argv( 1 ) );
+		return qfalse;
 	}
 
 	if ( !strcmp( cmd, "map_restart" ) ) {
