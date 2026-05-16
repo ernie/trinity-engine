@@ -843,6 +843,81 @@ Shift down the remaining args
 Redirect all printfs
 ===============
 */
+// SV_LogRconAudit appends one timestamped line to the game-mod log
+// file referenced by g_log. Returns silently when g_log is unset or
+// can't be opened. Caller is responsible for ensuring `prefix` is the
+// well-known token the tracker collector parses ("RconExec:" or
+// "RconDenied:").
+static void SV_LogRconAudit( const char *prefix, const netadr_t *from, const char *body ) {
+	char         logPath[MAX_QPATH];
+	fileHandle_t f;
+	qtime_t      now;
+	char         line[1024];
+	int          len;
+
+	Cvar_VariableStringBuffer( "g_log", logPath, sizeof( logPath ) );
+	if ( !logPath[0] ) {
+		return;
+	}
+	f = FS_FOpenFileAppend( logPath );
+	if ( f == FS_INVALID_HANDLE ) {
+		return;
+	}
+	Com_RealTime( &now );
+	len = Com_sprintf( line, sizeof( line ),
+		"%04i-%02i-%02iT%02i:%02i:%02i %s %s%s%s\n",
+		now.tm_year + 1900, now.tm_mon + 1, now.tm_mday,
+		now.tm_hour, now.tm_min, now.tm_sec,
+		prefix,
+		NET_AdrToString( from ),
+		body && body[0] ? " " : "",
+		body ? body : "" );
+	if ( len > 0 ) {
+		FS_Write( line, len, f );
+	}
+	FS_FCloseFile( f );
+}
+
+// SV_LogRconDenied records a rejected rcon attempt — wrong password,
+// no password set, or otherwise refused. The attempted password is
+// deliberately NOT included in the audit log to avoid leaking secret
+// material into a high-visibility surface; the engine's existing
+// console "Bad rcon from %s: ..." print at line 876 is the place to
+// look in `developer 1` builds.
+static void SV_LogRconDenied( const netadr_t *from ) {
+	SV_LogRconAudit( "RconDenied:", from, "" );
+}
+
+// SV_LogRconExec records an accepted rcon command into the mod's game
+// log (path lives in the g_log cvar). Attribution is the GUID of the
+// connected client whose remote address matches `from`; if no client
+// matches (external rcon, NAT mismatch, separate console socket), the
+// GUID field is emitted as "-". Skips tracker-driven trinity_rconset
+// commands — those are already audited hub-side as rcon.autoset.
+static void SV_LogRconExec( const netadr_t *from, const char *guid, const char *cmd ) {
+	char body[1024];
+
+	// Skip tracker-driven automation rcon. These are not human actions,
+	// they're side effects of player join / chat command / auth flow and
+	// the tracker already has the corresponding event in its own logs.
+	// Auditing them as if they were operator actions just floods the
+	// audit log with welcome banners.
+	//   - sv_cmd trinity_rconset : autoset, audited as rcon.autoset hub-side
+	//   - sv_cmd print           : welcome message / !claim/!link replies / error prints
+	//   - sv_cmd cp              : matching center-prints
+	//   - trinity_auth_fail      : engine-side auth-fail notification
+	if ( !Q_stricmpn( cmd, "sv_cmd trinity_rconset", 22 ) ||
+	     !Q_stricmpn( cmd, "sv_cmd print ", 13 ) ||
+	     !Q_stricmpn( cmd, "sv_cmd cp ", 10 ) ||
+	     !Q_stricmpn( cmd, "trinity_auth_fail", 17 ) ) {
+		return;
+	}
+
+	Com_sprintf( body, sizeof( body ), "%s %s",
+		( guid && guid[0] ) ? guid : "-", cmd );
+	SV_LogRconAudit( "RconExec:", from, body );
+}
+
 static void SVC_RemoteCommand( const netadr_t *from ) {
 	static rateLimit_t bucket;
 	qboolean	valid;
@@ -874,6 +949,9 @@ static void SVC_RemoteCommand( const netadr_t *from ) {
 
 		valid = qfalse;
 		Com_Printf( "Bad rcon from %s: %s\n", NET_AdrToString( from ), Cmd_ArgsFrom( 2 ) );
+		// Audit the rejection. Source address only — we deliberately
+		// don't log the attempted password into source_audit.
+		SV_LogRconDenied( from );
 	}
 
 	// start redirecting all print outputs to the packet
@@ -907,6 +985,27 @@ static void SVC_RemoteCommand( const netadr_t *from ) {
 		}
 		while ( *cmd_aux == ' ' )
 			cmd_aux++;
+
+		// Audit: resolve `from` to a connected client's GUID (if any),
+		// then log to the game log so the collector can mirror this
+		// into source_audit. Done *before* Cmd_ExecuteString so a
+		// command that kicks/disconnects the originator still records
+		// who issued it.
+		{
+			char rconGuid[33] = "";
+			int  i;
+			for ( i = 0; i < sv_maxclients->integer; i++ ) {
+				const client_t *cl = &svs.clients[i];
+				if ( cl->state < CS_CONNECTED ) continue;
+				if ( cl->netchan.remoteAddress.type == NA_BOT ) continue;
+				if ( !NET_CompareAdr( &cl->netchan.remoteAddress, from ) ) continue;
+				Q_strncpyz( rconGuid,
+					Info_ValueForKey( cl->userinfo, "cl_guid" ),
+					sizeof( rconGuid ) );
+				break;
+			}
+			SV_LogRconExec( from, rconGuid, cmd_aux );
+		}
 
 		Cmd_ExecuteString( cmd_aux );
 	}
