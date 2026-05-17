@@ -8,17 +8,23 @@
 // VOIP level bucketing — encodes per-frame transmission state and loudness into a 0-5
 // digit for both cl_voipLevel (local self) and cl_voipLevels (per-client received).
 //   0 = not transmitting / stale
-//   1 = transmitting but silent (power < VOIP_LEVEL_FLOOR)
+//   1 = transmitting but silent (peak < VOIP_PEAK_FLOOR)
 //   2-5 = transmitting at level 1-4 (audible quartiles)
-#define VOIP_LEVEL_FLOOR     5.0f    // power below which a transmitting frame is "silent active"
+// HUD level bucketing operates on peak amplitude (linear, 0.0-1.0). Power-based VAD is
+// untouched and continues to use clc.voipPower + cl_voipVADThreshold.
+#define VOIP_PEAK_FLOOR      0.05f   // below this → digit=1 (idle icon while transmitting)
+#define VOIP_PEAK_L1         0.25f   // below this → digit=2 (1 arc, quiet speech)
+#define VOIP_PEAK_L2         0.50f   // below this → digit=3 (2 arcs, normal speech)
+#define VOIP_PEAK_L3         0.75f   // below this → digit=4 (3 arcs, loud speech)
+                                     // ≥ L3 → digit=5 (glow, very loud / clipping)
 #define VOIP_LEVEL_DECAY_MS  250     // ms with no incoming packet before a remote slot goes stale
                                      // (matches VOIP_TALKING_TIMEOUT semantically)
 
-static int CL_VoipBucketLevel( float power ) {
-	if ( power < VOIP_LEVEL_FLOOR ) return 1;
-	if ( power < 25.0f )            return 2;
-	if ( power < 50.0f )            return 3;
-	if ( power < 75.0f )            return 4;
+static int CL_VoipBucketLevel( float peak ) {
+	if ( peak < VOIP_PEAK_FLOOR ) return 1;
+	if ( peak < VOIP_PEAK_L1 )    return 2;
+	if ( peak < VOIP_PEAK_L2 )    return 3;
+	if ( peak < VOIP_PEAK_L3 )    return 4;
 	return 5;
 }
 
@@ -432,15 +438,20 @@ void CL_CaptureVoip( void )
 					Com_Memset( sampbuffer + actualSamples, 0, (samples - actualSamples) * sizeof( int16_t ) );
 				}
 
-				// check the "power" of this packet, using the same amplified-and-clamped
-				// sample that gets encoded. Computing power on the raw pre-amp samples
-				// would make the local HUD level read lower than what receivers see,
-				// since their power calc runs on the decoded (post-amp) audio.
-				for ( i = 0; i < actualSamples; i++ ) {
-					const float flsamp = (float) sampbuffer[i];
-					const float amped = Com_Clamp( -32768.0f, 32767.0f, flsamp * audioMult );
-					voipPower += amped * amped;
-					sampbuffer[i] = (int16_t) amped;
+				// check the "power" (energy, for VAD) and "peak" (amplitude, for HUD)
+				// of this packet, using the same amplified-and-clamped samples that get
+				// encoded — so both metrics reflect what receivers will see.
+				{
+					float peakAmp = 0.0f;
+					for ( i = 0; i < actualSamples; i++ ) {
+						const float flsamp = (float) sampbuffer[i];
+						const float amped = Com_Clamp( -32768.0f, 32767.0f, flsamp * audioMult );
+						const float absAmped = fabs( amped );
+						voipPower += amped * amped;
+						if ( absAmped > peakAmp ) peakAmp = absAmped;
+						sampbuffer[i] = (int16_t) amped;
+					}
+					clc.voipPeak = peakAmp / 32767.0f;
 				}
 
 				clc.voipPower = (voipPower / (32768.0f * 32768.0f *
@@ -548,10 +559,12 @@ void CL_CaptureVoip( void )
 	}
 
 	// Update cl_voipLevel each frame — encodes whether we're emitting and how loud.
-	// The bucketing uses cl_voipSend (the per-frame "am I transmitting" signal from the
-	// refactor) so PTT-silent frames produce digit 1 and audible frames produce 2-5.
+	// Bucketing uses clc.voipPeak (linear amplitude, post-amp/post-clamp) so the HUD
+	// level reflects "how close to clipping am I" rather than averaged energy. cl_voipSend
+	// gates whether we're emitting at all; PTT-silent frames produce digit 1 because peak
+	// is below the floor, audible frames produce 2-5 by peak quartile.
 	{
-		int level = cl_voipSend->integer ? CL_VoipBucketLevel( clc.voipPower ) : 0;
+		int level = cl_voipSend->integer ? CL_VoipBucketLevel( clc.voipPeak ) : 0;
 		char buf[8];
 		Com_sprintf( buf, sizeof( buf ), "%d", level );
 		if ( strcmp( cl_voipLevel->string, buf ) != 0 ) {
@@ -565,7 +578,7 @@ void CL_CaptureVoip( void )
 ===============
 CL_UpdateVoipLevels
 
-Decay stale entries in clc.voipIncomingPower[] and update cl_voipLevels
+Decay stale entries in clc.voipIncomingPeak[] and update cl_voipLevels
 with the packed per-client state. Called once per client frame.
 ===============
 */
@@ -589,7 +602,7 @@ void CL_UpdateVoipLevels( void ) {
 		            cls.realtime - clc.voipIncomingPowerTime[i] > VOIP_LEVEL_DECAY_MS ) {
 			digit = 0;
 		} else {
-			digit = CL_VoipBucketLevel( clc.voipIncomingPower[i] );
+			digit = CL_VoipBucketLevel( clc.voipIncomingPeak[i] );
 		}
 
 		buf[i] = (char) ( '0' + digit );  // digit is always 0-5, single char
@@ -831,17 +844,18 @@ void CL_ParseVoip( msg_t *msg, qboolean ignoreData )
 		numSamples = 0;
 	}
 
-	// Compute per-client received audio power for the volume HUD indicator.
-	// Same normalization as the local-side voipPower at the encode path.
+	// Compute per-client received audio peak amplitude for the volume HUD indicator.
+	// Peak rather than power: matches the local-side HUD bucketing and gives the QVM a
+	// mult-independent signal where "level 5 / glow" corresponds to peak ≥ 75% of max.
 	if ( numSamples > 0 ) {
-		float sum = 0.0f;
 		int j;
+		int peakSample = 0;
 		for ( j = 0; j < numSamples; j++ ) {
-			float s = (float) decoded[written + j];
-			sum += s * s;
+			int s = decoded[written + j];
+			if ( s < 0 ) s = -s;
+			if ( s > peakSample ) peakSample = s;
 		}
-		clc.voipIncomingPower[sender] = (sum / (32768.0f * 32768.0f *
-		                                 ((float) numSamples))) * 100.0f;
+		clc.voipIncomingPeak[sender] = (float) peakSample / 32767.0f;
 		clc.voipIncomingPowerTime[sender] = cls.realtime;
 	}
 
