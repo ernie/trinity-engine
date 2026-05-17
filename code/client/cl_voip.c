@@ -787,6 +787,20 @@ void CL_ParseVoip( msg_t *msg, qboolean ignoreData )
 		numSamples = 0;
 	}
 
+	// Compute per-client received audio power for the volume HUD indicator.
+	// Same normalization as the local-side voipPower at the encode path.
+	if ( numSamples > 0 ) {
+		float sum = 0.0f;
+		int j;
+		for ( j = 0; j < numSamples; j++ ) {
+			float s = (float) decoded[written + j];
+			sum += s * s;
+		}
+		clc.voipIncomingPower[sender] = (sum / (32768.0f * 32768.0f *
+		                                 ((float) numSamples))) * 100.0f;
+		clc.voipIncomingPowerTime[sender] = cls.realtime;
+	}
+
 	written += numSamples;
 
 	Com_DPrintf( "VoIP: playback %d bytes, %d samples, %d frames\n",
