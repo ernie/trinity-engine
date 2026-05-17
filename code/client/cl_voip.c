@@ -13,10 +13,10 @@
 // HUD level bucketing operates on peak amplitude (linear, 0.0-1.0). Power-based VAD is
 // untouched and continues to use clc.voipPower + cl_voipVADThreshold.
 #define VOIP_PEAK_FLOOR      0.05f   // below this → digit=1 (idle icon while transmitting)
-#define VOIP_PEAK_L1         0.25f   // below this → digit=2 (1 arc, quiet speech)
-#define VOIP_PEAK_L2         0.50f   // below this → digit=3 (2 arcs, normal speech)
-#define VOIP_PEAK_L3         0.75f   // below this → digit=4 (3 arcs, loud speech)
-                                     // ≥ L3 → digit=5 (glow, very loud / clipping)
+#define VOIP_PEAK_L1         0.30f   // below this → digit=2 (1 arc, quiet speech)
+#define VOIP_PEAK_L2         0.60f   // below this → digit=3 (2 arcs, normal speech)
+#define VOIP_PEAK_L3         0.90f   // below this → digit=4 (3 arcs, loud speech)
+                                     // ≥ L3 → digit=5 (glow, near-clipping / clipping)
 #define VOIP_LEVEL_DECAY_MS  250     // ms with no incoming packet before a remote slot goes stale
                                      // (matches VOIP_TALKING_TIMEOUT semantically)
 
