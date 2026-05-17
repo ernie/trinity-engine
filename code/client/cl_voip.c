@@ -359,14 +359,14 @@ void CL_CaptureVoip( void )
 		}
 	}
 
-	// Open capture device on rising edge. Master gain ducking follows the
-	// device, so it engages here and releases in the finalFrame block below.
+	// Open capture device on rising edge. Master gain ducking is tied to
+	// cl_voipSend (actively transmitting), not to the capture device — so a
+	// VAD session with the device permanently open doesn't permanently duck.
 	if ( captureStart ) {
 		if ( S_AvailableCaptureSamples() < 0 ) {
 			Cvar_Set( "cl_voipCapture", "0" );
 			return;
 		}
-		S_MasterGain( Com_Clamp( 0.0f, 1.0f, cl_voipGainDuringCapture->value ) );
 
 		S_StartCapture();
 
@@ -481,9 +481,10 @@ void CL_CaptureVoip( void )
 					shouldSend = (cl_voipCapture->integer != 0);
 				}
 
-				// Edge-detect cl_voipSend's rising transition for generation
-				// reset and target re-parse. Falling transitions need no flag —
-				// we just stop emitting this frame.
+				// Edge-detect cl_voipSend transitions. Rising → reset generation,
+				// reparse targets, duck game audio. Falling → restore game audio.
+				// Ducking tracks transmit edges so PTT behavior is unchanged and
+				// VAD only ducks during actual utterances, not idle listening.
 				{
 					qboolean wasSending = (cl_voipSend->integer != 0);
 					if ( shouldSend != wasSending ) {
@@ -491,6 +492,9 @@ void CL_CaptureVoip( void )
 						cl_voipSend->modified = qfalse;
 						if ( shouldSend ) {
 							initialFrame = qtrue;
+							S_MasterGain( Com_Clamp( 0.0f, 1.0f, cl_voipGainDuringCapture->value ) );
+						} else {
+							S_MasterGain( 1.0f );
 						}
 					}
 				}
@@ -531,8 +535,10 @@ void CL_CaptureVoip( void )
 		}
 	}
 
-	// finalFrame teardown: close device, drain residue, restore master gain,
-	// clear meter, and force cl_voipSend to 0 so the HUD goes dark.
+	// finalFrame teardown: close device, drain residue, clear meter, and
+	// force cl_voipSend to 0 so the HUD goes dark. If we were mid-utterance
+	// when teardown landed, the edge detector above never saw a falling
+	// transition (shouldSend == cl_voipSend on finalFrame), so unduck here.
 	if ( finalFrame ) {
 		S_StopCapture();
 
@@ -550,11 +556,11 @@ void CL_CaptureVoip( void )
 			}
 		}
 
-		S_MasterGain( 1.0f );
 		clc.voipPower = 0.0f;  // force this value so it doesn't linger.
 		if ( cl_voipSend->integer ) {
 			Cvar_Set( "cl_voipSend", "0" );
 			cl_voipSend->modified = qfalse;
+			S_MasterGain( 1.0f );
 		}
 	}
 
