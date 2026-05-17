@@ -432,12 +432,15 @@ void CL_CaptureVoip( void )
 					Com_Memset( sampbuffer + actualSamples, 0, (samples - actualSamples) * sizeof( int16_t ) );
 				}
 
-				// check the "power" of this packet...
+				// check the "power" of this packet, using the same amplified-and-clamped
+				// sample that gets encoded. Computing power on the raw pre-amp samples
+				// would make the local HUD level read lower than what receivers see,
+				// since their power calc runs on the decoded (post-amp) audio.
 				for ( i = 0; i < actualSamples; i++ ) {
 					const float flsamp = (float) sampbuffer[i];
-					const float s = fabs( flsamp );
-					voipPower += s * s;
-					sampbuffer[i] = (int16_t) Com_Clamp( -32768.0f, 32767.0f, flsamp * audioMult );
+					const float amped = Com_Clamp( -32768.0f, 32767.0f, flsamp * audioMult );
+					voipPower += amped * amped;
+					sampbuffer[i] = (int16_t) amped;
 				}
 
 				clc.voipPower = (voipPower / (32768.0f * 32768.0f *
