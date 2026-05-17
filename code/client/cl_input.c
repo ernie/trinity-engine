@@ -252,8 +252,8 @@ static void IN_StrafeDown(void) {IN_KeyDown(&in_strafe);}
 static void IN_StrafeUp(void) {IN_KeyUp(&in_strafe);}
 
 #ifdef USE_VOIP
-static void IN_VoipRecordDown(void) { Cvar_Set( "cl_voipSend", "1" ); }
-static void IN_VoipRecordUp(void) { Cvar_Set( "cl_voipSend", "0" ); }
+static void IN_VoipRecordDown(void) { Cvar_Set( "cl_voipCapture", "1" ); }
+static void IN_VoipRecordUp(void) { Cvar_Set( "cl_voipCapture", "0" ); }
 #endif
 
 static void IN_Button0Down(void) {IN_KeyDown(&in_buttons[0]);}
