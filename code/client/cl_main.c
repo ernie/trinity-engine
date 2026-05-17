@@ -3322,6 +3322,7 @@ void CL_Frame( int msec, int realMsec ) {
 
 #ifdef USE_VOIP
 	CL_CaptureVoip();
+	CL_UpdateVoipLevels();
 #endif
 
 	// advance local effects for next frame

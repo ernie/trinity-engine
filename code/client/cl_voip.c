@@ -560,6 +560,45 @@ void CL_CaptureVoip( void )
 
 /*
 ===============
+CL_UpdateVoipLevels
+
+Decay stale entries in clc.voipIncomingPower[] and update cl_voipLevels
+with the packed per-client state. Called once per client frame.
+===============
+*/
+void CL_UpdateVoipLevels( void ) {
+	char buf[MAX_CLIENTS + 1];
+	int i;
+
+	if ( !clc.voipCodecInitialized ) {
+		return;
+	}
+
+	for ( i = 0; i < MAX_CLIENTS; i++ ) {
+		int digit;
+
+		if ( i == clc.clientNum ) {
+			// Local self uses cl_voipLevel; this slot stays 0 in the per-client string.
+			digit = 0;
+		} else if ( clc.voipIncomingPowerTime[i] == 0 ||
+		            cls.realtime - clc.voipIncomingPowerTime[i] > VOIP_LEVEL_DECAY_MS ) {
+			digit = 0;
+		} else {
+			digit = CL_VoipBucketLevel( clc.voipIncomingPower[i] );
+		}
+
+		buf[i] = (char) ( '0' + digit );  // digit is always 0-5, single char
+	}
+	buf[MAX_CLIENTS] = '\0';
+
+	if ( strcmp( cl_voipLevels->string, buf ) != 0 ) {
+		Cvar_Set( "cl_voipLevels", buf );
+	}
+}
+
+
+/*
+===============
 CL_WriteVoip
 
 Write clc_voipOpus to outgoing message. Also writes fake svc_voipOpus
