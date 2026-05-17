@@ -359,7 +359,8 @@ typedef struct {
 	byte voipOutgoingData[1024];
 	float voipPower;
 	int voipLastSelfSendTime;
-	float voipIncomingPower[MAX_CLIENTS];     // per-client received audio power, 0-100 normalized
+	float voipPeak;                           // local outgoing peak amplitude this frame, 0.0-1.0
+	float voipIncomingPeak[MAX_CLIENTS];      // per-client received peak amplitude, 0.0-1.0
 	int   voipIncomingPowerTime[MAX_CLIENTS]; // cls.realtime when each entry was last updated
 #endif
 
