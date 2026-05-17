@@ -5,10 +5,30 @@
 
 #ifdef USE_VOIP
 
+// VOIP level bucketing — encodes per-frame transmission state and loudness into a 0-5
+// digit for both cl_voipLevel (local self) and cl_voipLevels (per-client received).
+//   0 = not transmitting / stale
+//   1 = transmitting but silent (power < VOIP_LEVEL_FLOOR)
+//   2-5 = transmitting at level 1-4 (audible quartiles)
+#define VOIP_LEVEL_FLOOR     5.0f    // power below which a transmitting frame is "silent active"
+#define VOIP_LEVEL_DECAY_MS  250     // ms with no incoming packet before a remote slot goes stale
+                                     // (matches VOIP_TALKING_TIMEOUT semantically)
+
+static int CL_VoipBucketLevel( float power ) {
+	if ( power < VOIP_LEVEL_FLOOR ) return 1;
+	if ( power < 25.0f )            return 2;
+	if ( power < 50.0f )            return 3;
+	if ( power < 75.0f )            return 4;
+	return 5;
+}
+
 // Cvar definitions
 cvar_t *cl_voipUseVAD;
 cvar_t *cl_voipVADThreshold;
 cvar_t *cl_voipSend;
+cvar_t *cl_voipLevel;
+cvar_t *cl_voipLevels;
+cvar_t *cl_voipCapture;
 cvar_t *cl_voipSendTarget;
 cvar_t *cl_voipGainDuringCapture;
 cvar_t *cl_voipCaptureMult;
@@ -34,7 +54,10 @@ Register all cl_voip* cvars
 */
 void CL_VoipCvarInit( void )
 {
-	cl_voipSend = Cvar_Get( "cl_voipSend", "0", 0 );
+	cl_voipSend = Cvar_Get( "cl_voipSend", "0", CVAR_ROM );
+	Cvar_SetDescription( cl_voipSend, "Read-only. 1 while VOIP packets are being emitted this frame; 0 otherwise. Driven by the engine." );
+	cl_voipCapture = Cvar_Get( "cl_voipCapture", "0", 0 );
+	Cvar_SetDescription( cl_voipCapture, "1 while the VOIP capture device is open and audio is being analyzed. Normally driven by PTT bindings (+voiprecord) or cl_voipUseVAD; safe to set manually for scripted control." );
 	cl_voipSendTarget = Cvar_Get( "cl_voipSendTarget", "spatial", 0 );
 	cl_voipGainDuringCapture = Cvar_Get( "cl_voipGainDuringCapture", "0.2", CVAR_ARCHIVE );
 	cl_voipCaptureMult = Cvar_Get( "cl_voipCaptureMult", "2.0", CVAR_ARCHIVE );
@@ -116,12 +139,12 @@ Called from CL_Disconnect.
 */
 void CL_ShutdownVoip( void )
 {
-	if ( cl_voipSend->integer ) {
+	if ( cl_voipCapture->integer ) {
 		int tmp = cl_voipUseVAD->integer;
-		cl_voipUseVAD->integer = 0;  // disable this for a moment.
+		cl_voipUseVAD->integer = 0;  // suppress auto-re-enable for one frame.
 		clc.voipOutgoingDataSize = 0;  // dump any pending VoIP transmission.
-		Cvar_Set( "cl_voipSend", "0" );
-		CL_CaptureVoip();  // clean up any state...
+		Cvar_Set( "cl_voipCapture", "0" );
+		CL_CaptureVoip();  // runs finalFrame teardown (closes device, emits tail if mid-utterance).
 		cl_voipUseVAD->integer = tmp;
 	}
 
@@ -263,8 +286,9 @@ void CL_CaptureVoip( void )
 {
 	const float audioMult = cl_voipCaptureMult->value;
 	const qboolean useVad = (cl_voipUseVAD->integer != 0);
-	qboolean initialFrame = qfalse;
+	qboolean captureStart = qfalse;
 	qboolean finalFrame = qfalse;
+	qboolean initialFrame = qfalse;
 
 	// If your data rate is too low, you'll get Connection Interrupted warnings
 	//  when VoIP packets arrive, even if you have a broadband connection.
@@ -288,47 +312,48 @@ void CL_CaptureVoip( void )
 	if ( clc.voipOutgoingDataSize > 0 )
 		return;  // packet is pending transmission, don't record more yet.
 
+	// VAD toggle drives cl_voipCapture (device on/off), not cl_voipSend
+	// (per-frame emit). cl_voipSend is engine-output now.
 	if ( cl_voipUseVAD->modified ) {
-		Cvar_Set( "cl_voipSend", (useVad) ? "1" : "0" );
+		Cvar_Set( "cl_voipCapture", (useVad) ? "1" : "0" );
 		cl_voipUseVAD->modified = qfalse;
 	}
 
-	if ( (useVad) && (!cl_voipSend->integer) )
-		Cvar_Set( "cl_voipSend", "1" );  // lots of things reset this.
+	// Capture-device edge events. Validation gates only the rising edge —
+	// falling edge always honors so we clean up if state went bad.
+	if ( cl_voipCapture->modified ) {
+		cl_voipCapture->modified = qfalse;
 
-	if ( cl_voipSend->modified ) {
-		qboolean dontCapture = qfalse;
-		if ( cls.state != CA_ACTIVE )
-			dontCapture = qtrue;  // not connected to a server.
-		else if ( !clc.voipEnabled )
-			dontCapture = qtrue;  // server doesn't support VoIP.
-		else if ( clc.demoplaying )
-			dontCapture = qtrue;  // playing back a demo.
-		else if ( cl_voip->integer == 0 )
-			dontCapture = qtrue;  // client has VoIP support disabled.
-		else if ( audioMult == 0.0f )
-			dontCapture = qtrue;  // basically silenced incoming audio.
+		if ( cl_voipCapture->integer ) {
+			qboolean dontCapture = qfalse;
+			if ( cls.state != CA_ACTIVE )
+				dontCapture = qtrue;  // not connected to a server.
+			else if ( !clc.voipEnabled )
+				dontCapture = qtrue;  // server doesn't support VoIP.
+			else if ( clc.demoplaying )
+				dontCapture = qtrue;  // playing back a demo.
+			else if ( cl_voip->integer == 0 )
+				dontCapture = qtrue;  // client has VoIP support disabled.
+			else if ( audioMult == 0.0f )
+				dontCapture = qtrue;  // basically silenced incoming audio.
 
-		cl_voipSend->modified = qfalse;
+			if ( dontCapture ) {
+				Cvar_Set( "cl_voipCapture", "0" );
+				return;  // device was never opened; nothing more to do.
+			}
 
-		if ( dontCapture ) {
-			Cvar_Set( "cl_voipSend", "0" );
-			return;
-		}
-
-		if ( cl_voipSend->integer ) {
-			initialFrame = qtrue;
+			captureStart = qtrue;
 		} else {
+			// Falling edge: always tear down (PTT release, VAD off, shutdown).
 			finalFrame = qtrue;
 		}
 	}
 
-	// try to get more audio data from the sound card...
-
-	if ( initialFrame ) {
-		// Check if capture is available before starting
+	// Open capture device on rising edge. Master gain ducking follows the
+	// device, so it engages here and releases in the finalFrame block below.
+	if ( captureStart ) {
 		if ( S_AvailableCaptureSamples() < 0 ) {
-			Cvar_Set( "cl_voipSend", "0" );
+			Cvar_Set( "cl_voipCapture", "0" );
 			return;
 		}
 		S_MasterGain( Com_Clamp( 0.0f, 1.0f, cl_voipGainDuringCapture->value ) );
@@ -347,19 +372,22 @@ void CL_CaptureVoip( void )
 				}
 			}
 		}
-
-		CL_VoipNewGeneration();
-		CL_VoipParseTargets();
 	}
 
-	if ( (cl_voipSend->integer) || (finalFrame) ) { // user wants to capture audio?
+	// Continuous-talk mid-utterance target change: cl_voipSendTarget edits
+	// landing while we're already inside an utterance. Per-utterance changes
+	// are handled by initialFrame below; this hook covers only the genuine
+	// in-flight case (user changes voip_channel while still speaking).
+	if ( cl_voipSendTarget->modified && cl_voipSend->integer ) {
+		CL_VoipParseTargets();
+		cl_voipSendTarget->modified = qfalse;
+	}
+
+	// Encode loop: run while we have a live capture device OR we're tearing
+	// down a final partial frame on the way out.
+	if ( cl_voipCapture->integer || finalFrame ) {
 		int samples = S_AvailableCaptureSamples();
 		const int packetSamples = (finalFrame) ? VOIP_MAX_FRAME_SAMPLES : VOIP_MAX_PACKET_SAMPLES;
-
-		// If no capture device available, skip gracefully
-		if ( samples <= 0 && !cl_voipSend->integer ) {
-			return;
-		}
 
 		// enough data buffered in audio hardware to process yet?
 		// On finalFrame, accept any samples > 0 and zero-pad to frame boundary
@@ -370,6 +398,8 @@ void CL_CaptureVoip( void )
 			int voipFrames;
 			int i, bytes;
 			int actualSamples;
+			qboolean shouldSend;
+			qboolean hangover = qfalse;
 
 			if ( samples > VOIP_MAX_PACKET_SAMPLES )
 				samples = VOIP_MAX_PACKET_SAMPLES;
@@ -388,61 +418,84 @@ void CL_CaptureVoip( void )
 				actualSamples = samples;  // only capture the rounded amount
 			}
 
-			if ( samples <= 0 ) {
-				Com_DPrintf( "VoIP: no complete frames to encode\n" );
-				return;
-			}
-			voipFrames = samples / VOIP_MAX_FRAME_SAMPLES;
+			if ( samples > 0 ) {
+				voipFrames = samples / VOIP_MAX_FRAME_SAMPLES;
 
-			S_Capture( actualSamples, (byte *) sampbuffer );  // grab from audio card.
+				S_Capture( actualSamples, (byte *) sampbuffer );  // grab from audio card.
 
-			// Zero-pad any remainder on the final frame
-			if ( actualSamples < samples ) {
-				Com_Memset( sampbuffer + actualSamples, 0, (samples - actualSamples) * sizeof( int16_t ) );
-			}
+				// Zero-pad any remainder on the final frame
+				if ( actualSamples < samples ) {
+					Com_Memset( sampbuffer + actualSamples, 0, (samples - actualSamples) * sizeof( int16_t ) );
+				}
 
-			// check the "power" of this packet...
-			for ( i = 0; i < actualSamples; i++ ) {
-				const float flsamp = (float) sampbuffer[i];
-				const float s = fabs( flsamp );
-				voipPower += s * s;
-				sampbuffer[i] = (int16_t) Com_Clamp( -32768.0f, 32767.0f, flsamp * audioMult );
-			}
+				// check the "power" of this packet...
+				for ( i = 0; i < actualSamples; i++ ) {
+					const float flsamp = (float) sampbuffer[i];
+					const float s = fabs( flsamp );
+					voipPower += s * s;
+					sampbuffer[i] = (int16_t) Com_Clamp( -32768.0f, 32767.0f, flsamp * audioMult );
+				}
 
-			// encode raw audio samples into Opus data...
-			bytes = opus_encode( clc.opusEncoder, sampbuffer, samples,
-									(unsigned char *) clc.voipOutgoingData,
-									sizeof( clc.voipOutgoingData ) );
-			if ( bytes <= 0 ) {
-				Com_DPrintf( "VoIP: Error encoding %d samples\n", samples );
-				bytes = 0;
-			}
+				clc.voipPower = (voipPower / (32768.0f * 32768.0f *
+				                 ((float) (actualSamples ? actualSamples : 1)))) * 100.0f;
 
-			clc.voipPower = (voipPower / (32768.0f * 32768.0f *
-			                 ((float) (actualSamples ? actualSamples : 1)))) * 100.0f;
-
-			{
-				qboolean discard = qfalse;
-				qboolean hangover = qfalse;
-
-				if ( useVad ) {
+				// Decide whether THIS frame emits a packet.
+				if ( finalFrame ) {
+					// Forced teardown — emit the tail only if mid-utterance
+					// (PTT release while speaking, VAD-off mid-burst).
+					shouldSend = (cl_voipSend->integer != 0);
+				} else if ( useVad ) {
 					if ( cl_voipVADMuted->integer ) {
-						discard = qtrue;
-					} else if ( clc.voipPower < cl_voipVADThreshold->value ) {
-						// Below threshold — bridge brief dips so the wire
-						// behavior matches the HUD icon's decay window.
-						if ( clc.voipLastSelfSendTime > 0
-							&& cls.realtime - clc.voipLastSelfSendTime < VOIP_TALKING_TIMEOUT ) {
-							hangover = qtrue;
-						} else {
-							discard = qtrue;
+						shouldSend = qfalse;
+					} else if ( clc.voipPower >= cl_voipVADThreshold->value ) {
+						shouldSend = qtrue;
+					} else if ( clc.voipLastSelfSendTime > 0
+					         && cls.realtime - clc.voipLastSelfSendTime < VOIP_TALKING_TIMEOUT ) {
+						// Below threshold but within hangover window — bridge
+						// brief dips so wire behavior matches HUD decay.
+						shouldSend = qtrue;
+						hangover = qtrue;
+					} else {
+						shouldSend = qfalse;
+					}
+				} else {
+					// PTT: emit whenever the capture device is open.
+					shouldSend = (cl_voipCapture->integer != 0);
+				}
+
+				// Edge-detect cl_voipSend's rising transition for generation
+				// reset and target re-parse. Falling transitions need no flag —
+				// we just stop emitting this frame.
+				{
+					qboolean wasSending = (cl_voipSend->integer != 0);
+					if ( shouldSend != wasSending ) {
+						Cvar_Set( "cl_voipSend", shouldSend ? "1" : "0" );
+						cl_voipSend->modified = qfalse;
+						if ( shouldSend ) {
+							initialFrame = qtrue;
 						}
 					}
 				}
 
-				if ( discard ) {
-					CL_VoipNewGeneration();  // no "talk" for at least 1/4 second.
-				} else {
+				if ( initialFrame ) {
+					CL_VoipNewGeneration();
+					CL_VoipParseTargets();
+					cl_voipSendTarget->modified = qfalse;
+				}
+
+				// encode raw audio samples into Opus data...
+				bytes = opus_encode( clc.opusEncoder, sampbuffer, samples,
+										(unsigned char *) clc.voipOutgoingData,
+										sizeof( clc.voipOutgoingData ) );
+				if ( bytes <= 0 ) {
+					Com_DPrintf( "VoIP: Error encoding %d samples\n", samples );
+					bytes = 0;
+				}
+
+				// Emit only if shouldSend. Below-threshold VAD frames still
+				// run through opus_encode (advances encoder state) but the
+				// packet is dropped on the floor.
+				if ( shouldSend && bytes > 0 ) {
 					clc.voipOutgoingDataSize = bytes;
 					clc.voipOutgoingDataFrames = voipFrames;
 					// Only advance the timestamp on frames that genuinely cross
@@ -460,8 +513,8 @@ void CL_CaptureVoip( void )
 		}
 	}
 
-	// User requested we stop recording, and we've now processed the last of
-	//  any previously-buffered data. Pause the capture device, etc.
+	// finalFrame teardown: close device, drain residue, restore master gain,
+	// clear meter, and force cl_voipSend to 0 so the HUD goes dark.
 	if ( finalFrame ) {
 		S_StopCapture();
 
@@ -481,6 +534,10 @@ void CL_CaptureVoip( void )
 
 		S_MasterGain( 1.0f );
 		clc.voipPower = 0.0f;  // force this value so it doesn't linger.
+		if ( cl_voipSend->integer ) {
+			Cvar_Set( "cl_voipSend", "0" );
+			cl_voipSend->modified = qfalse;
+		}
 	}
 }
 

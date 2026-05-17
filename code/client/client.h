@@ -359,6 +359,8 @@ typedef struct {
 	byte voipOutgoingData[1024];
 	float voipPower;
 	int voipLastSelfSendTime;
+	float voipIncomingPower[MAX_CLIENTS];     // per-client received audio power, 0-100 normalized
+	int   voipIncomingPowerTime[MAX_CLIENTS]; // cls.realtime when each entry was last updated
 #endif
 
 } clientConnection_t;
@@ -544,14 +546,18 @@ extern	cvar_t	*cl_demoPlayer;
 extern cvar_t *cl_voipUseVAD;
 extern cvar_t *cl_voipVADThreshold;
 extern cvar_t *cl_voipSend;
+extern cvar_t *cl_voipCapture;
 extern cvar_t *cl_voipSendTarget;
 extern cvar_t *cl_voipGainDuringCapture;
 extern cvar_t *cl_voipCaptureMult;
 extern cvar_t *cl_voipShowMeter;
 extern cvar_t *cl_voipVolume;
 extern cvar_t *cl_voip;
+extern cvar_t *cl_voipLevel;
+extern cvar_t *cl_voipLevels;
 
 void CL_CaptureVoip( void );
+void CL_UpdateVoipLevels( void );
 void CL_ParseVoip( msg_t *msg, qboolean ignoreData );
 void CL_WriteVoip( msg_t *msg );
 void CL_InitVoip( void );
