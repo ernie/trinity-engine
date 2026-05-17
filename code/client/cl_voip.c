@@ -56,6 +56,10 @@ void CL_VoipCvarInit( void )
 {
 	cl_voipSend = Cvar_Get( "cl_voipSend", "0", CVAR_ROM );
 	Cvar_SetDescription( cl_voipSend, "Read-only. 1 while VOIP packets are being emitted this frame; 0 otherwise. Driven by the engine." );
+	cl_voipLevel = Cvar_Get( "cl_voipLevel", "0", CVAR_ROM );
+	Cvar_SetDescription( cl_voipLevel, "Read-only. Local VOIP transmission state encoded as 0-5: 0=not transmitting, 1=transmitting but silent, 2-5=transmitting at level 1-4. Driven by the engine each frame; do not set manually." );
+	cl_voipLevels = Cvar_Get( "cl_voipLevels", "", CVAR_ROM );
+	Cvar_SetDescription( cl_voipLevels, "Read-only. Per-client received VOIP levels packed as MAX_CLIENTS hex digits, same 0-5 encoding as cl_voipLevel. Local-self slot is always 0; QVM reads cl_voipLevel for self. Driven by the engine each frame." );
 	cl_voipCapture = Cvar_Get( "cl_voipCapture", "0", 0 );
 	Cvar_SetDescription( cl_voipCapture, "1 while the VOIP capture device is open and audio is being analyzed. Normally driven by PTT bindings (+voiprecord) or cl_voipUseVAD; safe to set manually for scripted control." );
 	cl_voipSendTarget = Cvar_Get( "cl_voipSendTarget", "spatial", 0 );
@@ -537,6 +541,18 @@ void CL_CaptureVoip( void )
 		if ( cl_voipSend->integer ) {
 			Cvar_Set( "cl_voipSend", "0" );
 			cl_voipSend->modified = qfalse;
+		}
+	}
+
+	// Update cl_voipLevel each frame — encodes whether we're emitting and how loud.
+	// The bucketing uses cl_voipSend (the per-frame "am I transmitting" signal from the
+	// refactor) so PTT-silent frames produce digit 1 and audible frames produce 2-5.
+	{
+		int level = cl_voipSend->integer ? CL_VoipBucketLevel( clc.voipPower ) : 0;
+		char buf[8];
+		Com_sprintf( buf, sizeof( buf ), "%d", level );
+		if ( strcmp( cl_voipLevel->string, buf ) != 0 ) {
+			Cvar_Set( "cl_voipLevel", buf );
 		}
 	}
 }
