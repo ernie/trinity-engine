@@ -577,8 +577,10 @@ void CL_UpdateVoipLevels( void ) {
 	for ( i = 0; i < MAX_CLIENTS; i++ ) {
 		int digit;
 
-		if ( i == clc.clientNum ) {
-			// Local self uses cl_voipLevel; this slot stays 0 in the per-client string.
+		if ( i == clc.clientNum && !clc.demoplaying && !tvPlay.active ) {
+			// Local self uses cl_voipLevel for live capture; this slot stays 0 in the per-client string.
+			// During demo/TV playback there's no live capture, and clc.clientNum is the followed player —
+			// fall through to bucket like any other client.
 			digit = 0;
 		} else if ( clc.voipIncomingPowerTime[i] == 0 ||
 		            cls.realtime - clc.voipIncomingPowerTime[i] > VOIP_LEVEL_DECAY_MS ) {
