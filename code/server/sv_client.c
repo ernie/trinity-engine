@@ -1827,6 +1827,15 @@ void SV_UserinfoChanged( client_t *cl, qboolean updateUserinfo, qboolean runFilt
 	if ( !updateUserinfo )
 		return;
 
+	// Hub-supplied name lock: if the tracker has confirmed this client's
+	// identity and pushed a canonical name via trinity_auth_ok, override
+	// whatever the client sent in userinfo. The override is silent — the
+	// client's /name attempt simply doesn't take. This persists across
+	// map changes because client_t is engine-side memory.
+	if ( cl->trinityName[0] ) {
+		Info_SetValueForKey( cl->userinfo, "name", cl->trinityName );
+	}
+
 	// name for C code
 	val = Info_ValueForKey( cl->userinfo, "name" );
 	// truncate if it is too long as it may cause memory corruption in OSP mod

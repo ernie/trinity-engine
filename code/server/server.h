@@ -187,6 +187,7 @@ typedef struct client_s {
 	char			lastClientCommandString[MAX_STRING_CHARS];
 	sharedEntity_t	*gentity;			// SV_GentityNum(clientnum)
 	char			name[MAX_NAME_LENGTH];			// extracted from userinfo, high bits masked
+	char			trinityName[MAX_NAME_LENGTH];	// hub-supplied canonical name; when set, overrides userinfo "name"
 
 	gameStateAck_t	gamestateAck;
 	qboolean		downloading;		// set at "download", reset at gamestate retransmission

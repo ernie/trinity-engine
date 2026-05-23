@@ -1138,8 +1138,34 @@ See if the current console command is claimed by the game
 ====================
 */
 qboolean SV_GameCommand( void ) {
+	const char *cmd;
+
 	if ( sv.state != SS_GAME ) {
 		return qfalse;
+	}
+
+	cmd = Cmd_Argv( 0 );
+
+	// Intercept trinity_auth_ok to stash the canonical name on client_t
+	// before the QVM sees the command. The QVM still processes the
+	// command (sets trinityUserType, triggers announcement); the engine
+	// just owns the name-lock field.
+	if ( !Q_stricmp( cmd, "trinity_auth_ok" ) && Cmd_Argc() >= 4 ) {
+		int slot = atoi( Cmd_Argv( 1 ) );
+		if ( slot >= 0 && slot < sv_maxclients->integer ) {
+			Q_strncpyz( svs.clients[slot].trinityName,
+			            Cmd_Argv( 3 ),
+			            sizeof( svs.clients[slot].trinityName ) );
+			SV_UserinfoChanged( &svs.clients[slot], qtrue, qfalse );
+		}
+	}
+
+	// Clear the name lock on auth failure so the client can /name freely.
+	if ( !Q_stricmp( cmd, "trinity_auth_fail" ) && Cmd_Argc() >= 2 ) {
+		int slot = atoi( Cmd_Argv( 1 ) );
+		if ( slot >= 0 && slot < sv_maxclients->integer ) {
+			svs.clients[slot].trinityName[0] = '\0';
+		}
 	}
 
 	return VM_Call( gvm, 0, GAME_CONSOLE_COMMAND );
