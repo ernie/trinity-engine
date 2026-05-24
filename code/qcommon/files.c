@@ -394,6 +394,49 @@ qboolean FS_Initialized( void ) {
 
 /*
 =================
+FS_TrinityPakIndex
+
+For Trinity paks (pak8t, pak3t, zzz-trinity-announcer), returns the
+index into fs_serverReferencedPaks[] whose name matches this pack,
+or -1 if no match.  Matches both exact base names (e.g. "pak8t") and
+checksummed download variants (e.g. "pak8t.0abcdef0").
+=================
+*/
+static int FS_TrinityPakIndex( const pack_t *pack ) {
+	static const char *trinityPaks[] = {
+		"pak8t", "pak3t", "zzz-trinity-announcer"
+	};
+	int t, i;
+	const char *base;
+	int baseLen;
+
+	for ( t = 0; t < ARRAY_LEN( trinityPaks ); t++ ) {
+		base = trinityPaks[t];
+		baseLen = (int)strlen( base );
+
+		if ( Q_stricmpn( pack->pakBasename, base, baseLen ) != 0 )
+			continue;
+		// Must be exact match or followed by '.' (checksummed variant)
+		if ( pack->pakBasename[baseLen] != '\0' &&
+		     pack->pakBasename[baseLen] != '.' )
+			continue;
+
+		// Find the matching entry in the server's referenced list.
+		// Referenced names use "gamedir/basename" format.
+		for ( i = 0; i < fs_numServerReferencedPaks; i++ ) {
+			if ( !fs_serverReferencedPakNames[i] )
+				continue;
+			if ( !Q_stricmp( fs_serverReferencedPakNames[i],
+			                 va( "%s/%s", pack->pakGamename, base ) ) )
+				return i;
+		}
+	}
+	return -1;
+}
+
+
+/*
+=================
 FS_PakIsPure
 =================
 */
@@ -410,6 +453,17 @@ static qboolean FS_PakIsPure( const pack_t *pack ) {
 			}
 		}
 		return qfalse;	// not on the pure server pak list
+	}
+
+	// Non-pure mode: Trinity paks still require a server checksum match
+	// so the correct version loads even without sv_pure.  VR clients
+	// (q3vr, ioq3quest) force non-pure because they run native cgame/
+	// game/ui, but we still want pak8t/pak3t/announcer to track the
+	// server's version.
+	if ( fs_numServerReferencedPaks ) {
+		i = FS_TrinityPakIndex( pack );
+		if ( i >= 0 && pack->checksum != fs_serverReferencedPaks[i] )
+			return qfalse;
 	}
 #endif
 	return qtrue;

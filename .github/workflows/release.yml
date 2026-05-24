@@ -327,6 +327,7 @@ jobs:
           mkdir -p trinity-assets
           gh release download --repo ernie/trinity --pattern 'pak8t.pk3' --dir trinity-assets
           gh release download --repo ernie/trinity --pattern 'pak3t.pk3' --dir trinity-assets
+          gh release download --repo ernie/trinity --pattern 'zzz-trinity-announcer.pk3' --dir trinity-assets
 
       - name: Bundle game data into platform artifacts
         run: |
@@ -350,6 +351,7 @@ jobs:
               mkdir -p "$dir/baseq3" "$dir/missionpack"
               cp trinity-assets/pak8t.pk3 "$dir/baseq3/"
               cp trinity-assets/pak3t.pk3 "$dir/missionpack/"
+              cp trinity-assets/zzz-trinity-announcer.pk3 "$dir/baseq3/"
             else
               echo "Warning: $dir not found, skipping"
             fi

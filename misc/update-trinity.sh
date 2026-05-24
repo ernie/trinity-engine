@@ -18,8 +18,13 @@ for dir in "$BASEQ3" "$MISSIONPACK"; do
   fi
 done
 
+if [ -d "$BASEQ3" ]; then
+  rm -f "$BASEQ3"/zzz-trinity-announcer.*.pk3 "$BASEQ3"/zzz-trinity-announcer.pk3
+fi
+
 echo "Downloading latest Trinity pk3s..."
 curl -fL -o "$BASEQ3/pak8t.pk3" "$BASE_URL/pak8t.pk3" && echo "  baseq3/pak8t.pk3 OK" || echo "  baseq3/pak8t.pk3 FAILED"
 curl -fL -o "$MISSIONPACK/pak3t.pk3" "$BASE_URL/pak3t.pk3" && echo "  missionpack/pak3t.pk3 OK" || echo "  missionpack/pak3t.pk3 FAILED"
+curl -fL -o "$BASEQ3/zzz-trinity-announcer.pk3" "$BASE_URL/zzz-trinity-announcer.pk3" && echo "  baseq3/zzz-trinity-announcer.pk3 OK" || echo "  baseq3/zzz-trinity-announcer.pk3 FAILED"
 
 echo "Done."
