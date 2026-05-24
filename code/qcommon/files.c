@@ -409,6 +409,7 @@ static int FS_TrinityPakIndex( const pack_t *pack ) {
 	int t, i;
 	const char *base;
 	int baseLen;
+	char qualifiedName[MAX_OSPATH];
 
 	for ( t = 0; t < ARRAY_LEN( trinityPaks ); t++ ) {
 		base = trinityPaks[t];
@@ -421,13 +422,15 @@ static int FS_TrinityPakIndex( const pack_t *pack ) {
 		     pack->pakBasename[baseLen] != '.' )
 			continue;
 
+		Com_sprintf( qualifiedName, sizeof( qualifiedName ),
+		             "%s/%s", pack->pakGamename, base );
+
 		// Find the matching entry in the server's referenced list.
 		// Referenced names use "gamedir/basename" format.
 		for ( i = 0; i < fs_numServerReferencedPaks; i++ ) {
 			if ( !fs_serverReferencedPakNames[i] )
 				continue;
-			if ( !Q_stricmp( fs_serverReferencedPakNames[i],
-			                 va( "%s/%s", pack->pakGamename, base ) ) )
+			if ( !Q_stricmp( fs_serverReferencedPakNames[i], qualifiedName ) )
 				return i;
 		}
 	}
