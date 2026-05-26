@@ -582,11 +582,7 @@ typedef struct src_s
 	qboolean	local;			// Is this local (relative to the cam)
 } src_t;
 
-#ifdef __APPLE__
-	#define MAX_SRC 64
-#else
-	#define MAX_SRC 128
-#endif
+#define MAX_SRC 128
 static src_t srcList[MAX_SRC];
 static int srcCount = 0;
 static int srcActiveCnt = 0;
@@ -1265,7 +1261,7 @@ static void S_AL_StartSound( const vec3_t origin, int entnum, int entchannel, sf
 
 	S_AL_SanitiseVector(sorigin);
 
-	if((srcActiveCnt > 5 * srcCount / 3) &&
+	if((srcActiveCnt > srcCount * 7 / 8) &&
 		(DistanceSquared(sorigin, lastListenerOrigin) >=
 		(s_alMaxDistance->value + s_alGraceDistance->value) * (s_alMaxDistance->value + s_alGraceDistance->value)))
 	{
@@ -1328,6 +1324,16 @@ static void S_AL_SrcLoop( alSrcPriority_t priority, sfxHandle_t sfx,
 	// Do we need to allocate a new source for this entity
 	if( !sent->srcAllocated )
 	{
+		// Skip distant new loops when pool is saturated, otherwise far-away
+		// ambients on loop-heavy maps thrash slots with closer loops every frame.
+		if( srcActiveCnt > srcCount * 7 / 8 )
+		{
+			const float *spos = origin ? origin : sent->origin;
+			float maxRange = s_alMaxDistance->value + s_alGraceDistance->value;
+			if( DistanceSquared( spos, lastListenerOrigin ) >= maxRange * maxRange )
+				return;
+		}
+
 		// Try to get a channel
 		src = S_AL_SrcAlloc( priority, entityNum, -1 );
 		if( src == -1 )
@@ -2548,7 +2554,7 @@ qboolean S_AL_Init( soundInterface_t *si )
 	// New console variables
 	s_alPrecache = Cvar_Get( "s_alPrecache", "1", CVAR_ARCHIVE );
 	s_alGain = Cvar_Get( "s_alGain", "1.0", CVAR_ARCHIVE );
-	s_alSources = Cvar_Get( "s_alSources", "96", CVAR_ARCHIVE );
+	s_alSources = Cvar_Get( "s_alSources", "128", CVAR_ARCHIVE );
 	s_alDopplerFactor = Cvar_Get( "s_alDopplerFactor", "1.0", CVAR_ARCHIVE );
 	s_alDopplerSpeed = Cvar_Get( "s_alDopplerSpeed", "9000", CVAR_ARCHIVE );
 	s_alMinDistance = Cvar_Get( "s_alMinDistance", "120", CVAR_CHEAT );
