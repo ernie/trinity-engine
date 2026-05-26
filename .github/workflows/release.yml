@@ -246,6 +246,7 @@ jobs:
   macos:
     name: Release macOS ${{ matrix.arch }}
     runs-on: macos-14
+    environment: release
     strategy:
       fail-fast: false
       matrix:
@@ -272,6 +273,59 @@ jobs:
         ./make-macosx-app.sh release ${{ matrix.arch }}
         mkdir -p bin
         cp -R build/release-darwin-${{ matrix.arch }}/Trinity.app bin/
+
+    - name: Sign and notarize app bundle
+      env:
+        MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+        MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        AC_API_KEY_BASE64: ${{ secrets.AC_API_KEY_BASE64 }}
+        AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+        AC_API_ISSUER_ID: ${{ secrets.AC_API_ISSUER_ID }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "${MACOS_CERTIFICATE_BASE64:-}" ]; then
+          echo "::warning::Signing secrets not configured; shipping ad-hoc signed build."
+          echo "Set MACOS_CERTIFICATE_BASE64 (and friends) in repo secrets to enable signing."
+          exit 0
+        fi
+
+        # Stage credentials in $RUNNER_TEMP (auto-cleaned by GitHub).
+        CERT_PATH="$RUNNER_TEMP/cert.p12"
+        API_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+        echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$CERT_PATH"
+        echo "$AC_API_KEY_BASE64"        | base64 --decode > "$API_KEY_PATH"
+        chmod 600 "$CERT_PATH" "$API_KEY_PATH"
+
+        # Build a throwaway keychain so we never touch the runner's login.keychain.
+        KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+        KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
+        security create-keychain  -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+        security set-keychain-settings -lut 21600 "$KEYCHAIN"
+        security unlock-keychain  -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+        security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" \
+          -A -t cert -f pkcs12 -k "$KEYCHAIN"
+
+        # Make the new keychain searchable by codesign without ejecting the default.
+        security list-keychains -d user -s "$KEYCHAIN" \
+          $(security list-keychains -d user | sed -e 's/[\" ]//g')
+
+        # Allow codesign to use the imported key without an interactive prompt.
+        security set-key-partition-list \
+          -S apple-tool:,apple:,codesign: \
+          -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+        export AC_API_KEY_PATH="$API_KEY_PATH"
+        chmod +x misc/macos-codesign.sh
+        ./misc/macos-codesign.sh bin/Trinity.app
+
+    - name: Clean up signing keychain
+      if: always()
+      run: |
+        security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+        rm -f "$RUNNER_TEMP/cert.p12" "$RUNNER_TEMP/AuthKey.p8"
 
     - uses: actions/upload-artifact@v7
       with:
