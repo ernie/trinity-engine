@@ -258,7 +258,19 @@ jobs:
         submodules: recursive
 
 
-    - name: Build universal2 app bundle
+    - name: Download Trinity mod paks
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        mkdir -p trinity-assets
+        gh release download --repo ernie/trinity --pattern 'pak8t.pk3'                --dir trinity-assets
+        gh release download --repo ernie/trinity --pattern 'pak3t.pk3'                --dir trinity-assets
+        gh release download --repo ernie/trinity --pattern 'zzz-trinity-announcer.pk3' --dir trinity-assets
+
+    - name: Build universal2 app bundle (with mod paks bundled)
+      env:
+        TRINITY_ASSETS_DIR: ${{ github.workspace }}/trinity-assets
       run: |
         NCPU=$(sysctl -n hw.logicalcpu)
         make -j$NCPU PLATFORM=darwin ARCH=x86_64  CC=clang USE_RENDERER_DLOPEN=0 STRIP=echo
@@ -315,16 +327,13 @@ jobs:
         chmod +x misc/macos-codesign.sh
         ./misc/macos-codesign.sh bin/Trinity.app
 
-    - name: Bundle assets and update script
-      env:
-        GH_TOKEN: ${{ github.token }}
+    - name: Build DMG
       run: |
-        set -euo pipefail
-        mkdir -p bin/baseq3 bin/missionpack
-        gh release download --repo ernie/trinity --pattern 'pak8t.pk3'                --dir bin/baseq3
-        gh release download --repo ernie/trinity --pattern 'pak3t.pk3'                --dir bin/missionpack
-        gh release download --repo ernie/trinity --pattern 'zzz-trinity-announcer.pk3' --dir bin/baseq3
-        cp misc/update-trinity.sh bin/
+        # Pack the signed/notarized .app into a drag-to-Applications DMG.
+        # The .app is already notarized and stapled; we don't notarize the
+        # DMG too — Gatekeeper checks the inner .app on first launch.
+        chmod +x misc/macos-make-dmg.sh
+        ./misc/macos-make-dmg.sh bin/Trinity.app trinity-macos-universal2.dmg
 
     - name: Archive with ditto (preserves stapled ticket)
       run: |
@@ -344,7 +353,9 @@ jobs:
     - uses: actions/upload-artifact@v7
       with:
         name: macos-universal2
-        path: trinity-macos-universal2.zip
+        path: |
+          trinity-macos-universal2.zip
+          trinity-macos-universal2.dmg
         if-no-files-found: error
         retention-days: 5
 
@@ -388,12 +399,14 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v8
 
-      - name: Stage pre-built macOS zip
+      - name: Stage pre-built macOS artifacts
         # The macOS bundle is signed, notarized, stapled, and zipped with
-        # ditto on the macOS runner — moving it to the top level lets the
-        # checksum and release steps treat it like every other zip without
-        # the Linux runner ever touching its xattrs.
-        run: mv macos-universal2/trinity-macos-universal2.zip .
+        # ditto on the macOS runner — moving them to the top level lets the
+        # checksum and release steps treat them like every other zip without
+        # the Linux runner ever touching xattrs or the DMG structure.
+        run: |
+          mv macos-universal2/trinity-macos-universal2.zip .
+          mv macos-universal2/trinity-macos-universal2.dmg .
 
       - name: Download Trinity assets
         env:
@@ -459,7 +472,7 @@ jobs:
       - name: Generate checksums
         run: |
           set -euxo pipefail
-          sha256sum trinity-*.zip > sha256sums.txt
+          sha256sum trinity-*.zip trinity-*.dmg > sha256sums.txt
           cat sha256sums.txt
 
       - name: Create release
@@ -467,4 +480,5 @@ jobs:
         with:
           files: |
             *.zip
+            *.dmg
             sha256sums.txt

@@ -318,6 +318,33 @@ function action()
 action "${BUNDLEBINDIR}/${EXECUTABLE_NAME}"				"${TRINITY_CLIENT_ARCHS}"
 action "${BUNDLEBINDIR}/${DEDICATED_NAME}"				"${TRINITY_SERVER_ARCHS}"
 
+# Optionally bundle Trinity mod paks inside the .app. Callers (CI, local
+# release scripts) point TRINITY_ASSETS_DIR at a directory containing the
+# pre-downloaded pak files; we copy them into the appropriate subdirs
+# inside Contents/MacOS/, where the engine's fs_basepath search finds them.
+# Users' overrides in fs_homepath always win, so this is a safe fallback.
+if [ -n "${TRINITY_ASSETS_DIR}" ]; then
+	if [ ! -d "${TRINITY_ASSETS_DIR}" ]; then
+		echo "**** ERROR: TRINITY_ASSETS_DIR set to '${TRINITY_ASSETS_DIR}' but directory does not exist"
+		exit 1
+	fi
+	mkdir -p "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/missionpack"
+	for pak in pak8t.pk3 zzz-trinity-announcer.pk3; do
+		if [ -f "${TRINITY_ASSETS_DIR}/${pak}" ]; then
+			cp "${TRINITY_ASSETS_DIR}/${pak}" "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/baseq3/${pak}"
+			echo "Bundled baseq3/${pak}"
+		else
+			echo "**** WARNING: ${pak} not found in TRINITY_ASSETS_DIR"
+		fi
+	done
+	if [ -f "${TRINITY_ASSETS_DIR}/pak3t.pk3" ]; then
+		cp "${TRINITY_ASSETS_DIR}/pak3t.pk3" "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/missionpack/pak3t.pk3"
+		echo "Bundled missionpack/pak3t.pk3"
+	else
+		echo "**** WARNING: pak3t.pk3 not found in TRINITY_ASSETS_DIR"
+	fi
+fi
+
 # ad-hoc sign if codesign is available (required on Apple Silicon for the
 # app to launch at all). Hardened Runtime is intentionally NOT used here:
 # ad-hoc signatures cannot carry the restricted entitlements
