@@ -500,6 +500,19 @@ void *Sys_LoadLibrary( const char *name )
 		Com_Error( ERR_FATAL, "Sys_LoadLibrary: Unable to load library with '%s' extension", ext );
 	}
 
+#ifdef __APPLE__
+	// dyld does not search @executable_path for bare names passed to dlopen,
+	// so bundled dylibs (libopenal, etc.) in Trinity.app/Contents/MacOS/ are
+	// invisible to the system search path. Try the bundle dir explicitly first.
+	if ( name && !strchr( name, '/' ) ) {
+		char bundlePath[MAX_OSPATH];
+		Com_sprintf( bundlePath, sizeof( bundlePath ), "@executable_path/%s", name );
+		handle = dlopen( bundlePath, RTLD_NOW );
+		if ( handle )
+			return handle;
+	}
+#endif
+
 	handle = dlopen( name, RTLD_NOW );
 	return handle;
 }
