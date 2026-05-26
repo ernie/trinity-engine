@@ -12,6 +12,13 @@
 #include <stdio.h>
 #include <ctype.h>
 
+#ifdef __APPLE__
+#include <sys/wait.h>
+#include <unistd.h>
+#include <copyfile.h>
+#include <errno.h>
+#endif
+
 // compile-time defaults (overridden by Makefile defines)
 #ifndef UPDATE_GITHUB_OWNER
 #define UPDATE_GITHUB_OWNER "ernie"
@@ -71,6 +78,23 @@ static cvar_t	*update_force;
 static char		releaseVersion[64];
 static char		releaseAssetURL[MAX_OSPATH];
 static int		releaseAssetSize;
+
+
+// Pick the update-state root: the user-data dir on macOS (so update
+// staging lives under ~/Library/Application Support/Quake3 like
+// configs and demos), the install directory via Sys_DefaultBasePath()
+// on Windows/Linux (preserves the existing install-dir-is-state model).
+// Uses Sys_DefaultHomePath() rather than the fs_homepath cvar to stay
+// symmetric with Sys_ApplyPendingUpdate in unix_main.c, which also calls
+// Sys_DefaultHomePath() directly (the cvar is empty before Com_Init).
+static const char *Update_StageRoot( void )
+{
+#ifdef __APPLE__
+	return Sys_DefaultHomePath();
+#else
+	return Sys_DefaultBasePath();
+#endif
+}
 
 
 /*
@@ -177,7 +201,7 @@ static void Update_BuildAssetName( char *buf, int bufSize )
     #endif
   #endif
 #elif defined(__APPLE__)
-	Com_sprintf( buf, bufSize, "%s-macos-universal2.zip", UPDATE_ASSET_PREFIX );
+	Com_sprintf( buf, bufSize, "%s-macos-universal2.dmg", UPDATE_ASSET_PREFIX );
 #elif defined(__linux__)
   #if defined(__aarch64__)
 	Com_sprintf( buf, bufSize, "%s-linux-arm64.zip", UPDATE_ASSET_PREFIX );
@@ -540,10 +564,10 @@ static int Update_DownloadProgressCallback( void *data, double dltotal, double d
 ==================
 Update_BeginDownload
 
-Start downloading the release ZIP to a temp file in the install directory.
+Start downloading the release asset to a temp file in the staging root.
 ==================
 */
-static char updateZipPath[MAX_OSPATH];
+static char updateDownloadPath[MAX_OSPATH];
 
 static void Update_BeginDownload( void )
 {
@@ -568,12 +592,16 @@ static void Update_BeginDownload( void )
 		return;
 	}
 
-	// write to a temp file in the install directory (raw filesystem, not engine FS)
-	Com_sprintf( updateZipPath, sizeof( updateZipPath ), "%s/update_download.zip.tmp", Sys_DefaultBasePath() );
+	// write to a temp file in the staging root (raw filesystem, not engine FS)
+#ifdef __APPLE__
+	Com_sprintf( updateDownloadPath, sizeof( updateDownloadPath ), "%s/update_download.dmg.tmp", Update_StageRoot() );
+#else
+	Com_sprintf( updateDownloadPath, sizeof( updateDownloadPath ), "%s/update_download.zip.tmp", Update_StageRoot() );
+#endif
 
-	updateZipFile = fopen( updateZipPath, "wb" );
+	updateZipFile = fopen( updateDownloadPath, "wb" );
 	if ( !updateZipFile ) {
-		Update_SetError( va( "Cannot write to install directory: %s", Sys_DefaultBasePath() ) );
+		Update_SetError( va( "Cannot write to update staging directory: %s", Update_StageRoot() ) );
 		Com_DL_Cleanup( dl );
 		return;
 	}
@@ -674,7 +702,7 @@ static void Update_PerformDownload( void )
 		long code = 0;
 		dl->func.easy_getinfo( msg->easy_handle, CURLINFO_RESPONSE_CODE, &code );
 		Com_DL_Cleanup( dl );
-		remove( updateZipPath );
+		remove( updateDownloadPath );
 		Update_SetError( va( "Download failed (HTTP %ld)", code ) );
 	}
 }
@@ -749,16 +777,145 @@ static int Update_DetectZipPrefix( unzFile uf )
 }
 
 
+#ifdef __APPLE__
+/*
+==================
+Update_RunCommand
+
+fork+execvp+wait helper for shelling out to hdiutil and ditto. argv is
+NULL-terminated; argv[0] is the program name (looked up on PATH).
+Returns qtrue iff the child exited with status 0.
+==================
+*/
+static qboolean Update_RunCommand( const char *argv[] )
+{
+	pid_t pid;
+	int status;
+
+	pid = fork();
+	if ( pid < 0 ) {
+		return qfalse;
+	}
+	if ( pid == 0 ) {
+		execvp( argv[0], (char *const *)argv );
+		_exit( 127 );
+	}
+
+	while ( waitpid( pid, &status, 0 ) < 0 ) {
+		if ( errno != EINTR ) {
+			return qfalse;
+		}
+	}
+	return WIFEXITED( status ) && WEXITSTATUS( status ) == 0;
+}
+
+
+/*
+==================
+Update_ExtractDMG
+
+Mount the downloaded .dmg, copy Trinity.app out into pending/Trinity.app
+via copyfile(3) with COPYFILE_ALL (data + xattrs + ACLs + stat, so the
+notarization staple xattr comes through), detach, then write a minimal
+manifest. The apply path picks up pending/Trinity.app and does the
+atomic bundle swap.
+==================
+*/
+static qboolean Update_ExtractDMG( void )
+{
+	char updatesDir[MAX_OSPATH];
+	char pendingDir[MAX_OSPATH];
+	char manifestPath[MAX_OSPATH];
+	char stagedBundle[MAX_OSPATH];
+	char mountPoint[MAX_OSPATH];
+	char bundleSource[MAX_OSPATH];
+	FILE *manifest;
+	int copyResult;
+
+	Com_sprintf( updatesDir, sizeof( updatesDir ), "%s/%s", Update_StageRoot(), UPDATES_DIR );
+	Com_sprintf( pendingDir, sizeof( pendingDir ), "%s/%s", Update_StageRoot(), PENDING_DIR );
+	Com_sprintf( manifestPath, sizeof( manifestPath ), "%s/%s", pendingDir, MANIFEST_NAME );
+	Com_sprintf( stagedBundle, sizeof( stagedBundle ), "%s/Trinity.app", pendingDir );
+
+	Sys_Mkdir( updatesDir );
+
+	// Clear any partial pending/ from a prior failed extract — copyfile
+	// with COPYFILE_RECURSIVE merges into an existing destination dir
+	// rather than replacing it.
+	{
+		const char *rmArgs[] = { "rm", "-rf", pendingDir, NULL };
+		Update_RunCommand( rmArgs );
+	}
+	Sys_Mkdir( pendingDir );
+
+	Com_sprintf( mountPoint, sizeof( mountPoint ), "%s/dmg-mount-XXXXXX", updatesDir );
+	if ( !mkdtemp( mountPoint ) ) {
+		Update_SetError( "Failed to create temp mount point for DMG" );
+		remove( updateDownloadPath );
+		return qfalse;
+	}
+
+	{
+		const char *attachArgs[] = {
+			"hdiutil", "attach", "-nobrowse", "-noverify", "-noautoopen",
+			"-mountpoint", mountPoint, updateDownloadPath, NULL
+		};
+		if ( !Update_RunCommand( attachArgs ) ) {
+			Update_SetError( "hdiutil attach failed for downloaded DMG" );
+			rmdir( mountPoint );
+			remove( updateDownloadPath );
+			return qfalse;
+		}
+	}
+
+	Com_sprintf( bundleSource, sizeof( bundleSource ), "%s/Trinity.app", mountPoint );
+	copyResult = copyfile( bundleSource, stagedBundle, NULL,
+		COPYFILE_ALL | COPYFILE_RECURSIVE );
+
+	{
+		const char *detachArgs[] = { "hdiutil", "detach", mountPoint, NULL };
+		Update_RunCommand( detachArgs );
+	}
+	rmdir( mountPoint );
+
+	if ( copyResult != 0 ) {
+		Update_SetError( va( "copyfile failed to extract Trinity.app from DMG: %s",
+			strerror( errno ) ) );
+		remove( updateDownloadPath );
+		return qfalse;
+	}
+
+	manifest = fopen( manifestPath, "w" );
+	if ( !manifest ) {
+		Update_SetError( "Failed to create update manifest" );
+		remove( updateDownloadPath );
+		return qfalse;
+	}
+	fprintf( manifest, "version=%s\n", releaseVersion );
+	fclose( manifest );
+
+	remove( updateDownloadPath );
+
+	Com_Printf( "Update: extracted Trinity.app from DMG (version %s)\n", releaseVersion );
+	return qtrue;
+}
+#endif
+
+
 /*
 ==================
 Update_ExtractAndStage
 
-Open the downloaded ZIP, extract non-excluded files into pendingupdate/,
-and write the manifest.
+Stage the downloaded release into pendingupdate/ and write the manifest.
+On macOS the asset is a .dmg handled by Update_ExtractDMG; everywhere
+else it's a .zip unpacked entry-by-entry.
 ==================
 */
 static qboolean Update_ExtractAndStage( void )
 {
+#ifdef __APPLE__
+	return Update_ExtractDMG();
+#else
 	unzFile uf;
 	char filename[MAX_OSPATH];
 	char destPath[MAX_OSPATH];
@@ -772,13 +929,13 @@ static qboolean Update_ExtractAndStage( void )
 	int extracted = 0;
 	int ret;
 
-	Com_sprintf( pendingDir, sizeof( pendingDir ), "%s/%s", Sys_DefaultBasePath(), PENDING_DIR );
+	Com_sprintf( pendingDir, sizeof( pendingDir ), "%s/%s", Update_StageRoot(), PENDING_DIR );
 	Com_sprintf( manifestPath, sizeof( manifestPath ), "%s/%s", pendingDir, MANIFEST_NAME );
 
-	uf = unzOpen( updateZipPath );
+	uf = unzOpen( updateDownloadPath );
 	if ( !uf ) {
 		Update_SetError( "Failed to open downloaded ZIP" );
-		remove( updateZipPath );
+		remove( updateDownloadPath );
 		return qfalse;
 	}
 
@@ -787,7 +944,7 @@ static qboolean Update_ExtractAndStage( void )
 	// create .updates/pending/ directory
 	{
 		char updatesDir[MAX_OSPATH];
-		Com_sprintf( updatesDir, sizeof( updatesDir ), "%s/%s", Sys_DefaultBasePath(), UPDATES_DIR );
+		Com_sprintf( updatesDir, sizeof( updatesDir ), "%s/%s", Update_StageRoot(), UPDATES_DIR );
 		Sys_Mkdir( updatesDir );
 	}
 	Sys_Mkdir( pendingDir );
@@ -797,7 +954,7 @@ static qboolean Update_ExtractAndStage( void )
 	if ( !manifest ) {
 		Update_SetError( "Failed to create update manifest" );
 		unzClose( uf );
-		remove( updateZipPath );
+		remove( updateDownloadPath );
 		return qfalse;
 	}
 
@@ -868,7 +1025,7 @@ static qboolean Update_ExtractAndStage( void )
 				Z_Free( extractBuf );
 				fclose( manifest );
 				unzClose( uf );
-				remove( updateZipPath );
+				remove( updateDownloadPath );
 				Update_SetError( "Write error during extraction (disk full?)" );
 				return qfalse;
 			}
@@ -888,7 +1045,7 @@ static qboolean Update_ExtractAndStage( void )
 	unzClose( uf );
 
 	// clean up the downloaded ZIP
-	remove( updateZipPath );
+	remove( updateDownloadPath );
 
 	if ( extracted == 0 ) {
 		Update_SetError( "No files extracted from update ZIP" );
@@ -898,6 +1055,7 @@ static qboolean Update_ExtractAndStage( void )
 
 	Com_Printf( "Update: %d files staged in %s\n", extracted, PENDING_DIR );
 	return qtrue;
+#endif
 }
 
 
@@ -1033,7 +1191,7 @@ void Update_Cancel_f( void )
 			updateZipFile = NULL;
 		}
 		Com_DL_Cleanup( &updateDownload );
-		remove( updateZipPath );
+		remove( updateDownloadPath );
 		Com_Printf( "Update: download cancelled\n" );
 	} else if ( updateState == UPDATE_CHECKING ) {
 		Com_DL_Cleanup( &updateDownload );

@@ -42,7 +42,10 @@ guard args.count == 3, let icon = NSImage(contentsOfFile: args[1]) else {
 exit(NSWorkspace.shared.setIcon(icon, forFile: args[2], options: []) ? 0 : 1)
 SWIFT
 
-cp -R "$APP" "$STAGE_DIR/Trinity.app"
+# ditto, not cp -R: bundle xattrs (incl. signature metadata stashed there
+# by codesign on Sequoia+) survive ditto but get dropped by cp -R, which
+# leaves /Volumes/Trinity/Trinity.app failing `codesign --verify`.
+ditto "$APP" "$STAGE_DIR/Trinity.app"
 ln -s /Applications "$STAGE_DIR/Applications"
 cp "$README_SOURCE" "$STAGE_DIR/Read Me Before Playing.rtf"
 mkdir -p "$STAGE_DIR/.background"

@@ -937,11 +937,39 @@ static char *Sys_StripAppBundle( char *dir )
 /*
 =================
 Sys_DefaultAppPath
+
+Returns the bundled-data directory inside the running .app. For a
+launch from /Applications/Trinity.app/Contents/MacOS/trinity, returns
+/Applications/Trinity.app/Contents/Resources. fs_apppath uses this
+to add an FS search path covering paks shipped inside the bundle.
+
+Resources/ (not MacOS/) because macOS Sequoia+ codesign treats files
+under Contents/MacOS/ as nested code subcomponents and rejects the
+bundle if non-Mach-O data (like .pk3 zips) sits there unsigned.
+
+If we're not in a recognizable .app layout (e.g., the binary was
+relocated outside a bundle), fall back to binaryPath.
 =================
 */
 char *Sys_DefaultAppPath( void )
 {
-	return binaryPath;
+	static char appPath[ MAX_OSPATH ];
+	char cwd[ MAX_OSPATH ];
+
+	if ( appPath[0] )
+		return appPath;
+
+	Q_strncpyz( appPath, binaryPath, sizeof( appPath ) );
+
+	Q_strncpyz( cwd, binaryPath, sizeof( cwd ) );
+	if ( strcmp( basename( cwd ), "MacOS" ) == 0 ) {
+		Q_strncpyz( cwd, dirname( cwd ), sizeof( cwd ) );
+		if ( strcmp( basename( cwd ), "Contents" ) == 0 ) {
+			Com_sprintf( appPath, sizeof( appPath ), "%s/Resources", cwd );
+		}
+	}
+
+	return appPath;
 }
 #endif // __APPLE__
 
@@ -1100,6 +1128,44 @@ static void Sys_RemoveDirectoryRecursive( const char *path )
 }
 
 
+#ifdef __APPLE__
+/*
+==================
+Sys_AppBundleDir
+
+Resolve the directory containing the running Trinity.app. For
+/Applications/Trinity.app/Contents/MacOS/trinity, returns /Applications.
+Returns NULL on failure (caller treats as "skip .app updates").
+==================
+*/
+static const char *Sys_AppBundleDir( void )
+{
+	static char dir[MAX_OSPATH];
+	uint32_t bufSize = sizeof( dir );
+	char *p;
+
+	if ( _NSGetExecutablePath( dir, &bufSize ) != 0 )
+		return NULL;
+
+	// Walk up: .../Trinity.app/Contents/MacOS/trinity -> .../Trinity.app
+	for ( int i = 0; i < 3; i++ ) {
+		p = strrchr( dir, '/' );
+		if ( !p )
+			return NULL;
+		*p = '\0';
+	}
+
+	// One more to get the .app's parent.
+	p = strrchr( dir, '/' );
+	if ( !p )
+		return NULL;
+	*p = '\0';
+
+	return dir;
+}
+#endif
+
+
 /*
 ==================
 Sys_ApplyPendingUpdate
@@ -1126,14 +1192,21 @@ void Sys_ApplyPendingUpdate( void )
 	qboolean exeSwapped = qfalse;
 	int applied = 0;
 	char exePath[MAX_OSPATH];
-	ssize_t exeLen;
 
 	#define MAX_UPDATE_FILES 256
 	char movedDst[MAX_UPDATE_FILES][MAX_OSPATH];
 	char movedBak[MAX_UPDATE_FILES][MAX_OSPATH];
 	int movedCount = 0;
 
+#ifdef __APPLE__
+	// On macOS the staging root is the user-data dir; assets target it,
+	// .app contents target the running app's parent dir (resolved per file).
+	// Sys_DefaultHomePath() not Cvar_VariableString — this code runs before
+	// Com_Init registers cvars, so the cvar is empty here.
+	Q_strncpyz( pwd, Sys_DefaultHomePath(), sizeof( pwd ) );
+#else
 	Q_strncpyz( pwd, Sys_Pwd(), sizeof( pwd ) );
+#endif
 
 	Com_sprintf( updatesDir, sizeof( updatesDir ), "%s/.updates", pwd );
 	Com_sprintf( pendingDir, sizeof( pendingDir ), "%s/pending", updatesDir );
@@ -1162,9 +1235,11 @@ void Sys_ApplyPendingUpdate( void )
 	// resolve our own executable path for exe-swap detection
 	exePath[0] = '\0';
 #ifdef __linux__
-	exeLen = readlink( "/proc/self/exe", exePath, sizeof( exePath ) - 1 );
-	if ( exeLen > 0 )
-		exePath[exeLen] = '\0';
+	{
+		ssize_t exeLen = readlink( "/proc/self/exe", exePath, sizeof( exePath ) - 1 );
+		if ( exeLen > 0 )
+			exePath[exeLen] = '\0';
+	}
 #elif defined(__APPLE__)
 	{
 		uint32_t bufSize = sizeof( exePath );
@@ -1197,6 +1272,13 @@ void Sys_ApplyPendingUpdate( void )
 			*pipe = '\0';
 
 		Com_sprintf( srcPath, sizeof( srcPath ), "%s/%s", pendingDir, line );
+#ifdef __APPLE__
+		// Bundle entries are applied by the atomic swap below, as a unit,
+		// to keep the bundle's codesign seal intact.
+		if ( Q_strncmp( line, "Trinity.app/", 12 ) == 0 ) {
+			continue;
+		}
+#endif
 		Com_sprintf( dstPath, sizeof( dstPath ), "%s/%s", pwd, line );
 		Com_sprintf( bakPath, sizeof( bakPath ), "%s/%s", previousDir, line );
 
@@ -1256,6 +1338,45 @@ void Sys_ApplyPendingUpdate( void )
 	if ( applied > 0 ) {
 		fprintf( stderr, "Update: applied %d files (version %s)\n", applied, version );
 	}
+
+#ifdef __APPLE__
+	// Move pendingDir/Trinity.app/ into the install location. rename(2)
+	// is atomic on a single APFS volume; dyld keeps the old binary mmap'd
+	// through the swap, so the running process stays valid until
+	// Sys_RestartProcess re-execs from the new bundle.
+	{
+		const char *appDir = Sys_AppBundleDir();
+		char stagedBundle[MAX_OSPATH];
+		char installedBundle[MAX_OSPATH];
+		char previousBundle[MAX_OSPATH];
+		struct stat st;
+
+		if ( appDir ) {
+			Com_sprintf( stagedBundle, sizeof( stagedBundle ), "%s/Trinity.app", pendingDir );
+			Com_sprintf( installedBundle, sizeof( installedBundle ), "%s/Trinity.app", appDir );
+			Com_sprintf( previousBundle, sizeof( previousBundle ), "%s/Trinity.app", previousDir );
+
+			if ( stat( stagedBundle, &st ) == 0 && S_ISDIR( st.st_mode ) ) {
+				if ( rename( installedBundle, previousBundle ) != 0 ) {
+					fprintf( stderr, "Update: cannot move installed bundle aside: %s\n",
+						strerror( errno ) );
+				} else if ( rename( stagedBundle, installedBundle ) != 0 ) {
+					fprintf( stderr, "Update: cannot move new bundle into place: %s\n",
+						strerror( errno ) );
+					if ( rename( previousBundle, installedBundle ) != 0 ) {
+						fprintf( stderr, "Update: ALSO failed to restore old bundle: %s\n",
+							strerror( errno ) );
+					}
+				} else {
+					fprintf( stderr, "Update: swapped Trinity.app; relaunching\n" );
+					exeSwapped = qtrue;
+				}
+			}
+		} else {
+			fprintf( stderr, "Update: can't resolve .app dir; skipping bundle swap\n" );
+		}
+	}
+#endif
 
 	if ( exeSwapped ) {
 		Sys_RestartProcess();

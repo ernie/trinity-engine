@@ -147,7 +147,6 @@ TRINITY_VERSION="1.32e"
 TRINITY_CLIENT_ARCHS=""
 TRINITY_SERVER_ARCHS=""
 
-BASEDIR="baseq3"
 
 DEDICATED_NAME="trinity.ded"
 
@@ -228,8 +227,8 @@ done
 echo ""
 
 # make the application bundle directories
-if [ ! -d "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/$BASEDIR" ]; then
-	mkdir -p "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/$BASEDIR" || exit 1;
+if [ ! -d "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}" ]; then
+	mkdir -p "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}" || exit 1;
 fi
 if [ ! -d "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}" ]; then
 	mkdir -p "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}" || exit 1;
@@ -320,26 +319,34 @@ action "${BUNDLEBINDIR}/${DEDICATED_NAME}"				"${TRINITY_SERVER_ARCHS}"
 
 # Optionally bundle Trinity mod paks inside the .app. Callers (CI, local
 # release scripts) point TRINITY_ASSETS_DIR at a directory containing the
-# pre-downloaded pak files; we copy them into the appropriate subdirs
-# inside Contents/MacOS/, where the engine's fs_basepath search finds them.
-# Users' overrides in fs_homepath always win, so this is a safe fallback.
+# pre-downloaded pak files; we copy them into Contents/Resources/, the
+# macOS-conventional location for non-code bundle data. The engine's
+# fs_apppath search (Sys_DefaultAppPath) resolves to Resources/ on macOS,
+# so these are picked up automatically. Users' overrides in fs_homepath
+# always win, so this is a safe fallback.
+#
+# Paks must NOT live under Contents/MacOS/ — Sequoia+ codesign treats
+# files there as nested code subcomponents and refuses to sign the
+# bundle if any are unsigned (and .pk3 is a zip, not a Mach-O, so it
+# can't be signed as code). Resources/ files are hashed as resources.
 if [ -n "${TRINITY_ASSETS_DIR}" ]; then
 	if [ ! -d "${TRINITY_ASSETS_DIR}" ]; then
 		echo "**** ERROR: TRINITY_ASSETS_DIR set to '${TRINITY_ASSETS_DIR}' but directory does not exist"
 		exit 1
 	fi
-	mkdir -p "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/missionpack"
+	mkdir -p "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/baseq3"
+	mkdir -p "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/missionpack"
 	for pak in pak8t.pk3 zzz-trinity-announcer.pk3; do
 		if [ -f "${TRINITY_ASSETS_DIR}/${pak}" ]; then
-			cp "${TRINITY_ASSETS_DIR}/${pak}" "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/baseq3/${pak}"
-			echo "Bundled baseq3/${pak}"
+			cp "${TRINITY_ASSETS_DIR}/${pak}" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/baseq3/${pak}"
+			echo "Bundled Resources/baseq3/${pak}"
 		else
 			echo "**** WARNING: ${pak} not found in TRINITY_ASSETS_DIR"
 		fi
 	done
 	if [ -f "${TRINITY_ASSETS_DIR}/pak3t.pk3" ]; then
-		cp "${TRINITY_ASSETS_DIR}/pak3t.pk3" "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}/missionpack/pak3t.pk3"
-		echo "Bundled missionpack/pak3t.pk3"
+		cp "${TRINITY_ASSETS_DIR}/pak3t.pk3" "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/missionpack/pak3t.pk3"
+		echo "Bundled Resources/missionpack/pak3t.pk3"
 	else
 		echo "**** WARNING: pak3t.pk3 not found in TRINITY_ASSETS_DIR"
 	fi
