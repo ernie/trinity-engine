@@ -907,11 +907,13 @@ static void SV_LogRconExec( const netadr_t *from, const char *guid, const char *
 	//   - sv_cmd cp              : matching center-prints
 	//   - trinity_auth_fail      : engine-side auth-fail notification
 	//   - trinity_auth_ok        : engine-side auth-success notification
+	//   - trinity_name_conflict  : reserved-name reset notification
 	if ( !Q_stricmpn( cmd, "sv_cmd trinity_rconset", 22 ) ||
 	     !Q_stricmpn( cmd, "sv_cmd print ", 13 ) ||
 	     !Q_stricmpn( cmd, "sv_cmd cp ", 10 ) ||
 	     !Q_stricmpn( cmd, "trinity_auth_fail", 17 ) ||
-	     !Q_stricmpn( cmd, "trinity_auth_ok", 15 ) ) {
+	     !Q_stricmpn( cmd, "trinity_auth_ok", 15 ) ||
+	     !Q_stricmpn( cmd, "trinity_name_conflict", 21 ) ) {
 		return;
 	}
 
