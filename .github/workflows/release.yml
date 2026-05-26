@@ -315,6 +315,26 @@ jobs:
         chmod +x misc/macos-codesign.sh
         ./misc/macos-codesign.sh bin/Trinity.app
 
+    - name: Bundle assets and update script
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        mkdir -p bin/baseq3 bin/missionpack
+        gh release download --repo ernie/trinity --pattern 'pak8t.pk3'                --dir bin/baseq3
+        gh release download --repo ernie/trinity --pattern 'pak3t.pk3'                --dir bin/missionpack
+        gh release download --repo ernie/trinity --pattern 'zzz-trinity-announcer.pk3' --dir bin/baseq3
+        cp misc/update-trinity.sh bin/
+
+    - name: Archive with ditto (preserves stapled ticket)
+      run: |
+        # ditto preserves extended attributes — including the notarization
+        # staple — and macOS metadata that plain zip/tar strip. Without this,
+        # Gatekeeper has to make a network round-trip to Apple on first
+        # launch instead of trusting the local staple.
+        mv bin macos-universal2
+        ditto -c -k --sequesterRsrc --keepParent macos-universal2 trinity-macos-universal2.zip
+
     - name: Clean up signing keychain
       if: always()
       run: |
@@ -324,7 +344,7 @@ jobs:
     - uses: actions/upload-artifact@v7
       with:
         name: macos-universal2
-        path: bin
+        path: trinity-macos-universal2.zip
         if-no-files-found: error
         retention-days: 5
 
@@ -368,6 +388,13 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v8
 
+      - name: Stage pre-built macOS zip
+        # The macOS bundle is signed, notarized, stapled, and zipped with
+        # ditto on the macOS runner — moving it to the top level lets the
+        # checksum and release steps treat it like every other zip without
+        # the Linux runner ever touching its xattrs.
+        run: mv macos-universal2/trinity-macos-universal2.zip .
+
       - name: Download Trinity assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -387,7 +414,6 @@ jobs:
             windows-mingw-x86
             windows-mingw-x86_64
             windows-msvc-arm64
-            macos-universal2
           )
 
           for dir in "${PLATFORM_DIRS[@]}"; do
@@ -409,7 +435,7 @@ jobs:
           for dir in windows-mingw-x86 windows-mingw-x86_64 windows-msvc-arm64; do
             [ -d "$dir" ] && cp misc/update-trinity.bat "$dir/"
           done
-          for dir in linux-x86 linux-x86_64 linux-arm64 linux-armv7 macos-universal2; do
+          for dir in linux-x86 linux-x86_64 linux-arm64 linux-armv7; do
             [ -d "$dir" ] && cp misc/update-trinity.sh "$dir/"
           done
 
@@ -417,9 +443,6 @@ jobs:
         run: |
           for dir in linux-x86 linux-x86_64 linux-arm64 linux-armv7; do
             [ -d "$dir" ] && chmod +x "$dir"/trinity "$dir"/trinity.ded 2>/dev/null || true
-          done
-          for dir in macos-universal2; do
-            [ -d "$dir" ] && find "$dir/Trinity.app/Contents/MacOS" -type f -exec chmod +x {} + 2>/dev/null || true
           done
 
       - name: Create binary archives
@@ -431,7 +454,6 @@ jobs:
           7z a -r trinity-windows-mingw-x86.zip    ./windows-mingw-x86/*
           7z a -r trinity-windows-mingw-x86_64.zip ./windows-mingw-x86_64/*
           7z a -r trinity-windows-msvc-arm64.zip   ./windows-msvc-arm64/*
-          zip -r -y trinity-macos-universal2.zip   ./macos-universal2/
           7z a -r trinity-web-engine.zip           ./web-engine/*
 
       - name: Generate checksums
