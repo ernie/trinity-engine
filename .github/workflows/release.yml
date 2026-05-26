@@ -244,14 +244,9 @@ jobs:
           retention-days: 5
 
   macos:
-    name: Release macOS ${{ matrix.arch }}
+    name: Release macOS universal2
     runs-on: macos-14
     environment: release
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
-        cc: [clang]
 
     steps:
 
@@ -263,16 +258,15 @@ jobs:
         submodules: recursive
 
 
-    - name: Build
+    - name: Build universal2 app bundle
       run: |
-        make -j$(sysctl -n hw.logicalcpu) ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} USE_RENDERER_DLOPEN=0 STRIP=echo
-
-    - name: Create app bundle
-      run: |
+        NCPU=$(sysctl -n hw.logicalcpu)
+        make -j$NCPU PLATFORM=darwin ARCH=x86_64  CC=clang USE_RENDERER_DLOPEN=0 STRIP=echo
+        make -j$NCPU PLATFORM=darwin ARCH=aarch64 CC=clang USE_RENDERER_DLOPEN=0 STRIP=echo
         chmod +x make-macosx-app.sh
-        ./make-macosx-app.sh release ${{ matrix.arch }}
+        ./make-macosx-app.sh release
         mkdir -p bin
-        cp -R build/release-darwin-${{ matrix.arch }}/Trinity.app bin/
+        cp -R build/release-darwin-universal2/Trinity.app bin/
 
     - name: Sign and notarize app bundle
       env:
@@ -329,7 +323,7 @@ jobs:
 
     - uses: actions/upload-artifact@v7
       with:
-        name: macos-${{ matrix.arch }}
+        name: macos-universal2
         path: bin
         if-no-files-found: error
         retention-days: 5
@@ -393,8 +387,7 @@ jobs:
             windows-mingw-x86
             windows-mingw-x86_64
             windows-msvc-arm64
-            macos-x86_64
-            macos-aarch64
+            macos-universal2
           )
 
           for dir in "${PLATFORM_DIRS[@]}"; do
@@ -416,7 +409,7 @@ jobs:
           for dir in windows-mingw-x86 windows-mingw-x86_64 windows-msvc-arm64; do
             [ -d "$dir" ] && cp misc/update-trinity.bat "$dir/"
           done
-          for dir in linux-x86 linux-x86_64 linux-arm64 linux-armv7 macos-x86_64 macos-aarch64; do
+          for dir in linux-x86 linux-x86_64 linux-arm64 linux-armv7 macos-universal2; do
             [ -d "$dir" ] && cp misc/update-trinity.sh "$dir/"
           done
 
@@ -425,7 +418,7 @@ jobs:
           for dir in linux-x86 linux-x86_64 linux-arm64 linux-armv7; do
             [ -d "$dir" ] && chmod +x "$dir"/trinity "$dir"/trinity.ded 2>/dev/null || true
           done
-          for dir in macos-x86_64 macos-aarch64; do
+          for dir in macos-universal2; do
             [ -d "$dir" ] && find "$dir/Trinity.app/Contents/MacOS" -type f -exec chmod +x {} + 2>/dev/null || true
           done
 
@@ -438,8 +431,7 @@ jobs:
           7z a -r trinity-windows-mingw-x86.zip    ./windows-mingw-x86/*
           7z a -r trinity-windows-mingw-x86_64.zip ./windows-mingw-x86_64/*
           7z a -r trinity-windows-msvc-arm64.zip   ./windows-msvc-arm64/*
-          zip -r -y trinity-macos-x86_64.zip       ./macos-x86_64/
-          zip -r -y trinity-macos-aarch64.zip      ./macos-aarch64/
+          zip -r -y trinity-macos-universal2.zip   ./macos-universal2/
           7z a -r trinity-web-engine.zip           ./web-engine/*
 
       - name: Generate checksums

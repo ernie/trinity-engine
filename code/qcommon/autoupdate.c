@@ -177,11 +177,7 @@ static void Update_BuildAssetName( char *buf, int bufSize )
     #endif
   #endif
 #elif defined(__APPLE__)
-  #if defined(__aarch64__)
-	Com_sprintf( buf, bufSize, "%s-macos-aarch64.zip", UPDATE_ASSET_PREFIX );
-  #else
-	Com_sprintf( buf, bufSize, "%s-macos-x86_64.zip", UPDATE_ASSET_PREFIX );
-  #endif
+	Com_sprintf( buf, bufSize, "%s-macos-universal2.zip", UPDATE_ASSET_PREFIX );
 #elif defined(__linux__)
   #if defined(__aarch64__)
 	Com_sprintf( buf, bufSize, "%s-linux-arm64.zip", UPDATE_ASSET_PREFIX );
