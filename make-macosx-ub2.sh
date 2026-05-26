@@ -6,18 +6,33 @@ if [ ! -f Makefile ]; then
 	exit 1
 fi
 
-# This script is to build a Universal 2 binary
-# (Apple's term for an x86_64 and aarch64 binary)
+# Build a Universal 2 binary (Apple's term for an x86_64 + aarch64 binary).
+#
+# Pass 'notarize' as the first argument to also sign and notarize the
+# resulting Trinity.app via misc/macos-codesign.sh. That requires the
+# following environment variables to be set:
+#
+#   MACOS_SIGNING_IDENTITY   "Developer ID Application: Your Name (TEAMID)"
+#   AC_API_KEY_PATH          path to an App Store Connect API key (.p8)
+#   AC_API_KEY_ID            10-char Key ID from App Store Connect
+#   AC_API_ISSUER_ID         Issuer UUID from App Store Connect
+#
+# The signing identity must already be present in a keychain on the
+# default search list.
 
-echo "Building X86_64 Client/Dedicated Server"
-echo "Building AARCH64 Client/Dedicated Server"
-echo
-
-if [ "$1" == "" ]; then
-	echo "Run script with a 'notarize' flag to perform signing and notarization."
+if [ "$1" = "notarize" ]; then
+	: "${MACOS_SIGNING_IDENTITY:?must be set to use 'notarize' (e.g. 'Developer ID Application: Your Name (TEAMID)')}"
+	: "${AC_API_KEY_PATH:?must be set to a path to your App Store Connect .p8 key}"
+	: "${AC_API_KEY_ID:?must be set to your App Store Connect key ID}"
+	: "${AC_API_ISSUER_ID:?must be set to your App Store Connect issuer UUID}"
+else
+	echo "Run with a 'notarize' argument to also sign and notarize the bundle."
 fi
 
-# For parallel make on multicore boxes...
+echo "Building x86_64 + aarch64 universal2 client/server..."
+echo
+
+# For parallel make on multicore boxes.
 SYSCTL_PATH=`command -v sysctl 2> /dev/null`
 if [ -n "$SYSCTL_PATH" ]; then
 	NCPU=`sysctl -n hw.ncpu`
@@ -26,120 +41,17 @@ else
 	NCPU=`nproc`
 fi
 
-# x86_64 client and server
-#if [ -d build/release-release-x86_64 ]; then
-#	rm -r build/release-darwin-x86_64
-#fi
-(PLATFORM=darwin ARCH=x86_64 make -j$NCPU) || exit 1;
-
-echo;echo
-
-# aarch64 client and server
-#if [ -d build/release-release-aarch64 ]; then
-#	rm -r build/release-darwin-aarch64
-#fi
-(PLATFORM=darwin ARCH=aarch64 make -j$NCPU) || exit 1;
-
+(PLATFORM=darwin ARCH=x86_64 make -j$NCPU) || exit 1
+echo; echo
+(PLATFORM=darwin ARCH=aarch64 make -j$NCPU) || exit 1
 echo
 
-# use the following shell script to build a universal 2 application bundle
+# Build the universal2 app bundle (lipo merges per-arch binaries).
 if [ -d build/release-darwin-universal2 ]; then
 	rm -r build/release-darwin-universal2
 fi
-"./make-macosx-app.sh" release
+"./make-macosx-app.sh" release || exit 1
 
-if [ "$1" == "notarize" ]; then
-	# user-specific values
-	# specify the actual values in a separate file called make-macosx-values.local
-
-	# ****************************************************************************************
-	# identity as specified in Keychain
-	SIGNING_IDENTITY="Developer ID Application: Your Name (XXXXXXXXX)"
-
-	ASC_USERNAME="your@apple.id"
-
-	# signing password is app-specific (https://appleid.apple.com/account/manage) and stored in Keychain (as "notarize-app" in this case)
-	ASC_PASSWORD="@keychain:notarize-app"
-
-	# ProviderShortname can be found with
-	# xcrun altool --list-providers -u your@apple.id -p "@keychain:notarize-app"
-	ASC_PROVIDER="XXXXXXXXX"
-	# ****************************************************************************************
-
-	source make-macosx-values.local
-
-	# release build location
-	RELEASE_LOCATION="build/release-darwin-universal2"
-
-	# release build name
-	RELEASE_BUILD="Trinity.app"
-
-	# Pre-notarized zip file (not what is shipped)
-	PRE_NOTARIZED_ZIP="trinity_prenotarized.zip"
-
-	# Post-notarized zip file (shipped)
-	POST_NOTARIZED_ZIP="trinity_notarized.zip"
-
-	BUNDLE_ID="org.trinity.trinity"
-
-	# allows for unsigned executable memory in hardened runtime
-	# see: https://developer.apple.com/documentation/bundleresources/entitlements/com_apple_security_cs_allow-unsigned-executable-memory
-	ENTITLEMENTS_FILE="misc/xcode/trinity/trinity.entitlements"
-
-	# sign the resulting app bundle
-	echo "signing..."
-	codesign --force --options runtime --deep --entitlements "${ENTITLEMENTS_FILE}" --sign "${SIGNING_IDENTITY}" ${RELEASE_LOCATION}/${RELEASE_BUILD}
-
-	cd ${RELEASE_LOCATION}
-
-	# notarize app
-	# script taken from https://github.com/rednoah/notarize-app
-
-	# create the zip to send to the notarization service
-	echo "zipping..."
-	ditto -c -k --sequesterRsrc --keepParent ${RELEASE_BUILD} ${PRE_NOTARIZED_ZIP}
-
-	# create temporary files
-	NOTARIZE_APP_LOG=$(mktemp -t notarize-app)
-	NOTARIZE_INFO_LOG=$(mktemp -t notarize-info)
-
-	# delete temporary files on exit
-	function finish {
-		rm "$NOTARIZE_APP_LOG" "$NOTARIZE_INFO_LOG"
-	}
-	trap finish EXIT
-
-	echo "submitting..."
-	# submit app for notarization
-	if xcrun altool --notarize-app --primary-bundle-id "$BUNDLE_ID" --asc-provider "$ASC_PROVIDER" --username "$ASC_USERNAME" --password "$ASC_PASSWORD" -f "$PRE_NOTARIZED_ZIP" > "$NOTARIZE_APP_LOG" 2>&1; then
-		cat "$NOTARIZE_APP_LOG"
-		RequestUUID=$(awk -F ' = ' '/RequestUUID/ {print $2}' "$NOTARIZE_APP_LOG")
-
-		# check status periodically
-		while sleep 60 && date; do
-			# check notarization status
-			if xcrun altool --notarization-info "$RequestUUID" --asc-provider "$ASC_PROVIDER" --username "$ASC_USERNAME" --password "$ASC_PASSWORD" > "$NOTARIZE_INFO_LOG" 2>&1; then
-				cat "$NOTARIZE_INFO_LOG"
-
-				# once notarization is complete, run stapler and exit
-				if ! grep -q "Status: in progress" "$NOTARIZE_INFO_LOG"; then
-					xcrun stapler staple "$RELEASE_BUILD"
-					break
-				fi
-			else
-				cat "$NOTARIZE_INFO_LOG" 1>&2
-				exit 1
-			fi
-		done
-	else
-		cat "$NOTARIZE_APP_LOG" 1>&2
-		exit 1
-	fi
-
-	echo "notarized"
-	echo "zipping notarized..."
-
-	ditto -c -k --sequesterRsrc --keepParent ${RELEASE_BUILD} ${POST_NOTARIZED_ZIP}
-
-	echo "done. ${POST_NOTARIZED_ZIP} contains notarized ${RELEASE_BUILD} build."
+if [ "$1" = "notarize" ]; then
+	./misc/macos-codesign.sh build/release-darwin-universal2/Trinity.app
 fi
