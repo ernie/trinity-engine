@@ -23,6 +23,12 @@ jobs:
         run: make -j$(nproc)
 
   build-macos:
+    # Mirrors the pre-signing steps of the release workflow's macos job so
+    # PRs catch anything that would break a tag-triggered release: per-arch
+    # builds, the universal2 lipo merge in make-macosx-app.sh, and the
+    # ad-hoc signature the script applies. The Developer ID signing and
+    # notarization steps stay release-only — they need secrets, cost
+    # Apple notary submissions, and aren't catchable here anyway.
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v6
@@ -32,5 +38,19 @@ jobs:
       - name: Install build tools
         run: brew install coreutils sdl2
 
-      - name: Build
-        run: make -j$(sysctl -n hw.logicalcpu) CC=clang STRIP=echo
+      - name: Build universal2 app bundle
+        run: |
+          NCPU=$(sysctl -n hw.logicalcpu)
+          make -j$NCPU PLATFORM=darwin ARCH=x86_64  CC=clang USE_RENDERER_DLOPEN=0 STRIP=echo
+          make -j$NCPU PLATFORM=darwin ARCH=aarch64 CC=clang USE_RENDERER_DLOPEN=0 STRIP=echo
+          chmod +x make-macosx-app.sh
+          ./make-macosx-app.sh release
+
+      - name: Verify bundle signature
+        # make-macosx-app.sh ad-hoc signs the bundle. If that signature is
+        # malformed (missing nested binary, broken Mach-O, etc.) the real
+        # Developer ID signing at release time will also fail — catching
+        # it here saves a tag-then-rollback cycle.
+        run: |
+          codesign --verify --deep --strict --verbose=2 \
+            build/release-darwin-universal2/Trinity.app
