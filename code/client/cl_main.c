@@ -3584,13 +3584,34 @@ static void CL_InitRef( void ) {
 #endif
 
 	Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
+#ifdef __APPLE__
+	// Renderer DLLs live inside Trinity.app/Contents/MacOS/, but
+	// Sys_DefaultBasePath() returns the .app's *parent* directory (so
+	// fs_basepath can find pk3 data alongside the bundle). Pass the bare
+	// basename instead — Sys_LoadLibrary's @executable_path shim resolves
+	// names without slashes against Contents/MacOS/.
+	ospath = dllName;
+#else
 	ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
+#endif
 	rendererLib = Sys_LoadLibrary( ospath );
 	if ( !rendererLib )
 	{
+		// If the failing renderer already equals the default, retrying after a
+		// Cvar_ForceReset would just try the same DLL again. Bail out cleanly.
+		if ( !Q_stricmp( cl_renderer->string, XSTRING( RENDERER_DEFAULT ) ) )
+		{
+			Com_Error( ERR_FATAL, "Failed to load default renderer %s", dllName );
+		}
+		Com_Printf( S_COLOR_YELLOW "Failed to load renderer DLL '%s', reverting to default '%s'\n",
+			dllName, XSTRING( RENDERER_DEFAULT ) );
 		Cvar_ForceReset( "cl_renderer" );
 		Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
+#ifdef __APPLE__
+		ospath = dllName;
+#else
 		ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
+#endif
 		rendererLib = Sys_LoadLibrary( ospath );
 		if ( !rendererLib )
 		{

@@ -83,7 +83,16 @@ endif
 ifeq ($(COMPILE_PLATFORM),darwin)
   USE_SDL=1
   USE_LOCAL_HEADERS=1
-  USE_RENDERER_DLOPEN = 0
+  # Build and default to the Vulkan renderer on macOS. Apple deprecated
+  # OpenGL in 2018 and runs it through a slow GL-on-Metal shim; Vulkan via
+  # bundled MoltenVK is native and dramatically faster. USE_VULKAN=1 is
+  # required (the global default is 0) so trinity_vulkan_<arch>.dylib
+  # actually gets built — without it the cvar default points to a renderer
+  # that doesn't exist in the bundle.
+  USE_VULKAN = 1
+  ifeq ($(USE_VULKAN_API),1)
+    RENDERER_DEFAULT = vulkan
+  endif
 endif
 
 ifeq ($(COMPILE_PLATFORM),cygwin)
@@ -550,11 +559,20 @@ ifeq ($(COMPILE_PLATFORM),darwin)
   BASE_CFLAGS += -DMACOS_X
   BASE_CFLAGS += -I$(ZSTDDIR)
 
-  OPTIMIZE = -O2 -fvisibility=hidden
+  # No -fvisibility=hidden on the main binary: with DLOPEN=1, renderer DLLs
+  # resolve host functions (Com_Error, Com_Printf, VKimp_Init, etc.) via
+  # dyld's dynamic_lookup, which requires those symbols to be in the main
+  # binary's dynamic symbol table. SHLIBCFLAGS keeps hidden visibility for
+  # renderer DLL .o files specifically — they only need to export GetRefAPI.
+  OPTIMIZE = -O2
 
   SHLIBEXT = dylib
   SHLIBCFLAGS = -fPIC -fvisibility=hidden
-  SHLIBLDFLAGS = -dynamiclib $(LDFLAGS)
+  # -undefined,dynamic_lookup: defer renderer-DLL references to host symbols
+  # (Com_Error, etc.) to runtime resolution by dyld, matching how Linux's
+  # -shared behaves by default. Without this, macOS ld rejects the dylib
+  # link because -dynamiclib requires all symbols resolved at link time.
+  SHLIBLDFLAGS = -dynamiclib -Wl,-undefined,dynamic_lookup $(LDFLAGS)
 
   # macOS keeps the .$(ARCH) suffix on intermediate per-arch builds so
   # make-macosx-app.sh can find them (`lipo` merges trinity.x86_64 and
@@ -563,7 +581,11 @@ ifeq ($(COMPILE_PLATFORM),darwin)
   # build/release-darwin-<arch>/.
   ARCHEXT = .$(ARCH)
 
-  LDFLAGS +=
+  # rpath so dyld resolves @rpath-named dylibs we bundle next to the binary
+  # (MoltenVK as @rpath/libvulkan.1.dylib, the renderer DLLs, etc.). This
+  # is what SDL2's internal dlopen("libvulkan.1.dylib") needs to find a
+  # bundled loader without DYLD_LIBRARY_PATH or a system-wide install.
+  LDFLAGS += -Wl,-rpath,@executable_path
 
   ifeq ($(ARCH),x86_64)
     BASE_CFLAGS += -arch x86_64

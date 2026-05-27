@@ -493,12 +493,15 @@ Sys_LoadLibrary
 void *Sys_LoadLibrary( const char *name )
 {
 	const char *ext;
+	const char *err;
 	void *handle;
 
 	if ( FS_AllowedExtension( name, qfalse, &ext ) )
 	{
 		Com_Error( ERR_FATAL, "Sys_LoadLibrary: Unable to load library with '%s' extension", ext );
 	}
+
+	dlerror(); /* clear any prior error state */
 
 #ifdef __APPLE__
 	// dyld does not search @executable_path for bare names passed to dlopen,
@@ -510,10 +513,17 @@ void *Sys_LoadLibrary( const char *name )
 		handle = dlopen( bundlePath, RTLD_NOW );
 		if ( handle )
 			return handle;
+		dlerror(); /* discard the bundle-path error; the bare-name attempt below is the real one */
 	}
 #endif
 
 	handle = dlopen( name, RTLD_NOW );
+	if ( !handle ) {
+		err = dlerror();
+		if ( err ) {
+			Com_Printf( S_COLOR_YELLOW "dlopen('%s') failed: %s\n", name, err );
+		}
+	}
 	return handle;
 }
 

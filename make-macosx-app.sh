@@ -237,6 +237,13 @@ fi
 # copy and generate some application bundle resources
 cp code/libsdl/macosx/*.dylib "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}"
 cp code/libopenal/macosx/*.dylib "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}"
+# Fetch and bundle MoltenVK so the Vulkan renderer loads on stock macOS
+# without users needing the Vulkan SDK. fetch-moltenvk.sh is idempotent;
+# users can also run it manually and commit the resulting dylib.
+if [ ! -f code/libvulkan/macosx/libvulkan.1.dylib ]; then
+    ./misc/macos/fetch-moltenvk.sh || exit 1
+fi
+cp code/libvulkan/macosx/*.dylib "${BUILT_PRODUCTS_DIR}/${EXECUTABLE_FOLDER_PATH}"
 cp ${ICNSDIR}/${ICNS} "${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/$ICNS" || exit 1;
 echo -n ${PKGINFO} > "${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/PkgInfo" || exit 1;
 
@@ -316,6 +323,21 @@ function action()
 # executables
 action "${BUNDLEBINDIR}/${EXECUTABLE_NAME}"				"${TRINITY_CLIENT_ARCHS}"
 action "${BUNDLEBINDIR}/${DEDICATED_NAME}"				"${TRINITY_SERVER_ARCHS}"
+
+# Renderer DLLs are per-arch by filename — cl_main.c interpolates
+# REND_ARCH_STRING into the dlopen path, so trinity_vulkan_aarch64.dylib
+# and trinity_vulkan_x86_64.dylib must stay distinct (never lipo'd). Copy
+# each per-arch DLL as-is and rewrite install_name to @rpath/<basename>
+# so dyld resolves them via the trinity binary's LC_RPATH=@executable_path.
+for ARCH in ${VALID_ARCHS}; do
+    SRC_DIR="${OBJROOT}/${TARGET_NAME}-darwin-${ARCH}"
+    for dll in "${SRC_DIR}"/${PRODUCT_NAME}_*_${ARCH}.dylib; do
+        [ -f "${dll}" ] || continue
+        cp "${dll}" "${BUNDLEBINDIR}/"
+        install_name_tool -id "@rpath/$(basename "${dll}")" \
+            "${BUNDLEBINDIR}/$(basename "${dll}")"
+    done
+done
 
 # Optionally bundle Trinity mod paks inside the .app. Callers (CI, local
 # release scripts) point TRINITY_ASSETS_DIR at a directory containing the

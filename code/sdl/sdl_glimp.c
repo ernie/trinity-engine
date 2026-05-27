@@ -707,6 +707,15 @@ void VKimp_Init( glconfig_t *config )
 
 	Com_DPrintf( "VKimp_Init()\n" );
 
+#ifdef __APPLE__
+	// MoltenVK's argument-buffer descriptor path skips useResource: calls that
+	// Metal needs for cross-encoder hazard tracking, causing the gamma pass to
+	// sample stale FBO tile memory (2D/HUD draws vanish). Individual texture
+	// binds give Metal full hazard visibility with no measurable cost at Q3's
+	// descriptor complexity. Won't clobber an explicit user override (third arg 0).
+	setenv( "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", "0", 0 );
+#endif
+
 	in_nograb = Cvar_Get( "in_nograb", "0", CVAR_ARCHIVE );
 	Cvar_SetDescription( in_nograb, "Do not capture mouse in game, may be useful during online streaming." );
 
