@@ -343,9 +343,11 @@ done
 # release scripts) point TRINITY_ASSETS_DIR at a directory containing the
 # pre-downloaded pak files; we copy them into Contents/Resources/, the
 # macOS-conventional location for non-code bundle data. The engine's
-# fs_apppath search (Sys_DefaultAppPath) resolves to Resources/ on macOS,
-# so these are picked up automatically. Users' overrides in fs_homepath
-# always win, so this is a safe fallback.
+# fs_apppath (Sys_DefaultAppPath) resolves to Resources/ on macOS;
+# FS_MergeAppPathPaks() interleaves bundled pk3s alphabetically among
+# the homepath pk3s so the pak-name sorting convention (pak8t > pak8)
+# works correctly.  Same-name pk3s in homepath win, so a server-
+# downloaded update overrides the bundled copy at the main menu.
 #
 # Paks must NOT live under Contents/MacOS/ — Sequoia+ codesign treats
 # files there as nested code subcomponents and refuses to sign the

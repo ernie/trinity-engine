@@ -4586,6 +4586,74 @@ void FS_Shutdown( qboolean closemfp )
 }
 
 
+#ifdef __APPLE__
+/*
+================
+FS_MergeAppPathPaks
+
+Reorder pk3 entries from fs_apppath so they interleave alphabetically
+with pk3s from other directories (primarily fs_homepath) of the same
+gamedir.  This makes bundled paks behave as if they were installed in
+the homepath directory, where the pak-name sorting convention
+(pak8t > pak8 > pak0) works correctly.
+
+Same-name pk3s already in homepath keep higher priority — a newer
+version downloaded from a server wins over the bundled copy.
+================
+*/
+static void FS_MergeAppPathPaks( void )
+{
+	searchpath_t **pp, *s, *appPak;
+	searchpath_t *appPaks = NULL;
+	int appPathLen;
+
+	if ( !fs_apppath || !fs_apppath->string[0] )
+		return;
+
+	appPathLen = (int)strlen( fs_apppath->string );
+
+	// Step 1: Extract all apppath pk3 entries from the search path.
+	pp = &fs_searchpaths;
+	while ( *pp ) {
+		s = *pp;
+		if ( s->pack &&
+		     Q_stricmpn( s->pack->pakFilename, fs_apppath->string, appPathLen ) == 0 &&
+		     s->pack->pakFilename[appPathLen] == PATH_SEP ) {
+			*pp = s->next;
+			s->next = appPaks;
+			appPaks = s;
+		} else {
+			pp = &(*pp)->next;
+		}
+	}
+
+	// Step 2: Re-insert each apppath pk3 at the correct position.
+	// The search path is ordered highest-priority-first.  Pk3s from
+	// the same gamedir are in reverse-alphabetical order (zzz first,
+	// aaa last).  Insert each apppath pk3 just before the first
+	// existing pk3 in the same gamedir whose basename sorts strictly
+	// lower, placing it right after any same-name homepath copy.
+	while ( appPaks ) {
+		appPak = appPaks;
+		appPaks = appPak->next;
+
+		pp = &fs_searchpaths;
+		for ( s = fs_searchpaths; s; s = s->next ) {
+			if ( s->pack &&
+			     Q_stricmp( s->pack->pakGamename, appPak->pack->pakGamename ) == 0 &&
+			     FS_PathCmp( s->pack->pakBasename, appPak->pack->pakBasename ) < 0 ) {
+				break;
+			}
+			pp = &s->next;
+		}
+
+		appPak->next = *pp;
+		*pp = appPak;
+	}
+}
+#endif
+
+
 /*
 ================
 FS_ReorderSearchPaths
@@ -4839,9 +4907,7 @@ static void FS_Startup( void ) {
 
 #ifdef __APPLE__
 	fs_apppath = Cvar_Get( "fs_apppath", Sys_DefaultAppPath(), CVAR_INIT | CVAR_PROTECTED );
-	// Make MacOSX also include the base path included with the .app bundle
 	if ( fs_apppath->string[0] ) {
-		// handle multiple basegames:
 		for ( i = 0; i < basegame_cnt; i++ ) {
 			FS_AddGameDirectory( fs_apppath->string, basegames[i] );
 		}
@@ -4865,10 +4931,19 @@ static void FS_Startup( void ) {
 		if ( fs_basepath->string[0] != '\0' ) {
 			FS_AddGameDirectory( fs_basepath->string, fs_gamedirvar->string );
 		}
+#ifdef __APPLE__
+		if ( fs_apppath->string[0] != '\0' ) {
+			FS_AddGameDirectory( fs_apppath->string, fs_gamedirvar->string );
+		}
+#endif
 		if ( fs_homepath->string[0] != '\0' && Q_stricmp( fs_homepath->string, fs_basepath->string ) ) {
 			FS_AddGameDirectory( fs_homepath->string, fs_gamedirvar->string );
 		}
 	}
+
+#ifdef __APPLE__
+	FS_MergeAppPathPaks();
+#endif
 
 	// reorder search paths to minimize further changes
 	FS_ReorderSearchPaths();

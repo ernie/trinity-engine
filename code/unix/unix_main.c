@@ -1408,7 +1408,7 @@ int main( int argc, const char* argv[] )
 	}
 
 #ifdef __APPLE__
-	Sys_SetBinaryPath( argv[ 0 ] );
+	Sys_SetBinaryPath( Sys_BinName( argv[ 0 ] ) );
 	Sys_SetDefaultBasePath( Sys_StripAppBundle( binaryPath ) );
 #endif
 
