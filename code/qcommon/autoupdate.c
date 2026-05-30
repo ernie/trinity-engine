@@ -81,7 +81,7 @@ static int		releaseAssetSize;
 
 
 // Pick the update-state root: the user-data dir on macOS (so update
-// staging lives under ~/Library/Application Support/Quake3 like
+// staging lives under ~/Library/Application Support/Trinity like
 // configs and demos), the install directory via Sys_DefaultBasePath()
 // on Windows/Linux (preserves the existing install-dir-is-state model).
 // Uses Sys_DefaultHomePath() rather than the fs_homepath cvar to stay

@@ -60,9 +60,10 @@ are never written to the cd path.  It defaults to a value set by the installer, 
 If a user runs the game directly from a CD, the base path would be on the CD.  This
 should still function correctly, but all file writes will fail (harmlessly).
 
-The "home path" is the path used for all write access. On win32 systems we have "base path"
-== "home path", but on *nix systems the base installation is usually read-only, and
-"home path" points to ~/.q3a or similar
+The "home path" is the path used for all write access. The "fs_multiuser" cvar controls
+whether it is separate from the "base path": when disabled (the Windows default) "home path"
+== "base path"; when enabled (the default on other systems) "home path" points to a per-user
+directory such as ~/.trinity, since the base installation is usually read-only.
 
 The user can also install custom mods and content in "home path", so it should be searched
 along with "home path" and "cd path" for game content.
@@ -298,6 +299,7 @@ static  const char  *basegame = ""; /* last value in array */
 static	char		fs_gamedir[MAX_OSPATH];	// this will be a single file name with no separators
 static	cvar_t		*fs_debug;
 static	cvar_t		*fs_homepath;
+static	cvar_t		*fs_multiuser;
 
 #ifdef __APPLE__
 // Also search the .app bundle for .pk3 files
@@ -402,6 +404,7 @@ or -1 if no match.  Matches both exact base names (e.g. "pak8t") and
 checksummed download variants (e.g. "pak8t.0abcdef0").
 =================
 */
+#ifndef DEDICATED
 static int FS_TrinityPakIndex( const pack_t *pack ) {
 	static const char *trinityPaks[] = {
 		"pak8t", "pak3t", "zzz-trinity-announcer"
@@ -436,6 +439,7 @@ static int FS_TrinityPakIndex( const pack_t *pack ) {
 	}
 	return -1;
 }
+#endif
 
 
 /*
@@ -4861,7 +4865,14 @@ static void FS_Startup( void ) {
 		" 1 - keep file handle locked, more consistent, total pk3 files count limited to ~1k-4k\n" );
 #endif
 
-	homePath = Sys_DefaultHomePath();
+#ifdef _WIN32
+	fs_multiuser = Cvar_Get( "fs_multiuser", "0", CVAR_INIT | CVAR_PROTECTED );
+#else
+	fs_multiuser = Cvar_Get( "fs_multiuser", "1", CVAR_INIT | CVAR_PROTECTED );
+#endif
+	Cvar_SetDescription( fs_multiuser, "Store user configuration and downloaded files in a per-OS-user directory (1) or alongside the executable (0). Set to 0 for a single-user install. An explicit fs_homepath overrides this." );
+
+	homePath = fs_multiuser->integer ? Sys_DefaultHomePath() : NULL;
 	if ( homePath == NULL || homePath[0] == '\0' ) {
 		homePath = fs_basepath->string;
 	}

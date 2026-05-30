@@ -99,20 +99,20 @@ const char *WtoA( const LPWSTR s )
 Sys_DefaultHomePath
 ================
 */
-const char *Sys_DefaultHomePath( void ) 
+const char *Sys_DefaultHomePath( void )
 {
-#ifdef USE_PROFILES
+	typedef HRESULT (WINAPI *SHGETFOLDERPATHA)( HWND, int, HANDLE, DWORD, LPSTR );
 	TCHAR szPath[MAX_PATH];
 	static char path[MAX_OSPATH];
-	FARPROC qSHGetFolderPath;
+	SHGETFOLDERPATHA qSHGetFolderPath;
 	HMODULE shfolder = LoadLibrary("shfolder.dll");
-	
+
 	if(shfolder == NULL) {
 		Com_Printf("Unable to load SHFolder.dll\n");
 		return NULL;
 	}
 
-	qSHGetFolderPath = GetProcAddress(shfolder, "SHGetFolderPathA");
+	qSHGetFolderPath = (SHGETFOLDERPATHA)GetProcAddress(shfolder, "SHGetFolderPathA");
 	if(qSHGetFolderPath == NULL)
 	{
 		Com_Printf("Unable to find SHGetFolderPath in SHFolder.dll\n");
@@ -128,7 +128,7 @@ const char *Sys_DefaultHomePath( void )
 		return NULL;
 	}
 	Q_strncpyz( path, szPath, sizeof(path) );
-	Q_strcat( path, sizeof(path), "\\Quake3" );
+	Q_strcat( path, sizeof(path), "\\Trinity" );
 	FreeLibrary(shfolder);
 	if( !CreateDirectory( path, NULL ) )
 	{
@@ -139,9 +139,6 @@ const char *Sys_DefaultHomePath( void )
 		}
 	}
 	return path;
-#else
-    return NULL;
-#endif
 }
 
 
