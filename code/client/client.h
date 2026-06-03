@@ -163,6 +163,15 @@ extern	clientActive_t		cl;
 #define MAX_TV_MSGLEN		(256*1024)
 #define TVD_ZSTD_IN_BUF_SIZE   (128*1024)
 #define TVD_ZSTD_OUT_BUF_SIZE  (256*1024)
+// Live-segment buffer bounds. segIn holds one segment's COMPRESSED payload;
+// segOut holds it DECOMPRESSED. The server caps the compressed assembly at
+// TV_STREAM_SEGBUF_SIZE (1 MiB) and forces an early keyframe before a segment's
+// decompressed size would exceed TV_SEG_UNCOMPRESSED_MAX, so these must be at
+// least those two server-side bounds respectively or a busy map's segment
+// overflows here and the feed silently ends/flaps. KEEP TV_SEG_UNCOMPRESSED_MAX
+// IN SYNC with trinity-engine code/server/server.h.
+#define TV_SEG_UNCOMPRESSED_MAX (2*1024*1024)  // >= server TV_SEG_UNCOMPRESSED_MAX (decompressed cap)
+#define TVD_SEGIN_MAX           (1*1024*1024)  // >= server TV_STREAM_SEGBUF_SIZE (compressed cap)
 
 typedef struct {
 	qboolean		active;
@@ -213,6 +222,14 @@ typedef struct {
 	size_t			zstdOutSize;
 	size_t			zstdOutPos;
 	qboolean		zstdStreamEnded;
+
+	// Live (TVL1) streaming mode
+	qboolean		live;              // true when playing a TVL1 live stream (not a TVD1 VOD)
+	qboolean		bootstrapped;      // true once the first keyframe segment has built a snapshot
+	byte			segIn[TVD_SEGIN_MAX];            // one live segment's compressed payload (raw, pre-zstd)
+	byte			segOut[TV_SEG_UNCOMPRESSED_MAX]; // one live segment's decompressed frames
+	size_t			segOutLen;   // decompressed bytes available in segOut (current segment)
+	size_t			segCursor;   // read offset within segOut for the next [size][frame] record
 } tvPlayback_t;
 
 extern tvPlayback_t tvPlay;
@@ -775,6 +792,7 @@ void CL_TV_Init( void );
 qboolean CL_TV_Open( const char *filename );
 void CL_TV_Close( void );
 void CL_TV_ReadFrame( void );
+qboolean CL_TV_NextLiveFrame( void );
 void CL_TV_BuildSnapshot( void );
 void CL_TV_Seek( int targetTime );
 

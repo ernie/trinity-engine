@@ -98,6 +98,8 @@ async function cachedFetch(url, label, statusEl, authToken) {
  * @param {string} opts.enginePath - Path to engine .js/.wasm files (e.g. '/engine/')
  * @param {string} [opts.configUrl] - URL to config JSON (defaults to enginePath + CLIENT_NAME-config.json)
  * @param {string} [opts.demoUrl] - URL of the .tvd demo file
+ * @param {string} [opts.liveUrl] - URL of a live TVL1 stream (mutually exclusive with demoUrl)
+ * @param {string} [opts.fsGame] - Explicit game dir for a live stream (TVL1 has no configstrings to sniff)
  * @param {string[]} [opts.extraPk3s] - Additional pk3 URLs to load
  * @param {string} [opts.extraArgs] - Additional engine command-line arguments
  * @param {string} [opts.authToken] - Bearer token for authenticated asset fetches
@@ -105,7 +107,7 @@ async function cachedFetch(url, label, statusEl, authToken) {
  * @param {function} [opts.onReady] - Called once after the first rendered frame
  * @returns {Promise<Object>} The Emscripten Module instance
  */
-export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demoUrl, extraPk3s = [], extraArgs = '', authToken, onProgress, onReady }) {
+export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demoUrl, liveUrl, fsGame, extraPk3s = [], extraArgs = '', authToken, onProgress, onReady }) {
     if (window.location.protocol === 'file:') {
         throw new Error('Browser security restrictions prevent loading wasm from a file: URL. Serve this file via a web server.');
     }
@@ -179,6 +181,69 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
         if (fs_game) generatedArguments += ` +set fs_game "${fs_game}" `;
     }
 
+    // Live stream: buffer just enough of the plaintext TVL1 header to learn the
+    // map, then leave the reader open for preRun to drain into the FS as bytes arrive.
+    let liveReader = null, liveInitialBytes = null, liveAbort = null;
+    if (liveUrl) {
+        statusEl.textContent = 'Connecting to live stream...';
+        liveAbort = new AbortController();
+        const resp = await fetch(liveUrl, { signal: liveAbort.signal });
+        if (!resp.ok) {
+            statusEl.textContent = `Live unavailable: ${resp.status}`;
+            throw new Error(`live ${resp.status}`);
+        }
+        const reader = resp.body.getReader();
+        // Buffer the plaintext TVL1 header (to learn the map) AND the first
+        // complete TVLs segment. The engine applies that first keyframe at open
+        // time (CL_TV_OpenLive) so cl.gameState has the configstrings before the
+        // cgame inits — without them CG_Init fails "Client/Server game mismatch".
+        // We only parse clear-text lengths here; the payload stays opaque.
+        let acc = new Uint8Array(0);
+        let headerEnd = -1, firstSegEnd = -1;
+        let headerGameName = '';
+        const concat = (a, b) => { const o = new Uint8Array(a.length + b.length); o.set(a); o.set(b, a.length); return o; };
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            acc = concat(acc, value);
+            // TVL1 header: magic(4)+ver(4)+svFps(4)+maxClients(4)
+            //   +mapLen(2)+map +tsLen(2)+ts +gameLen(2)+game(fs_game)
+            if (headerEnd < 0 && acc.length >= 18) {
+                if (String.fromCharCode(acc[0], acc[1], acc[2], acc[3]) !== 'TVL1') throw new Error('not a TVL1 stream');
+                const mapLen = acc[16] | (acc[17] << 8);
+                if (acc.length >= 20 + mapLen) {
+                    const tsLen = acc[18 + mapLen] | (acc[19 + mapLen] << 8);
+                    const tsEnd = 20 + mapLen + tsLen;   // start of the fs_game field
+                    if (acc.length >= tsEnd + 2) {
+                        const gameLen = acc[tsEnd] | (acc[tsEnd + 1] << 8);
+                        if (acc.length >= tsEnd + 2 + gameLen) {
+                            demoMapName = new TextDecoder().decode(acc.slice(18, 18 + mapLen));
+                            if (gameLen) headerGameName = new TextDecoder().decode(acc.slice(tsEnd + 2, tsEnd + 2 + gameLen));
+                            headerEnd = tsEnd + 2 + gameLen;
+                        }
+                    }
+                }
+            }
+            // First TVLs segment header: magic(4)+keyframeTime(4)+payloadLen(4 LE)
+            if (headerEnd >= 0 && firstSegEnd < 0 && acc.length >= headerEnd + 12) {
+                const he = headerEnd;
+                const pl = (acc[he + 8] | (acc[he + 9] << 8) | (acc[he + 10] << 16)) + acc[he + 11] * 0x1000000;
+                firstSegEnd = he + 12 + pl;
+            }
+            if (firstSegEnd >= 0 && acc.length >= firstSegEnd) break;
+        }
+        fs_game = headerGameName || fsGame || ''; // header wins; empty = baseq3
+        // The .tvd extension is required: it's what routes the engine's +demo
+        // command to the TV player (cl_main.c). The TVL1-vs-TVD1 magic then
+        // selects live vs VOD inside CL_TV_Open. So keep the extension even
+        // though these bytes are a live stream, not a recording.
+        demoFilename = 'live.tvd';
+        generatedArguments += ` +demo ${demoFilename} `;
+        if (fs_game) generatedArguments += ` +set fs_game "${fs_game}" `;
+        liveReader = reader;
+        liveInitialBytes = acc;
+    }
+
     statusEl.textContent = 'Loading engine...';
 
     const TrinityEngine = (await import(enginePath + `${CLIENT_NAME}.js`)).default;
@@ -247,6 +312,13 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
                 const cbs = modulePromise._nextFrameCbs.splice(0);
                 for (const cb of cbs) { try { cb(); } catch {} }
             }
+            // Autoplay policy creates each AudioContext suspended and re-suspends on
+            // tab background; a map-change reboot makes a brand-new one. The page already
+            // has a user gesture, so a programmatic resume succeeds here where the
+            // click/touchstart listener can't (the viewer is just watching). No-op once running.
+            for (const ctx of audioContexts) {
+                if (ctx.state === 'suspended') { try { ctx.resume(); } catch {} }
+            }
             // Fire onReady once on the first rendered frame
             if (onReady && !modulePromise._readyFired) {
                 modulePromise._readyFired = true;
@@ -261,6 +333,9 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
             mod.shutdown = function shutdown() {
                 if (mod._shuttingDown) return;
                 mod._shuttingDown = true;
+                // Abort the live fetch so its unconsumed octet-stream doesn't linger
+                // after teardown — on a feed switch iOS Safari surfaces it as a "download" prompt.
+                if (liveAbort) { try { liveAbort.abort(); } catch (e) {} }
                 // Close every AudioContext the engine created (OpenAL and/or SDL2)
                 for (const ctx of audioContexts) {
                     try { ctx.close(); } catch (e) {}
@@ -349,6 +424,37 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
                         mod.FS.mkdirTree(`/${fs_basegame}/demos`);
                         mod.FS.writeFile(`/${fs_basegame}/demos/${demoFilename}`, demoData);
                     }
+
+                    // Live stream: write the buffered header, then keep appending
+                    // chunks as they arrive so cl_tv's live mode reads a growing file.
+                    if (liveUrl && liveReader) {
+                        mod.FS.mkdirTree(`/${fs_basegame}/demos`);
+                        const livePath = `/${fs_basegame}/demos/${demoFilename}`;
+                        mod.FS.writeFile(livePath, liveInitialBytes);   // header + any early segment bytes
+                        // Append subsequent chunks as they arrive (growing-file read validated for MEMFS).
+                        (async () => {
+                            // Emscripten 'a' does NOT seek to EOF, and FS.write with
+                            // position=undefined writes at stream.position (0) — clobbering the
+                            // header. Track an explicit write offset starting past the header.
+                            let writePos = liveInitialBytes.length;
+                            const stream = mod.FS.open(livePath, 'a');
+                            try {
+                                for (;;) {
+                                    const { done, value } = await liveReader.read();
+                                    if (done) break;                 // clean end: in-band TVLe already present
+                                    mod.FS.write(stream, value, 0, value.length, writePos);
+                                    writePos += value.length;
+                                }
+                            } catch (e) {
+                                console.warn('live stream error', e);
+                            } finally {
+                                try { mod.FS.close(stream); } catch (e2) {}
+                                // Backstop for a dropped connection (no in-band TVLe): tell the engine to stop.
+                                try { mod.ccall('Cbuf_AddText', null, ['string'], ['set cl_tvStreamClosed 1\n']); } catch (e3) {}
+                            }
+                        })();
+                    }
+
 
                     // Generate autoexec.cfg from config cvars and binds
                     let autoexec = '';

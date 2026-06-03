@@ -1312,7 +1312,10 @@ void CL_SetCGameTime( void ) {
 	}
 
 	// get our current view of time
-	demoFreezed = clc.demoplaying && com_timescale->value == 0.0f;
+	// Live always tracks the delayed edge: pause (\timescale 0) is inert, so
+	// never freeze time on a live stream regardless of timescale.
+	demoFreezed = clc.demoplaying && com_timescale->value == 0.0f
+		&& !( tvPlay.active && tvPlay.live );
 	if ( demoFreezed ) {
 		// \timescale 0 is used to lock a demo in place for single frame advances
 		cl.serverTimeDelta -= cls.frametime;
@@ -1367,6 +1370,31 @@ void CL_SetCGameTime( void ) {
 	}
 
 	if ( tvPlay.active ) {
+		if ( tvPlay.live ) {
+			// Live: one snapshot per frame, render-paced like VOD, so adjacent
+			// snapshots are ~1 server-frame apart and cgame interpolates smoothly.
+			// Always advance the edge (pause is inert here — see top of function).
+			if ( !tvPlay.atEnd ) {
+				while ( cl.serverTime - cl.snap.serverTime >= 0 ) {
+					if ( !CL_TV_NextLiveFrame() ) {
+						break;   // starved (wait for next engine frame) or ended
+					}
+					if ( tvPlay.atEnd ) {
+						break;   // frame applied but parse hit a corrupt/truncated tail
+					}
+					CL_TV_BuildSnapshot();
+				}
+			}
+			if ( tvPlay.bootstrapped ) {
+				Cvar_SetIntegerValue( "cl_tvTime", tvPlay.serverTime - tvPlay.firstServerTime );
+			}
+			// Playback edge (see CL_TV_Init): the buffer is drained, so the
+			// final delayed seconds have rendered before the client reconnects.
+			if ( tvPlay.atEnd ) {
+				Cvar_SetIntegerValue( "cl_tvLiveEnded", 1 );
+			}
+			return;
+		}
 		// Advance TV frames while cl.serverTime is ahead of latest snapshot.
 		// Skip when paused (timescale 0) to prevent frame drift during
 		// viewpoint switches that snap cl.serverTime = cl.snap.serverTime.

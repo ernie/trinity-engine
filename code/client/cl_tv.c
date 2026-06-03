@@ -32,11 +32,16 @@ tvPlayback_t tvPlay;
 cvar_t *cl_tvViewpoint;
 cvar_t *cl_tvTime;
 cvar_t *cl_tvDuration;
+cvar_t *cl_tvStreamClosed;
+cvar_t *cl_tvLiveEnded;
 
 static void CL_TV_View_f( void );
 static void CL_TV_ViewNext_f( void );
 static void CL_TV_ViewPrev_f( void );
 static void CL_TV_Seek_f( void );
+static qboolean CL_TV_OpenLive( const char *filename );
+
+typedef enum { TVSEG_OK, TVSEG_STARVED, TVSEG_ENDED } tvSegResult_t;
 
 
 /*
@@ -71,6 +76,11 @@ void CL_TV_Init( void ) {
 	cl_tvViewpoint = Cvar_Get( "cl_tvViewpoint", "0", CVAR_ROM );
 	cl_tvTime = Cvar_Get( "cl_tvTime", "0", CVAR_ROM );
 	cl_tvDuration = Cvar_Get( "cl_tvDuration", "0", CVAR_ROM );
+	// cl_tvStreamClosed: set by the JS loader at the fetch edge (stream closed).
+	// cl_tvLiveEnded: set by the engine at the playback edge (buffer drained) —
+	// ~delay-buffer later, and what the web client reconnects on.
+	cl_tvStreamClosed = Cvar_Get( "cl_tvStreamClosed", "0", 0 );
+	cl_tvLiveEnded = Cvar_Get( "cl_tvLiveEnded", "0", CVAR_ROM );
 }
 
 
@@ -335,6 +345,139 @@ static void CL_TV_UpdateConfigstring( int index, const char *data, int dataLen )
 
 /*
 ===============
+CL_TV_OpenLive
+
+Open a TVL1 live stream. Assumes tvPlay.file is positioned just past the
+4-byte "TVL1" magic. Parses the header, then applies the first keyframe so
+configstrings precede the cgame init that follows.
+===============
+*/
+static qboolean CL_TV_OpenLive( const char *filename ) {
+	int version;
+	unsigned short maplen, tslen;
+	char mapname[MAX_QPATH];
+
+	if ( FS_Read( &version, 4, tvPlay.file ) != 4 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+		CL_TV_Close();
+		return qfalse;
+	}
+	if ( version != 1 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: unsupported TVL version %i\n", version );
+		CL_TV_Close();
+		return qfalse;
+	}
+
+	if ( FS_Read( &tvPlay.svFps, 4, tvPlay.file ) != 4 ||
+		 FS_Read( &tvPlay.maxclients, 4, tvPlay.file ) != 4 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+		CL_TV_Close();
+		return qfalse;
+	}
+
+	if ( FS_Read( &maplen, 2, tvPlay.file ) != 2 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+		CL_TV_Close();
+		return qfalse;
+	}
+	if ( maplen >= sizeof( mapname ) ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live mapName too long (%i)\n", maplen );
+		CL_TV_Close();
+		return qfalse;
+	}
+	if ( maplen && FS_Read( mapname, maplen, tvPlay.file ) != maplen ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+		CL_TV_Close();
+		return qfalse;
+	}
+	mapname[maplen] = '\0';
+
+	if ( FS_Read( &tslen, 2, tvPlay.file ) != 2 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+		CL_TV_Close();
+		return qfalse;
+	}
+	if ( tslen ) {
+		FS_Seek( tvPlay.file, tslen, FS_SEEK_CUR );  // skip the timestamp field exactly
+	}
+
+	// fs_game field: the loader uses it pre-boot; here just consume the bytes to
+	// stay aligned with the first segment (fs_game is already fixed for the session).
+	{
+		unsigned short gamelen;
+		if ( FS_Read( &gamelen, 2, tvPlay.file ) != 2 ) {
+			Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+			CL_TV_Close();
+			return qfalse;
+		}
+		if ( gamelen ) {
+			FS_Seek( tvPlay.file, gamelen, FS_SEEK_CUR );  // skip the fs_game field exactly
+		}
+	}
+
+	tvPlay.live = qtrue;
+	tvPlay.bootstrapped = qfalse;
+	tvPlay.atEnd = qfalse;
+	tvPlay.segOutLen = 0;
+	tvPlay.segCursor = 0;
+	Cvar_Set( "cl_tvStreamClosed", "0" );
+	Cvar_Set( "cl_tvLiveEnded", "0" );
+
+	// Init zstd decompressor
+	tvPlay.dstream = ZSTD_createDStream();
+	ZSTD_initDStream( tvPlay.dstream );
+
+	// Zero entity/player buffers
+	Com_Memset( tvPlay.entities, 0, sizeof( tvPlay.entities ) );
+	Com_Memset( tvPlay.entityBitmask, 0, sizeof( tvPlay.entityBitmask ) );
+	Com_Memset( tvPlay.players, 0, sizeof( tvPlay.players ) );
+	Com_Memset( tvPlay.playerBitmask, 0, sizeof( tvPlay.playerBitmask ) );
+
+	// Initialize standard ring buffer state
+	cl.parseEntitiesNum = 0;
+	clc.serverMessageSequence = 0;
+	clc.serverCommandSequence = 0;
+	clc.lastExecutedServerCommand = 0;
+
+	// Set initial clientNum
+	clc.clientNum = 0;
+
+	// Apply the first keyframe NOW (mirrors VOD's CL_TV_Open) so cl.gameState
+	// holds the configstrings before CL_InitCGame runs right after CL_TV_Open
+	// returns. Without them the cgame init fails "Client/Server game mismatch".
+	// The loader guarantees the first complete segment is in the initial file
+	// write, so this read is satisfied synchronously.
+	if ( !CL_TV_NextLiveFrame() ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live stream missing initial keyframe\n" );
+		CL_TV_Close();
+		return qfalse;
+	}
+	tvPlay.viewpoint = CL_TV_FindFirstActivePlayer();
+	if ( tvPlay.viewpoint < 0 ) {
+		tvPlay.viewpoint = 0;
+	}
+	clc.clientNum = tvPlay.viewpoint;
+	VectorCopy( tvPlay.players[tvPlay.viewpoint].origin, tvPlay.viewOrigin );
+	CL_TV_BuildSnapshot();
+
+	tvPlay.active = qtrue;
+
+	// tv_seek intentionally NOT registered in live mode — can't seek a delayed-edge stream.
+	Cmd_AddCommand( "tv_view", CL_TV_View_f );
+	Cmd_AddCommand( "tv_view_next", CL_TV_ViewNext_f );
+	Cmd_AddCommand( "tv_view_prev", CL_TV_ViewPrev_f );
+
+	Cvar_SetIntegerValue( "cl_tvViewpoint", 0 );
+	Cvar_SetIntegerValue( "cl_tvTime", 0 );
+	Cvar_SetIntegerValue( "cl_tvDuration", 0 );
+
+	Com_Printf( "TV: live stream open (map %s, svFps %i)\n", mapname, tvPlay.svFps );
+	return qtrue;
+}
+
+
+/*
+===============
 CL_TV_Open
 ===============
 */
@@ -352,9 +495,20 @@ qboolean CL_TV_Open( const char *filename ) {
 		return qfalse;
 	}
 
-	// Read and validate magic
-	if ( FS_Read( magic, 4, tvPlay.file ) != 4 ||
-		 magic[0] != 'T' || magic[1] != 'V' || magic[2] != 'D' || magic[3] != '1' ) {
+	// Read magic
+	if ( FS_Read( magic, 4, tvPlay.file ) != 4 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: Invalid magic\n" );
+		FS_FCloseFile( tvPlay.file );
+		return qfalse;
+	}
+
+	// Route by magic: TVL1 is a live stream, handled separately
+	if ( !Q_strncmp( magic, "TVL1", 4 ) ) {
+		return CL_TV_OpenLive( filename );
+	}
+
+	// Validate magic (TVD1 VOD)
+	if ( magic[0] != 'T' || magic[1] != 'V' || magic[2] != 'D' || magic[3] != '1' ) {
 		Com_Printf( S_COLOR_YELLOW "TV: Invalid magic\n" );
 		FS_FCloseFile( tvPlay.file );
 		return qfalse;
@@ -574,13 +728,13 @@ void CL_TV_Close( void ) {
 
 /*
 ===============
-CL_TV_ReadFrame
+CL_TV_ParseFrame
 
-Read one frame from the current file position.
+Parse one frame from an in-memory buffer. Shared by VOD playback
+(CL_TV_ReadFrame) and the live-streaming path.
 ===============
 */
-void CL_TV_ReadFrame( void ) {
-	unsigned int frameSize;
+static void CL_TV_ParseFrame( byte *data, int len ) {
 	msg_t msg;
 	int serverTime;
 	int num;
@@ -592,27 +746,9 @@ void CL_TV_ReadFrame( void ) {
 	int i;
 	char csData[BIG_INFO_STRING];
 
-	// Read frame size (4 bytes from compressed stream)
-	if ( CL_TV_DecompressRead( &frameSize, 4 ) != 4 || frameSize == 0 ) {
-		tvPlay.atEnd = qtrue;
-		return;
-	}
-
-	if ( frameSize > sizeof( tvPlay.msgBuf ) ) {
-		Com_Printf( S_COLOR_YELLOW "TV: Frame too large (%u)\n", frameSize );
-		tvPlay.atEnd = qtrue;
-		return;
-	}
-
-	// Read Huffman-encoded payload from compressed stream
-	if ( CL_TV_DecompressRead( tvPlay.msgBuf, frameSize ) != (int)frameSize ) {
-		tvPlay.atEnd = qtrue;
-		return;
-	}
-
 	// Set up message for reading
-	MSG_Init( &msg, tvPlay.msgBuf, sizeof( tvPlay.msgBuf ) );
-	msg.cursize = frameSize;
+	MSG_Init( &msg, data, len );
+	msg.cursize = len;
 	MSG_BeginReading( &msg );
 
 	// Server time
@@ -722,10 +858,26 @@ void CL_TV_ReadFrame( void ) {
 			MSG_ReadData( &msg, csData, csLen );
 			csData[csLen] = '\0';
 		} else {
+			// Out-of-range length: still consume the declared bytes (when
+			// positive) so the read cursor stays aligned for the rest of the
+			// frame instead of desyncing the parse on the next field.
+			int skip;
+			for ( skip = 0; skip < csLen; skip++ ) MSG_ReadByte( &msg );
 			csData[0] = '\0';
 		}
 
 		if ( (unsigned)csIndex < MAX_CONFIGSTRINGS ) {
+			// Dedup: a keyframe re-asserts every non-empty configstring each time,
+			// but we already hold them. Skip unchanged ones so we neither rebuild
+			// gameState nor flood the 64-slot reliable-command ring with redundant
+			// "cs" notifications. This mirrors a real client: the bulk set arrives
+			// once (svc_gamestate / first keyframe), and "cs" commands fire only on
+			// an actual change. A genuine change (incl. a clear) still falls through.
+			const char *cur = cl.gameState.stringData + cl.gameState.stringOffsets[csIndex];
+			if ( !strcmp( cur, csData ) ) {
+				continue;
+			}
+
 			CL_TV_UpdateConfigstring( csIndex, csData, csLen );
 
 			// Synthesize "cs" command for cgame so it registers new models/sounds/etc.
@@ -748,6 +900,10 @@ void CL_TV_ReadFrame( void ) {
 			MSG_ReadData( &msg, csData, cmdLen );
 			csData[cmdLen] = '\0';
 		} else {
+			// Out-of-range length: consume the declared bytes (when positive) to
+			// keep the read cursor aligned before discarding.
+			int skip;
+			for ( skip = 0; skip < cmdLen; skip++ ) MSG_ReadByte( &msg );
 			csData[0] = '\0';
 			cmdLen = 0;
 		}
@@ -827,6 +983,194 @@ void CL_TV_ReadFrame( void ) {
 	// Track last server time for seek clamping
 	if ( serverTime > tvPlay.lastServerTime ) {
 		tvPlay.lastServerTime = serverTime;
+	}
+}
+
+
+/*
+===============
+CL_TV_ReadFrame
+
+Read one frame from the current file position.
+===============
+*/
+void CL_TV_ReadFrame( void ) {
+	unsigned int frameSize;
+
+	// Read frame size (4 bytes from compressed stream)
+	if ( CL_TV_DecompressRead( &frameSize, 4 ) != 4 || frameSize == 0 ) {
+		tvPlay.atEnd = qtrue;
+		return;
+	}
+
+	if ( frameSize > sizeof( tvPlay.msgBuf ) ) {
+		Com_Printf( S_COLOR_YELLOW "TV: Frame too large (%u)\n", frameSize );
+		tvPlay.atEnd = qtrue;
+		return;
+	}
+
+	// Read Huffman-encoded payload from compressed stream
+	if ( CL_TV_DecompressRead( tvPlay.msgBuf, frameSize ) != (int)frameSize ) {
+		tvPlay.atEnd = qtrue;
+		return;
+	}
+
+	CL_TV_ParseFrame( tvPlay.msgBuf, frameSize );
+}
+
+
+/*
+===============
+CL_TV_RawRead
+
+Raw (pre-zstd) read of the live byte source. Thin wrapper over FS_Read so the
+byte source is swappable (a future ccall byte-feed could replace this).
+===============
+*/
+static int CL_TV_RawRead( void *buf, int len ) {
+	return FS_Read( buf, len, tvPlay.file );
+}
+
+
+/*
+===============
+CL_TV_ReadLiveSegment
+
+Decode ONE live segment into segOut. The segment is the retry unit: if the whole
+compressed payload isn't present yet, rewind and report STARVED (caller retries
+next engine frame). Returns ENDED on TVLe/corruption, OK after a full segment
+decompresses.
+===============
+*/
+static tvSegResult_t CL_TV_ReadLiveSegment( void ) {
+	long segStart = FS_FTell( tvPlay.file );
+	byte hdr[12];
+	unsigned int payloadLen;
+	int got;
+
+	got = CL_TV_RawRead( hdr, 12 );
+	if ( got < 12 ) { FS_Seek( tvPlay.file, segStart, FS_SEEK_SET ); return TVSEG_STARVED; }
+
+	if ( !Q_strncmp( (char *)hdr, "TVLe", 4 ) ) { return TVSEG_ENDED; }
+	if ( Q_strncmp( (char *)hdr, "TVLs", 4 ) ) {
+		Com_Printf( S_COLOR_YELLOW "TV: bad live segment magic\n" );
+		return TVSEG_ENDED;
+	}
+
+	// payloadLen = little-endian u32 at hdr+8 (keyframeServerTime at hdr+4 is unused for playback).
+	payloadLen = (unsigned int)( hdr[8] | ( hdr[9] << 8 ) | ( hdr[10] << 16 ) | ( (unsigned int)hdr[11] << 24 ) );
+	if ( payloadLen == 0 || payloadLen > sizeof( tvPlay.segIn ) ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live segment payload %u out of range\n", payloadLen );
+		return TVSEG_ENDED;
+	}
+
+	got = CL_TV_RawRead( tvPlay.segIn, payloadLen );
+	if ( got < (int)payloadLen ) { FS_Seek( tvPlay.file, segStart, FS_SEEK_SET ); return TVSEG_STARVED; }
+
+	// Decompress the whole independent segment (fresh session per segment).
+	ZSTD_DCtx_reset( tvPlay.dstream, ZSTD_reset_session_only );
+	{
+		ZSTD_inBuffer in = { tvPlay.segIn, payloadLen, 0 };
+		ZSTD_outBuffer out = { tvPlay.segOut, sizeof( tvPlay.segOut ), 0 };
+		size_t ret;
+		do {
+			ret = ZSTD_decompressStream( tvPlay.dstream, &out, &in );
+			if ( ZSTD_isError( ret ) ) {
+				Com_Printf( S_COLOR_YELLOW "TV: live segment zstd error\n" );
+				return TVSEG_ENDED;
+			}
+			// Output buffer full but frame not finished => segment decompresses larger
+			// than segOut. Fail loudly rather than silently dropping the tail.
+			if ( out.pos == out.size && ret != 0 ) {
+				Com_Printf( S_COLOR_YELLOW "TV: live segment too large (decompressed > %u)\n", (unsigned)sizeof( tvPlay.segOut ) );
+				return TVSEG_ENDED;
+			}
+		} while ( in.pos < in.size );
+		// ret == 0 means the independent segment frame is complete; otherwise truncated.
+		if ( ret != 0 ) {
+			Com_Printf( S_COLOR_YELLOW "TV: live segment truncated\n" );
+			return TVSEG_ENDED;
+		}
+		tvPlay.segOutLen = out.pos;
+		tvPlay.segCursor = 0;
+	}
+	return TVSEG_OK;
+}
+
+
+/*
+===============
+CL_TV_LiveBootstrap
+
+Re-assert the \tv\1 TV marker after the first live keyframe. The keyframe's
+configstring section overwrites CS_SERVERINFO with the server's real value, so
+mirror CL_TV_Open's injection (read current CS_SERVERINFO, re-apply through
+CL_TV_UpdateConfigstring, which auto-injects \tv\1) to keep cgame in TV mode.
+===============
+*/
+static void CL_TV_LiveBootstrap( void ) {
+	const char *si = cl.gameState.stringData + cl.gameState.stringOffsets[CS_SERVERINFO];
+	CL_TV_UpdateConfigstring( CS_SERVERINFO, si, (int)strlen( si ) );
+#ifdef USE_VOIP
+	clc.svVoipVersion = atoi( Info_ValueForKey( si, "sv_voipVersion" ) );
+#endif
+}
+
+
+/*
+===============
+CL_TV_NextLiveFrame
+
+Pull and apply the next live frame, decoding the next segment when the current
+one is exhausted. Render-paced (one frame per call). Returns qtrue if a frame was
+applied, qfalse on starved/ended. Sets tvPlay.atEnd on clean end (TVLe) or a
+dropped connection. Captures firstServerTime + asserts the TV marker on the first
+applied frame.
+===============
+*/
+qboolean CL_TV_NextLiveFrame( void ) {
+	for ( ;; ) {
+		// A complete record available in the current segment?
+		if ( tvPlay.segCursor + 4 <= tvPlay.segOutLen ) {
+			unsigned int fsz = (unsigned int)( tvPlay.segOut[tvPlay.segCursor]
+				| ( tvPlay.segOut[tvPlay.segCursor+1] << 8 )
+				| ( tvPlay.segOut[tvPlay.segCursor+2] << 16 )
+				| ( (unsigned int)tvPlay.segOut[tvPlay.segCursor+3] << 24 ) );
+			if ( fsz != 0 && (size_t)fsz <= tvPlay.segOutLen - ( tvPlay.segCursor + 4 ) ) {
+				tvPlay.segCursor += 4;
+				CL_TV_ParseFrame( tvPlay.segOut + tvPlay.segCursor, (int)fsz );
+				tvPlay.segCursor += fsz;
+				if ( !tvPlay.bootstrapped ) {
+					tvPlay.firstServerTime = tvPlay.serverTime;
+					tvPlay.bootstrapped = qtrue;
+					CL_TV_LiveBootstrap();
+				}
+				return qtrue;
+			}
+			// malformed / trailing padding: treat segment as exhausted
+			tvPlay.segCursor = tvPlay.segOutLen;
+		}
+		// Current segment exhausted: decode the next one.
+		{
+			tvSegResult_t r = CL_TV_ReadLiveSegment();
+			if ( r == TVSEG_ENDED ) { tvPlay.atEnd = qtrue; return qfalse; }
+			if ( r == TVSEG_STARVED ) {
+				if ( cl_tvStreamClosed->integer ) { tvPlay.atEnd = qtrue; }
+				return qfalse;
+			}
+			// TVSEG_OK: segOut refilled (segCursor=0). Every segment begins with a
+			// full keyframe (delta-from-zero), so reset the running delta baseline
+			// before applying it — the keyframe must rebuild state from scratch
+			// (a true I-frame) rather than merge onto our prior state. Without
+			// this, fields that are zero in the keyframe but non-zero in our state
+			// (e.g. scores/powerups reset at warmup->active) would never clear.
+			// Scope is exactly the delta baseline: NOT viewpoint/timing/config-
+			// strings, which the keyframe doesn't carry.
+			Com_Memset( tvPlay.entities, 0, sizeof( tvPlay.entities ) );
+			Com_Memset( tvPlay.entityBitmask, 0, sizeof( tvPlay.entityBitmask ) );
+			Com_Memset( tvPlay.players, 0, sizeof( tvPlay.players ) );
+			Com_Memset( tvPlay.playerBitmask, 0, sizeof( tvPlay.playerBitmask ) );
+		}
 	}
 }
 
@@ -1046,6 +1390,13 @@ void CL_TV_Seek( int targetTime ) {
 	int prevMsgNum;
 
 	if ( !tvPlay.active ) {
+		return;
+	}
+
+	// Seeking is meaningless on a delayed-edge live stream; hard-disable it
+	// even though tv_seek isn't registered in live mode (defense in depth).
+	if ( tvPlay.live ) {
+		Com_Printf( "TV: seeking is disabled in live mode\n" );
 		return;
 	}
 
@@ -1312,6 +1663,11 @@ static void CL_TV_Seek_f( void ) {
 
 	if ( !tvPlay.active ) {
 		Com_Printf( "Not playing a TV demo.\n" );
+		return;
+	}
+
+	// Defense in depth: tv_seek isn't registered in live mode, so this is unreachable.
+	if ( tvPlay.live ) {
 		return;
 	}
 
