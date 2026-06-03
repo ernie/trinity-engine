@@ -59,6 +59,36 @@ static void CL_TV_WriteCommand( const char *cmd ) {
 	clc.serverCommandsIgnore[index] = qfalse;
 }
 
+
+/*
+===============
+CL_TV_SendConfigstring
+
+Notify cgame of a configstring change. A value too large for a single "cs"
+command is split into bcs0/1/2 parts (mirrors SV_SendConfigstring;
+CL_GetServerCommand reassembles them) so it can't overflow MAX_STRING_CHARS.
+===============
+*/
+static void CL_TV_SendConfigstring( int index, const char *data, int len ) {
+	const int maxChunkSize = MAX_STRING_CHARS - 24;
+	char cmd[MAX_STRING_CHARS];
+	if ( len >= maxChunkSize ) {
+		int sent = 0, remaining = len;
+		char buf[MAX_STRING_CHARS];
+		while ( remaining > 0 ) {
+			const char *bcs = ( sent == 0 ) ? "bcs0" : ( remaining < maxChunkSize ? "bcs2" : "bcs1" );
+			Q_strncpyz( buf, &data[sent], maxChunkSize );
+			Com_sprintf( cmd, sizeof( cmd ), "%s %i \"%s\"", bcs, index, buf );
+			CL_TV_WriteCommand( cmd );
+			sent += ( maxChunkSize - 1 );
+			remaining -= ( maxChunkSize - 1 );
+		}
+	} else {
+		Com_sprintf( cmd, sizeof( cmd ), "cs %i \"%s\"", index, data );
+		CL_TV_WriteCommand( cmd );
+	}
+}
+
 // Read team from configstring rather than persistant[], which is unreliable
 // for spectators in follow mode.
 static int CL_TV_GetPlayerTeam( int clientNum ) {
@@ -880,12 +910,10 @@ static void CL_TV_ParseFrame( byte *data, int len ) {
 
 			CL_TV_UpdateConfigstring( csIndex, csData, csLen );
 
-			// Synthesize "cs" command for cgame so it registers new models/sounds/etc.
-			// Skip during seek (tv_seek_sync handles bulk re-registration)
+			// Notify cgame so it registers new models/sounds/etc.
+			// Skip during seek (tv_seek_sync handles bulk re-registration).
 			if ( !tvPlay.seeking ) {
-				char csCmd[MAX_STRING_CHARS];
-				Com_sprintf( csCmd, sizeof( csCmd ), "cs %i \"%s\"", csIndex, csData );
-				CL_TV_WriteCommand( csCmd );
+				CL_TV_SendConfigstring( csIndex, csData, csLen );
 			}
 		}
 	}
