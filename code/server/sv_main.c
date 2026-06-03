@@ -1517,6 +1517,8 @@ void SV_Frame( int msec ) {
 		SV_TV_WriteFrame();
 	}
 
+	SV_TVStream_RunListener();
+
 	if ( com_speeds->integer ) {
 		time_game = Sys_Milliseconds () - startTime;
 	}

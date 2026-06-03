@@ -28,6 +28,8 @@ cvar_t *sv_tvAutoMinPlayers;
 cvar_t *sv_tvAutoMinPlayersSecs;
 cvar_t *sv_tvpath;
 cvar_t *sv_tvDownload;
+cvar_t *sv_tvLive;
+cvar_t *sv_tvLiveKeyframeMsec;
 
 
 /*
@@ -50,6 +52,12 @@ void SV_TV_Init( void ) {
 
 	sv_tvDownload = Cvar_Get( "sv_tvDownload", "0", CVAR_ARCHIVE );
 	Cvar_SetDescription( sv_tvDownload, "Notify clients to download TV recordings via HTTP at end of match. Requires sv_dlURL." );
+
+	sv_tvLive = Cvar_Get( "sv_tvLive", "0", CVAR_ARCHIVE );
+	Cvar_SetDescription( sv_tvLive, "Broadcast the in-progress match over a loopback TCP socket (127.0.0.1:net_port) for live browser spectating. 0 = off." );
+
+	sv_tvLiveKeyframeMsec = Cvar_Get( "sv_tvLiveKeyframeMsec", "2000", CVAR_ARCHIVE );
+	Cvar_SetDescription( sv_tvLiveKeyframeMsec, "Live-stream keyframe interval in milliseconds. Lower = lower late-join latency, more bandwidth." );
 }
 
 
@@ -257,6 +265,17 @@ static void SV_TV_StartRecord( const char *filename ) {
 	tv.recording = qtrue;
 	tv.frameCount = 0;
 
+	// Recording shares tv.prevEntities with the live stream, and the memset above
+	// re-zeroed it. If a session is already live (warmup), force a keyframe so
+	// viewers re-base cleanly off the zeroed baseline; otherwise start the session
+	// now. Gate the start on sv_tvLive: with streaming off the listener was never
+	// bound, so starting would only make SV_TVStream_IsActive() lie.
+	if ( SV_TVStream_IsActive() ) {
+		SV_TVStream_ForceKeyframe();
+	} else if ( sv_tvLive->integer ) {
+		SV_TVStream_StartStream();
+	}
+
 	Com_Printf( "TV: Recording to %s\n", path );
 }
 
@@ -296,6 +315,7 @@ void SV_TV_WriteFrame( void ) {
 	// Check for deferred auto-start
 	if ( tv.autoPending ) {
 		const char *matchState = Cvar_VariableString( "g_matchState" );
+		qboolean started = qfalse;
 
 		if ( matchState[0] != '\0' ) {
 			// Match-state-aware mod (e.g. Trinity): start on "active"
@@ -305,6 +325,7 @@ void SV_TV_WriteFrame( void ) {
 				tv.autoPending = qfalse;
 				SV_TV_StartRecord( SV_TV_DefaultName( name, sizeof( name ) ) );
 				tv.autoRecording = qtrue;
+				started = qtrue;
 			}
 		} else {
 			// Fallback: start when first client connects
@@ -315,49 +336,60 @@ void SV_TV_WriteFrame( void ) {
 					tv.autoPending = qfalse;
 					SV_TV_StartRecord( SV_TV_DefaultName( name, sizeof( name ) ) );
 					tv.autoRecording = qtrue;
+					started = qtrue;
 					break;
 				}
 			}
 		}
+		// Recording just began: return so the first recorded frame is the NEXT
+		// server frame (keeps the .tvd's first-frame timing identical to before).
+		// Warmup (still pending): fall through to stream this frame live.
+		if ( started ) {
+			return;
+		}
+	}
+
+	// Produce a frame if recording the .tvd OR a live session is active (warmup
+	// streams before recording starts). File writes + duration below stay gated
+	// on tv.recording; the encode + tap send run for both.
+	if ( !tv.recording && !SV_TVStream_IsActive() ) {
 		return;
 	}
 
-	if ( !tv.recording ) {
-		return;
-	}
+	if ( tv.recording ) {
+		// Track whether player threshold has been met for auto-recordings
+		if ( tv.autoRecording && !tv.keepRecording && sv_tvAutoMinPlayers->integer > 0 ) {
+			int playerCount = 0;
 
-	// Track whether player threshold has been met for auto-recordings
-	if ( tv.autoRecording && !tv.keepRecording && sv_tvAutoMinPlayers->integer > 0 ) {
-		int playerCount = 0;
-
-		for ( i = 0; i < sv.maxclients; i++ ) {
-			if ( svs.clients[i].state == CS_ACTIVE &&
-				 svs.clients[i].netchan.remoteAddress.type != NA_BOT ) {
-				playerState_t *ps = SV_GameClientNum( i );
-				if ( ps->persistant[ PERS_TEAM ] != TEAM_SPECTATOR ) {
-					playerCount++;
+			for ( i = 0; i < sv.maxclients; i++ ) {
+				if ( svs.clients[i].state == CS_ACTIVE &&
+					 svs.clients[i].netchan.remoteAddress.type != NA_BOT ) {
+					playerState_t *ps = SV_GameClientNum( i );
+					if ( ps->persistant[ PERS_TEAM ] != TEAM_SPECTATOR ) {
+						playerCount++;
+					}
 				}
 			}
-		}
 
-		if ( playerCount >= sv_tvAutoMinPlayers->integer ) {
-			if ( sv_tvAutoMinPlayersSecs->integer <= 0 ) {
-				tv.keepRecording = qtrue;    // instantaneous check
-			} else if ( tv.thresholdMetTime == 0 ) {
-				tv.thresholdMetTime = sv.time;   // start timing
-			} else if ( sv.time - tv.thresholdMetTime >= sv_tvAutoMinPlayersSecs->integer * 1000 ) {
-				tv.keepRecording = qtrue;    // duration met
+			if ( playerCount >= sv_tvAutoMinPlayers->integer ) {
+				if ( sv_tvAutoMinPlayersSecs->integer <= 0 ) {
+					tv.keepRecording = qtrue;    // instantaneous check
+				} else if ( tv.thresholdMetTime == 0 ) {
+					tv.thresholdMetTime = sv.time;   // start timing
+				} else if ( sv.time - tv.thresholdMetTime >= sv_tvAutoMinPlayersSecs->integer * 1000 ) {
+					tv.keepRecording = qtrue;    // duration met
+				}
+			} else {
+				tv.thresholdMetTime = 0;         // reset timer
 			}
-		} else {
-			tv.thresholdMetTime = 0;         // reset timer
 		}
-	}
 
-	// Track server time range for duration
-	if ( tv.frameCount == 0 ) {
-		tv.firstServerTime = sv.time;
+		// Track server time range for duration (recorded frames only)
+		if ( tv.frameCount == 0 ) {
+			tv.firstServerTime = sv.time;
+		}
+		tv.lastServerTime = sv.time;
 	}
-	tv.lastServerTime = sv.time;
 
 	// Init message buffer
 	MSG_Init( &msg, tv.msgBuf, MAX_TV_MSGLEN );
@@ -479,16 +511,26 @@ void SV_TV_WriteFrame( void ) {
 	tv.voipBufUsed = 0;
 #endif
 
-	// --- Flush to file ---
+	// A frame that won't fit can't be recorded or streamed coherently. Drop it;
+	// when recording, abandon the file (matches prior behavior). When only
+	// streaming (warmup), just skip this frame — the next one re-keyframes.
 	if ( msg.overflowed ) {
-		Com_Printf( "TV: Frame %i overflowed message buffer, stopping recording.\n", tv.frameCount );
-		SV_TV_StopRecord( qtrue );
+		if ( tv.recording ) {
+			Com_Printf( "TV: Frame %i overflowed message buffer, stopping recording.\n", tv.frameCount );
+			SV_TV_StopRecord( qtrue );
+		}
 		return;
 	}
 
-	frameSize = (unsigned int)msg.cursize;
-	SV_TV_CompressWrite( &frameSize, 4 );
-	SV_TV_CompressWrite( msg.data, msg.cursize );
+	// --- Flush to file (recorded frames only) ---
+	if ( tv.recording ) {
+		frameSize = (unsigned int)msg.cursize;
+		SV_TV_CompressWrite( &frameSize, 4 );
+		SV_TV_CompressWrite( msg.data, msg.cursize );
+	}
+
+	// Send to the live tap (no-op if no stream session / listener).
+	SV_TVStream_Frame( msg.data, msg.cursize, sv.time );
 
 	// Save current state as previous for next delta.
 	// Zero removed entities/players so reappearing ones get a full delta.
@@ -510,7 +552,9 @@ void SV_TV_WriteFrame( void ) {
 	}
 	Com_Memcpy( tv.prevPlayerBitmask, curPlayerBitmask, sizeof( curPlayerBitmask ) );
 
-	tv.frameCount++;
+	if ( tv.recording ) {
+		tv.frameCount++;
+	}
 }
 
 
@@ -530,6 +574,11 @@ void SV_TV_StopRecord( qboolean discard ) {
 	if ( !tv.recording ) {
 		return;
 	}
+
+	// NB: the live stream session is NOT ended here — it spans the whole map
+	// (warmup..rotation) and is torn down by SV_TV_StreamEnd at the map
+	// boundary. Stopping a recording (e.g. manual tvstop mid-match) leaves the
+	// live feed running.
 
 	Com_sprintf( tmpPath, sizeof( tmpPath ), "%s.tvd.tmp", tv.recordingPath );
 
@@ -686,4 +735,55 @@ void SV_TV_AutoStart( void ) {
 
 	tv.autoPending = qtrue;
 	Com_Printf( "TV: Auto-record pending, waiting for first client.\n" );
+}
+
+
+/*
+===============
+SV_TV_StreamBegin
+
+Begin a live stream session for the current map (called at map go-live). The
+stream runs through warmup and the match, decoupled from .tvd recording (which
+starts later at matchState "active"). No-op if streaming is disabled or a
+session is already live (which is the case once recording has started, since
+StartRecord keeps the session active).
+===============
+*/
+void SV_TV_StreamBegin( void ) {
+	if ( !sv_tvLive->integer || SV_TVStream_IsActive() ) {
+		return;
+	}
+
+	// Zero the shared delta-encoder state so warmup frames stream from a clean
+	// baseline — mirrors what SV_TV_StartRecord does for the file. Recording/
+	// file fields are left untouched; recording begins later via autoPending.
+	Com_Memset( tv.prevEntities, 0, sizeof( tv.prevEntities ) );
+	Com_Memset( tv.prevEntityBitmask, 0, sizeof( tv.prevEntityBitmask ) );
+	Com_Memset( tv.prevPlayers, 0, sizeof( tv.prevPlayers ) );
+	Com_Memset( tv.prevPlayerBitmask, 0, sizeof( tv.prevPlayerBitmask ) );
+	Com_Memset( tv.csChanged, 0, sizeof( tv.csChanged ) );
+	tv.cmdCount = 0;
+	tv.cmdBufUsed = 0;
+#ifdef USE_VOIP
+	tv.voipCount = 0;
+	tv.voipBufUsed = 0;
+#endif
+
+	SV_TVStream_StartStream();
+}
+
+
+/*
+===============
+SV_TV_StreamEnd
+
+End the current map's live stream session (called at map rotation / shutdown),
+even when no .tvd was recorded — so a warmup-only stream is finalized and
+consumers get a clean TVLe.
+===============
+*/
+void SV_TV_StreamEnd( void ) {
+	if ( SV_TVStream_IsActive() ) {
+		SV_TVStream_EndStream();
+	}
 }

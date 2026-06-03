@@ -434,6 +434,10 @@ void SV_SpawnServer( const char *mapname, qboolean killBots ) {
 		SV_TV_StopRecord( qfalse );
 	}
 
+	// End the prior map's live stream session (even if it never recorded, e.g.
+	// a 1v1 that sat in warmup) so consumers get a clean TVLe before the swap.
+	SV_TV_StreamEnd();
+
 	// shut down the existing game if it is running
 	SV_ShutdownGameProgs();
 
@@ -709,6 +713,10 @@ void SV_SpawnServer( const char *mapname, qboolean killBots ) {
 	// Auto-start TV recording if enabled
 	SV_TV_AutoStart();
 
+	// Begin the live stream session for this map (streams warmup live; .tvd
+	// recording still starts later at matchState "active").
+	SV_TV_StreamBegin();
+
 	// suppress hitch warning
 	Com_FrameInit();
 }
@@ -918,6 +926,9 @@ void SV_Shutdown( const char *finalmsg ) {
 	} else {
 		SV_TV_StopRecord( qfalse );
 	}
+
+	SV_TV_StreamEnd();
+	SV_TVStream_Shutdown();
 
 	Com_Printf( "----- Server Shutdown (%s) -----\n", finalmsg );
 

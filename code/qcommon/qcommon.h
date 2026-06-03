@@ -1215,6 +1215,7 @@ qboolean CL_GameSwitch( void );
 // server interface
 //
 void SV_Init( void );
+void SV_TVStream_Init( void );	// live-TV loopback tap; bind after NET_Init (needs net_port)
 void SV_Shutdown( const char *finalmsg );
 void SV_Frame( int msec );
 void SV_TrackCvarChanges( void );

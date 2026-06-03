@@ -4054,6 +4054,7 @@ void Com_Init( char *commandLine ) {
 	Com_Printf( "--- Common Initialization Complete ---\n" );
 
 	NET_Init();
+	SV_TVStream_Init();		// bind the live-TV loopback listener now that net_port is registered
 
 	Com_Printf( "Working directory: %s\n", Sys_Pwd() );
 }
