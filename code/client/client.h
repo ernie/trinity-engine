@@ -230,6 +230,7 @@ typedef struct {
 	byte			segOut[TV_SEG_UNCOMPRESSED_MAX]; // one live segment's decompressed frames
 	size_t			segOutLen;   // decompressed bytes available in segOut (current segment)
 	size_t			segCursor;   // read offset within segOut for the next [size][frame] record
+	qboolean		segFirstRecord;  // next record consumed is a freshly-decoded segment's keyframe (full state)
 } tvPlayback_t;
 
 extern tvPlayback_t tvPlay;

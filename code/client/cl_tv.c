@@ -762,9 +762,15 @@ CL_TV_ParseFrame
 
 Parse one frame from an in-memory buffer. Shared by VOD playback
 (CL_TV_ReadFrame) and the live-streaming path.
+
+isKeyframe (live only): a segment-leading keyframe lists ALL non-empty
+configstrings, so it is authoritative — clear any we still hold that it omits.
+Else a configstring cleared on a keyframe-coincident frame (its delta is dropped
+for the keyframe) stays stale, e.g. CS_WARMUP replays the fight countdown on the
+next re-init. VOD has no keyframes and passes qfalse.
 ===============
 */
-static void CL_TV_ParseFrame( byte *data, int len ) {
+static void CL_TV_ParseFrame( byte *data, int len, qboolean isKeyframe ) {
 	msg_t msg;
 	int serverTime;
 	int num;
@@ -772,9 +778,14 @@ static void CL_TV_ParseFrame( byte *data, int len ) {
 	playerState_t tempPlayer;
 	byte oldEntityBitmask[MAX_GENTITIES/8];
 	byte oldPlayerBitmask[MAX_CLIENTS/8];
+	byte csSeen[(MAX_CONFIGSTRINGS + 7) / 8]; // keyframe: indices the keyframe asserted
 	int csCount, cmdCount;
 	int i;
 	char csData[BIG_INFO_STRING];
+
+	if ( isKeyframe ) {
+		Com_Memset( csSeen, 0, sizeof( csSeen ) );
+	}
 
 	// Set up message for reading
 	MSG_Init( &msg, data, len );
@@ -897,6 +908,11 @@ static void CL_TV_ParseFrame( byte *data, int len ) {
 		}
 
 		if ( (unsigned)csIndex < MAX_CONFIGSTRINGS ) {
+			// Mark present before the dedup continue (an unchanged value is still asserted).
+			if ( isKeyframe ) {
+				csSeen[csIndex >> 3] |= 1 << ( csIndex & 7 );
+			}
+
 			// Dedup: a keyframe re-asserts every non-empty configstring each time,
 			// but we already hold them. Skip unchanged ones so we neither rebuild
 			// gameState nor flood the 64-slot reliable-command ring with redundant
@@ -914,6 +930,22 @@ static void CL_TV_ParseFrame( byte *data, int len ) {
 			// Skip during seek (tv_seek_sync handles bulk re-registration).
 			if ( !tvPlay.seeking ) {
 				CL_TV_SendConfigstring( csIndex, csData, csLen );
+			}
+		}
+	}
+
+	// Keyframe authoritative: clear configstrings it omitted (see header note).
+	if ( isKeyframe ) {
+		for ( i = 0; i < MAX_CONFIGSTRINGS; i++ ) {
+			if ( csSeen[i >> 3] & ( 1 << ( i & 7 ) ) ) {
+				continue; // asserted by this keyframe
+			}
+			if ( cl.gameState.stringOffsets[i] == 0 ) {
+				continue; // already empty
+			}
+			CL_TV_UpdateConfigstring( i, "", 0 );
+			if ( !tvPlay.seeking ) {
+				CL_TV_SendConfigstring( i, "", 0 );
 			}
 		}
 	}
@@ -1043,7 +1075,7 @@ void CL_TV_ReadFrame( void ) {
 		return;
 	}
 
-	CL_TV_ParseFrame( tvPlay.msgBuf, frameSize );
+	CL_TV_ParseFrame( tvPlay.msgBuf, frameSize, qfalse ); // VOD: no keyframes
 }
 
 
@@ -1165,8 +1197,10 @@ qboolean CL_TV_NextLiveFrame( void ) {
 				| ( tvPlay.segOut[tvPlay.segCursor+2] << 16 )
 				| ( (unsigned int)tvPlay.segOut[tvPlay.segCursor+3] << 24 ) );
 			if ( fsz != 0 && (size_t)fsz <= tvPlay.segOutLen - ( tvPlay.segCursor + 4 ) ) {
+				qboolean isKeyframe = tvPlay.segFirstRecord;
+				tvPlay.segFirstRecord = qfalse;
 				tvPlay.segCursor += 4;
-				CL_TV_ParseFrame( tvPlay.segOut + tvPlay.segCursor, (int)fsz );
+				CL_TV_ParseFrame( tvPlay.segOut + tvPlay.segCursor, (int)fsz, isKeyframe );
 				tvPlay.segCursor += fsz;
 				if ( !tvPlay.bootstrapped ) {
 					tvPlay.firstServerTime = tvPlay.serverTime;
@@ -1192,12 +1226,13 @@ qboolean CL_TV_NextLiveFrame( void ) {
 			// (a true I-frame) rather than merge onto our prior state. Without
 			// this, fields that are zero in the keyframe but non-zero in our state
 			// (e.g. scores/powerups reset at warmup->active) would never clear.
-			// Scope is exactly the delta baseline: NOT viewpoint/timing/config-
-			// strings, which the keyframe doesn't carry.
+			// Scope is the entity/player delta baseline only; configstrings are
+			// reconciled in CL_TV_ParseFrame (isKeyframe), not here.
 			Com_Memset( tvPlay.entities, 0, sizeof( tvPlay.entities ) );
 			Com_Memset( tvPlay.entityBitmask, 0, sizeof( tvPlay.entityBitmask ) );
 			Com_Memset( tvPlay.players, 0, sizeof( tvPlay.players ) );
 			Com_Memset( tvPlay.playerBitmask, 0, sizeof( tvPlay.playerBitmask ) );
+			tvPlay.segFirstRecord = qtrue; // first record of the new segment is its keyframe
 		}
 	}
 }
