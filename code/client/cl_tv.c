@@ -1634,7 +1634,7 @@ static qboolean CL_TV_LiveMapChange( void ) {
 	Cvar_SetIntegerValue( "cl_tvMapSerial", cl_tvMapSerial->integer + 1 );
 	Cvar_SetIntegerValue( "cl_tvViewpoint", tvPlay.viewpoint );
 
-	Com_Printf( "TV: live map change -> %s (svFps %i)\n", tvPlay.pendingMap, tvPlay.svFps );
+	Com_DPrintf( "TV: live map change -> %s (svFps %i)\n", tvPlay.pendingMap, tvPlay.svFps );
 	return qtrue;
 }
 
