@@ -134,8 +134,9 @@ static int TVRing_SegmentKeyframeTime( size_t p ) {
 // sits ~TV_CATCHUP_KEEP_MS behind the newest buffered segment, discarding the
 // backlog a pk3 download accumulated (each TVL segment is a full keyframe, so the
 // jump is lossless). Stops at the first non-TVLs boundary (TVLe/partial), so it
-// never crosses a map change. Called once at the asset-gate resume — NOT per read:
-// segments are coarse and skipping one in steady play tears entity interpolation.
+// never crosses a map change. Called one-shot at initial boot and the map-change
+// asset-gate resume — NOT per read: segments are coarse and skipping one in steady
+// play tears entity interpolation.
 // Returns the number of segments skipped.
 static int TVRing_CatchUp( int keepMs ) {
 	size_t scan = tvRing.cursor, newest = tvRing.cursor;
@@ -734,6 +735,12 @@ static qboolean CL_TV_OpenLive( const char *filename ) {
 	clc.clientNum = tvPlay.viewpoint;
 	VectorCopy( tvPlay.players[tvPlay.viewpoint].origin, tvPlay.viewOrigin );
 	CL_TV_BuildSnapshot();
+
+#ifdef __EMSCRIPTEN__
+	// Trim the boot-time backlog once steady play begins, else the lag stays
+	// anchored at the click-time entry instead of the relay edge. See NextLiveFrame.
+	tvPlay.needInitialCatchUp = qtrue;
+#endif
 
 	tvPlay.active = qtrue;
 
@@ -1380,9 +1387,10 @@ decompresses.
 NOTE: this never skips segments. A TVL segment is a coarse multi-second unit
 (keyframe + many deltas), and in healthy steady state the next whole segment is
 normally buffered ahead — so per-read skipping would drop live content and the
-cgame would lerp entities across the gap (through walls). Catch-up after a stall
-is done once, at the asset-gate resume in CL_TV_LiveMapChange, where jumping the
-coarse backlog is exactly what's wanted.
+cgame would lerp entities across the gap (through walls). Backlog catch-up is done
+out-of-band by TVRing_CatchUp at two one-shot sites — the initial boot
+(CL_TV_NextLiveFrame) and the map-change asset-gate resume (CL_TV_LiveMapChange) —
+where jumping the coarse backlog is exactly what's wanted.
 ===============
 */
 static tvSegResult_t CL_TV_ReadLiveSegment( void ) {
@@ -1495,6 +1503,27 @@ static void CL_TV_LiveBootstrap( void ) {
 
 /*
 ===============
+CL_TV_ResyncLiveClock
+
+Called from the live pump after the initial catch-up jumped serverTime forward.
+Snaps the client clock to the new edge (mirrors CL_TV_Seek's tail); without it
+cl.serverTime trails the jump by the whole backlog and cgame lerps for seconds. A
+duplicate snapshot neutralizes the pre-jump one so the transition doesn't glide.
+===============
+*/
+void CL_TV_ResyncLiveClock( void ) {
+	CL_TV_BuildSnapshot();
+	cl.snap = cl.snapshots[clc.serverMessageSequence & PACKET_MASK];
+	cl.newSnapshots = qtrue;
+	cl.serverTimeDelta = cl.snap.serverTime - cls.realtime;
+	cl.serverTime = cl.snap.serverTime;
+	cl.oldServerTime = cl.snap.serverTime;
+	cl.oldFrameServerTime = cl.snap.serverTime;
+}
+
+
+/*
+===============
 CL_TV_LiveMapChange
 
 Drive an in-place map change when the live stream rolls from one match's session
@@ -1568,9 +1597,9 @@ static qboolean CL_TV_LiveMapChange( void ) {
 #ifdef __EMSCRIPTEN__
 	// Catch up the backlog the pk3 download accumulated: the relay kept feeding the
 	// new session's segments while we waited, so trim the excess (keeping ~the delay
-	// buffered) rather than replaying from the now-stale first keyframe. This is the
-	// only place we skip segments — it keeps the ~5s delay from compounding across
-	// maps without dropping to the jittery live edge.
+	// buffered) rather than replaying from the now-stale first keyframe. Keeps the
+	// ~5s delay from compounding across maps without dropping to the jittery live
+	// edge. (The other catch-up site is the initial boot — see CL_TV_NextLiveFrame.)
 	{
 		int keepMs = cl_tvDelay->integer > 0 ? cl_tvDelay->integer : TV_CATCHUP_KEEP_FALLBACK_MS;
 		int skipped = TVRing_CatchUp( keepMs );
@@ -1682,6 +1711,22 @@ qboolean CL_TV_NextLiveFrame( void ) {
 	if ( tvPlay.awaitingHeader || tvPlay.awaitingAssets ) {
 		return CL_TV_LiveMapChange();
 	}
+#ifdef __EMSCRIPTEN__
+	// Boot analogue of the map-change catch-up: once the boot-time backlog reaches
+	// the ring, trim to ~the delay and drop the stale bootstrap segment so the
+	// caught-up keyframe re-syncs. Retries each frame until it skips (backlog lands
+	// a frame or two in); the TVSEG_OK path clears it if there's nothing to skip.
+	if ( tvPlay.needInitialCatchUp ) {
+		int keepMs = cl_tvDelay->integer > 0 ? cl_tvDelay->integer : TV_CATCHUP_KEEP_FALLBACK_MS;
+		int skipped = TVRing_CatchUp( keepMs );
+		if ( skipped ) {
+			tvPlay.needInitialCatchUp = qfalse;
+			tvPlay.liveClockResync = qtrue;        // serverTime jumps below — snap the clock after the pump
+			tvPlay.segCursor = tvPlay.segOutLen;   // abandon the stale bootstrap segment
+			Com_DPrintf( "TV: initial catch-up skipped %d segment(s), kept ~%dms buffered\n", skipped, keepMs );
+		}
+	}
+#endif
 	for ( ;; ) {
 		// A complete record available in the current segment?
 		if ( tvPlay.segCursor + 4 <= tvPlay.segOutLen ) {
@@ -1731,6 +1776,9 @@ qboolean CL_TV_NextLiveFrame( void ) {
 			Com_Memset( tvPlay.players, 0, sizeof( tvPlay.players ) );
 			Com_Memset( tvPlay.playerBitmask, 0, sizeof( tvPlay.playerBitmask ) );
 			tvPlay.segFirstRecord = qtrue; // first record of the new segment is its keyframe
+#ifdef __EMSCRIPTEN__
+			tvPlay.needInitialCatchUp = qfalse;   // bootstrap drained: nothing to catch up
+#endif
 		}
 	}
 }

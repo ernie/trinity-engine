@@ -226,6 +226,8 @@ typedef struct {
 	// Live (TVL1) streaming mode
 	qboolean		live;              // true when playing a TVL1 live stream (not a TVD1 VOD)
 	qboolean		bootstrapped;      // true once the first keyframe segment has built a snapshot
+	qboolean		needInitialCatchUp; // WASM: trim the boot-time backlog once steady play begins (see CL_TV_NextLiveFrame)
+	qboolean		liveClockResync;    // WASM: the initial catch-up jumped serverTime; snap the clock after the pump (CL_TV_ResyncLiveClock)
 	byte			segIn[TVD_SEGIN_MAX];            // one live segment's compressed payload (raw, pre-zstd)
 	byte			segOut[TV_SEG_UNCOMPRESSED_MAX]; // one live segment's decompressed frames
 	size_t			segOutLen;   // decompressed bytes available in segOut (current segment)
@@ -802,6 +804,7 @@ void CL_TV_Close( void );
 void CL_TV_ReadFrame( void );
 qboolean CL_TV_NextLiveFrame( void );
 void CL_TV_BuildSnapshot( void );
+void CL_TV_ResyncLiveClock( void );
 void CL_TV_Seek( int targetTime );
 
 // base backend functions

@@ -1393,6 +1393,10 @@ void CL_SetCGameTime( void ) {
 					CL_TV_BuildSnapshot();
 				}
 			}
+			if ( tvPlay.liveClockResync ) {
+				tvPlay.liveClockResync = qfalse;
+				CL_TV_ResyncLiveClock();   // initial catch-up jumped serverTime; snap the clock to it
+			}
 			if ( tvPlay.bootstrapped ) {
 				Cvar_SetIntegerValue( "cl_tvTime", tvPlay.serverTime - tvPlay.firstServerTime );
 			}
