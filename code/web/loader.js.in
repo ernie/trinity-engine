@@ -237,8 +237,11 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
         // command to the TV player (cl_main.c). The TVL1-vs-TVD1 magic then
         // selects live vs VOD inside CL_TV_Open. So keep the extension even
         // though these bytes are a live stream, not a recording.
-        demoFilename = 'live.tvd';
-        generatedArguments += ` +demo ${demoFilename} `;
+        // Live no longer uses a MEMFS file — the engine pulls from an in-memory
+        // byte-feed ring fed via CL_TV_FeedBytes (see preRun). tv_openlive opens the
+        // stream off that ring (replacing "+demo live.tvd"), so a held-open viewer
+        // session across many matches no longer grows a file without bound.
+        generatedArguments += ` +tv_openlive `;
         if (fs_game) generatedArguments += ` +set fs_game "${fs_game}" `;
         liveReader = reader;
         liveInitialBytes = acc;
@@ -425,30 +428,49 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
                         mod.FS.writeFile(`/${fs_basegame}/demos/${demoFilename}`, demoData);
                     }
 
-                    // Live stream: write the buffered header, then keep appending
-                    // chunks as they arrive so cl_tv's live mode reads a growing file.
+                    // Live stream: push bytes into the engine's byte-feed ring
+                    // (CL_TV_FeedBytes) instead of a growing MEMFS file. FeedBytes
+                    // returns the count it accepted; when the ring is full (the engine
+                    // stalled — e.g. a backgrounded tab) we wait and re-feed the
+                    // remainder. That backpressure bounds memory, and the engine's
+                    // catch-up skips the backlog on resume.
                     if (liveUrl && liveReader) {
-                        mod.FS.mkdirTree(`/${fs_basegame}/demos`);
-                        const livePath = `/${fs_basegame}/demos/${demoFilename}`;
-                        mod.FS.writeFile(livePath, liveInitialBytes);   // header + any early segment bytes
-                        // Append subsequent chunks as they arrive (growing-file read validated for MEMFS).
+                        const FEED_CAP = 256 * 1024;
+                        const feedBuf = mod._malloc(FEED_CAP);
+                        // Feed up to the ring's free space; return how many bytes were
+                        // accepted (0 when full). Copies through a fixed heap buffer.
+                        const feedPiece = (u8, off) => {
+                            const piece = Math.min(FEED_CAP, u8.length - off);
+                            mod.HEAPU8.set(u8.subarray(off, off + piece), feedBuf);
+                            return mod.ccall('CL_TV_FeedBytes', 'number', ['number', 'number'], [feedBuf, piece]);
+                        };
+                        // Seed the buffered header + first segment SYNCHRONOUSLY so they
+                        // are in the ring before the "+tv_openlive" command line runs
+                        // (preRun completes before the + args execute). The ring is empty
+                        // here, so it all fits.
+                        for (let off = 0; off < liveInitialBytes.length; ) {
+                            off += feedPiece(liveInitialBytes, off);
+                        }
+                        // Drain subsequent chunks, applying backpressure when the ring is full.
                         (async () => {
-                            // Emscripten 'a' does NOT seek to EOF, and FS.write with
-                            // position=undefined writes at stream.position (0) — clobbering the
-                            // header. Track an explicit write offset starting past the header.
-                            let writePos = liveInitialBytes.length;
-                            const stream = mod.FS.open(livePath, 'a');
+                            const feed = async (u8) => {
+                                for (let off = 0; off < u8.length; ) {
+                                    if (mod._shuttingDown) return;
+                                    const n = feedPiece(u8, off);
+                                    off += n;
+                                    if (off < u8.length) await new Promise(r => setTimeout(r, 16)); // ring full: let the engine drain
+                                }
+                            };
                             try {
                                 for (;;) {
                                     const { done, value } = await liveReader.read();
-                                    if (done) break;                 // clean end: in-band TVLe already present
-                                    mod.FS.write(stream, value, 0, value.length, writePos);
-                                    writePos += value.length;
+                                    if (done) break;                 // clean end: in-band TVLe already fed
+                                    await feed(value);
                                 }
                             } catch (e) {
                                 console.warn('live stream error', e);
                             } finally {
-                                try { mod.FS.close(stream); } catch (e2) {}
+                                try { mod._free(feedBuf); } catch (e2) {}
                                 // Backstop for a dropped connection (no in-band TVLe): tell the engine to stop.
                                 try { mod.ccall('Cbuf_AddText', null, ['string'], ['set cl_tvStreamClosed 1\n']); } catch (e3) {}
                             }

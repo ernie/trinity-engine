@@ -236,6 +236,7 @@ typedef struct {
 	// yet, the change pauses here while JS fetches it (curl is compiled out of the
 	// WASM build, so JS fetch is the only transport — see CL_TV_LiveMapChange).
 	qboolean		awaitingAssets;            // map change paused, waiting on cl_tvAssetsReady
+	qboolean		awaitingHeader;            // map change paused: next session's TVL1 header not fully fed yet
 	char			pendingMap[MAX_QPATH];     // map whose pk3 we're waiting for
 } tvPlayback_t;
 
