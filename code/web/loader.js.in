@@ -453,6 +453,41 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
                                 try { mod.ccall('Cbuf_AddText', null, ['string'], ['set cl_tvStreamClosed 1\n']); } catch (e3) {}
                             }
                         })();
+
+                        // Live map change: on a TVLe->TVL1 boundary the engine pauses and
+                        // writes the next match's map into cl_tvPendingMap when that map's
+                        // pk3 isn't in the VFS. Fetch the per-map pk3 (same artifact the boot
+                        // path uses), drop it into the gamedir, then set cl_tvAssetsReady so
+                        // the engine FS_Restarts and reloads in place. This is the browser's
+                        // equivalent of a native client's HTTP map download — curl is compiled
+                        // out of the WASM build, so JS fetch is the only transport.
+                        (async () => {
+                            let handled = '';
+                            for (;;) {
+                                await new Promise(r => setTimeout(r, 200));
+                                if (mod._shuttingDown) break;
+                                let pending;
+                                try { pending = mod.ccall('Cvar_VariableString', 'string', ['string'], ['cl_tvPendingMap']); }
+                                catch (e) { break; } // module gone
+                                if (!pending) { handled = ''; continue; }
+                                if (pending === handled) continue;
+                                handled = pending;
+                                const name = `${pending.toLowerCase()}.pk3`;
+                                try {
+                                    const resp = await cachedFetch(new URL(`demopk3s/maps/${name}`, dataURL).href, `Loading ${pending}`, statusEl, authToken);
+                                    if (resp.ok) {
+                                        mod.FS.writeFile(`/${fs_basegame}/${name}`, new Uint8Array(await resp.arrayBuffer()));
+                                    } else {
+                                        console.warn(`Map pk3 not found: ${name} (${resp.status})`);
+                                    }
+                                } catch (e) {
+                                    console.warn('Map pk3 fetch failed', e);
+                                }
+                                // Signal even on failure so the engine proceeds (and errors
+                                // visibly via CM_LoadMap) rather than hanging forever.
+                                try { mod.ccall('Cbuf_AddText', null, ['string'], ['set cl_tvAssetsReady 1\n']); } catch (e) {}
+                            }
+                        })();
                     }
 
 

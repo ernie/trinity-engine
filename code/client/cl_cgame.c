@@ -1382,6 +1382,14 @@ void CL_SetCGameTime( void ) {
 					if ( tvPlay.atEnd ) {
 						break;   // frame applied but parse hit a corrupt/truncated tail
 					}
+					if ( cls.state != CA_ACTIVE ) {
+						// A live map change re-inited cgame (-> CA_PRIMED) and built the
+						// new session's first snapshot. Stop pumping so the next pass of
+						// CL_SetCGameTime runs CL_FirstSnapshot and re-baselines serverTime
+						// to the new session; otherwise the stale (large) cl.serverTime
+						// would burn through the whole new match in this one frame.
+						break;
+					}
 					CL_TV_BuildSnapshot();
 				}
 			}

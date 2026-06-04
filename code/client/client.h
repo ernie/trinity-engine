@@ -231,6 +231,12 @@ typedef struct {
 	size_t			segOutLen;   // decompressed bytes available in segOut (current segment)
 	size_t			segCursor;   // read offset within segOut for the next [size][frame] record
 	qboolean		segFirstRecord;  // next record consumed is a freshly-decoded segment's keyframe (full state)
+
+	// Live map change asset gate: when the next session's map pk3 isn't in the VFS
+	// yet, the change pauses here while JS fetches it (curl is compiled out of the
+	// WASM build, so JS fetch is the only transport — see CL_TV_LiveMapChange).
+	qboolean		awaitingAssets;            // map change paused, waiting on cl_tvAssetsReady
+	char			pendingMap[MAX_QPATH];     // map whose pk3 we're waiting for
 } tvPlayback_t;
 
 extern tvPlayback_t tvPlay;

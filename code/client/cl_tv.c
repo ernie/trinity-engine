@@ -34,14 +34,20 @@ cvar_t *cl_tvTime;
 cvar_t *cl_tvDuration;
 cvar_t *cl_tvStreamClosed;
 cvar_t *cl_tvLiveEnded;
+cvar_t *cl_tvMapSerial;
+cvar_t *cl_tvPendingMap;
+cvar_t *cl_tvAssetsReady;
 
 static void CL_TV_View_f( void );
 static void CL_TV_ViewNext_f( void );
 static void CL_TV_ViewPrev_f( void );
 static void CL_TV_Seek_f( void );
 static qboolean CL_TV_OpenLive( const char *filename );
+static qboolean CL_TV_ReadStreamHeader( char *mapname, int mapnameSize );
+static qboolean CL_TV_LiveMapChange( void );
+static qboolean CL_TV_MapAvailable( const char *mapname );
 
-typedef enum { TVSEG_OK, TVSEG_STARVED, TVSEG_ENDED } tvSegResult_t;
+typedef enum { TVSEG_OK, TVSEG_STARVED, TVSEG_ENDED, TVSEG_NEWSTREAM } tvSegResult_t;
 
 
 /*
@@ -111,6 +117,14 @@ void CL_TV_Init( void ) {
 	// ~delay-buffer later, and what the web client reconnects on.
 	cl_tvStreamClosed = Cvar_Get( "cl_tvStreamClosed", "0", 0 );
 	cl_tvLiveEnded = Cvar_Get( "cl_tvLiveEnded", "0", CVAR_ROM );
+	// cl_tvMapSerial: bumped on each in-place live map change so the web client
+	// can refresh roster + levelshot without a page reload (replaces the reboot).
+	cl_tvMapSerial = Cvar_Get( "cl_tvMapSerial", "0", CVAR_ROM );
+	// cl_tvPendingMap: engine writes the next map's name when its pk3 isn't in the
+	// VFS; the JS loader polls it, fetches the pk3, then sets cl_tvAssetsReady=1 so
+	// the engine FS_Restarts and completes the in-place map change.
+	cl_tvPendingMap = Cvar_Get( "cl_tvPendingMap", "", CVAR_ROM );
+	cl_tvAssetsReady = Cvar_Get( "cl_tvAssetsReady", "0", 0 );
 }
 
 
@@ -375,6 +389,72 @@ static void CL_TV_UpdateConfigstring( int index, const char *data, int dataLen )
 
 /*
 ===============
+CL_TV_ReadStreamHeader
+
+Parse a TVL1 session header, assuming tvPlay.file is positioned just past the
+4-byte "TVL1" magic. Reads svFps/maxclients into tvPlay and the map name into
+the caller's buffer; consumes (but discards) the timestamp + fs_game fields to
+stay aligned with the first segment (fs_game is fixed per stream — see D5). Used
+by both CL_TV_OpenLive (first session) and CL_TV_LiveMapChange (later sessions).
+Returns qfalse on a truncated/unsupported header without closing the stream —
+the caller decides cleanup.
+===============
+*/
+static qboolean CL_TV_ReadStreamHeader( char *mapname, int mapnameSize ) {
+	int version;
+	unsigned short maplen, tslen, gamelen;
+
+	if ( FS_Read( &version, 4, tvPlay.file ) != 4 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+		return qfalse;
+	}
+	if ( version != 1 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: unsupported TVL version %i\n", version );
+		return qfalse;
+	}
+
+	if ( FS_Read( &tvPlay.svFps, 4, tvPlay.file ) != 4 ||
+		 FS_Read( &tvPlay.maxclients, 4, tvPlay.file ) != 4 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+		return qfalse;
+	}
+
+	if ( FS_Read( &maplen, 2, tvPlay.file ) != 2 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+		return qfalse;
+	}
+	if ( maplen >= mapnameSize ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live mapName too long (%i)\n", maplen );
+		return qfalse;
+	}
+	if ( maplen && FS_Read( mapname, maplen, tvPlay.file ) != maplen ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+		return qfalse;
+	}
+	mapname[maplen] = '\0';
+
+	if ( FS_Read( &tslen, 2, tvPlay.file ) != 2 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+		return qfalse;
+	}
+	if ( tslen ) {
+		FS_Seek( tvPlay.file, tslen, FS_SEEK_CUR );  // skip the timestamp field exactly
+	}
+
+	if ( FS_Read( &gamelen, 2, tvPlay.file ) != 2 ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+		return qfalse;
+	}
+	if ( gamelen ) {
+		FS_Seek( tvPlay.file, gamelen, FS_SEEK_CUR );  // skip the fs_game field exactly
+	}
+
+	return qtrue;
+}
+
+
+/*
+===============
 CL_TV_OpenLive
 
 Open a TVL1 live stream. Assumes tvPlay.file is positioned just past the
@@ -383,66 +463,11 @@ configstrings precede the cgame init that follows.
 ===============
 */
 static qboolean CL_TV_OpenLive( const char *filename ) {
-	int version;
-	unsigned short maplen, tslen;
 	char mapname[MAX_QPATH];
 
-	if ( FS_Read( &version, 4, tvPlay.file ) != 4 ) {
-		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
+	if ( !CL_TV_ReadStreamHeader( mapname, sizeof( mapname ) ) ) {
 		CL_TV_Close();
 		return qfalse;
-	}
-	if ( version != 1 ) {
-		Com_Printf( S_COLOR_YELLOW "TV: unsupported TVL version %i\n", version );
-		CL_TV_Close();
-		return qfalse;
-	}
-
-	if ( FS_Read( &tvPlay.svFps, 4, tvPlay.file ) != 4 ||
-		 FS_Read( &tvPlay.maxclients, 4, tvPlay.file ) != 4 ) {
-		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
-		CL_TV_Close();
-		return qfalse;
-	}
-
-	if ( FS_Read( &maplen, 2, tvPlay.file ) != 2 ) {
-		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
-		CL_TV_Close();
-		return qfalse;
-	}
-	if ( maplen >= sizeof( mapname ) ) {
-		Com_Printf( S_COLOR_YELLOW "TV: live mapName too long (%i)\n", maplen );
-		CL_TV_Close();
-		return qfalse;
-	}
-	if ( maplen && FS_Read( mapname, maplen, tvPlay.file ) != maplen ) {
-		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
-		CL_TV_Close();
-		return qfalse;
-	}
-	mapname[maplen] = '\0';
-
-	if ( FS_Read( &tslen, 2, tvPlay.file ) != 2 ) {
-		Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
-		CL_TV_Close();
-		return qfalse;
-	}
-	if ( tslen ) {
-		FS_Seek( tvPlay.file, tslen, FS_SEEK_CUR );  // skip the timestamp field exactly
-	}
-
-	// fs_game field: the loader uses it pre-boot; here just consume the bytes to
-	// stay aligned with the first segment (fs_game is already fixed for the session).
-	{
-		unsigned short gamelen;
-		if ( FS_Read( &gamelen, 2, tvPlay.file ) != 2 ) {
-			Com_Printf( S_COLOR_YELLOW "TV: live header truncated\n" );
-			CL_TV_Close();
-			return qfalse;
-		}
-		if ( gamelen ) {
-			FS_Seek( tvPlay.file, gamelen, FS_SEEK_CUR );  // skip the fs_game field exactly
-		}
 	}
 
 	tvPlay.live = qtrue;
@@ -450,8 +475,11 @@ static qboolean CL_TV_OpenLive( const char *filename ) {
 	tvPlay.atEnd = qfalse;
 	tvPlay.segOutLen = 0;
 	tvPlay.segCursor = 0;
+	tvPlay.awaitingAssets = qfalse;
 	Cvar_Set( "cl_tvStreamClosed", "0" );
 	Cvar_Set( "cl_tvLiveEnded", "0" );
+	Cvar_Set( "cl_tvPendingMap", "" );
+	Cvar_Set( "cl_tvAssetsReady", "0" );
 
 	// Init zstd decompressor
 	tvPlay.dstream = ZSTD_createDStream();
@@ -1104,21 +1132,48 @@ decompresses.
 */
 static tvSegResult_t CL_TV_ReadLiveSegment( void ) {
 	long segStart = FS_FTell( tvPlay.file );
-	byte hdr[12];
+	byte magic[4];
+	byte hdr[8];           // keyframeServerTime(4) + payloadLen(4), follows a "TVLs" magic
 	unsigned int payloadLen;
 	int got;
 
-	got = CL_TV_RawRead( hdr, 12 );
-	if ( got < 12 ) { FS_Seek( tvPlay.file, segStart, FS_SEEK_SET ); return TVSEG_STARVED; }
+	// The writer frames a segment as "TVLs" + 8-byte header, but ends a session
+	// with a BARE 4-byte "TVLe" marker (sv_tvstream.c). So read the 4-byte magic
+	// first and dispatch — a fixed 12-byte read would over-read 8 bytes past TVLe
+	// and swallow the next session's "TVL1" header on a map change.
+	got = CL_TV_RawRead( magic, 4 );
+	if ( got < 4 ) { FS_Seek( tvPlay.file, segStart, FS_SEEK_SET ); return TVSEG_STARVED; }
 
-	if ( !Q_strncmp( (char *)hdr, "TVLe", 4 ) ) { return TVSEG_ENDED; }
-	if ( Q_strncmp( (char *)hdr, "TVLs", 4 ) ) {
+	if ( !Q_strncmp( (char *)magic, "TVLe", 4 ) ) {
+		// End of this session. Peek the next 4 bytes: a "TVL1" means the stream
+		// continues into the next match (in-place map change); anything else — or
+		// bytes not here yet — is a true end (closed) or a wait (still live).
+		byte next[4];
+		got = CL_TV_RawRead( next, 4 );
+		if ( got < 4 ) {
+			// Next session's header not here yet. Rewind PAST the TVLe (to segStart)
+			// so a STARVED retry re-reads the marker and re-peeks — otherwise the
+			// retry would read the later-arriving "TVL1" as a segment magic and err.
+			FS_Seek( tvPlay.file, segStart, FS_SEEK_SET );
+			return cl_tvStreamClosed->integer ? TVSEG_ENDED : TVSEG_STARVED;
+		}
+		if ( !Q_strncmp( (char *)next, "TVL1", 4 ) ) {
+			// Positioned just past the new session's "TVL1" magic — exactly what
+			// CL_TV_ReadStreamHeader expects. Caller drives CL_TV_LiveMapChange.
+			return TVSEG_NEWSTREAM;
+		}
+		return TVSEG_ENDED;  // TVLe followed by non-TVL1: genuine end
+	}
+	if ( Q_strncmp( (char *)magic, "TVLs", 4 ) ) {
 		Com_Printf( S_COLOR_YELLOW "TV: bad live segment magic\n" );
 		return TVSEG_ENDED;
 	}
 
-	// payloadLen = little-endian u32 at hdr+8 (keyframeServerTime at hdr+4 is unused for playback).
-	payloadLen = (unsigned int)( hdr[8] | ( hdr[9] << 8 ) | ( hdr[10] << 16 ) | ( (unsigned int)hdr[11] << 24 ) );
+	got = CL_TV_RawRead( hdr, 8 );
+	if ( got < 8 ) { FS_Seek( tvPlay.file, segStart, FS_SEEK_SET ); return TVSEG_STARVED; }
+
+	// payloadLen = little-endian u32 at hdr+4 (keyframeServerTime at hdr+0 is unused for playback).
+	payloadLen = (unsigned int)( hdr[4] | ( hdr[5] << 8 ) | ( hdr[6] << 16 ) | ( (unsigned int)hdr[7] << 24 ) );
 	if ( payloadLen == 0 || payloadLen > sizeof( tvPlay.segIn ) ) {
 		Com_Printf( S_COLOR_YELLOW "TV: live segment payload %u out of range\n", payloadLen );
 		return TVSEG_ENDED;
@@ -1179,16 +1234,158 @@ static void CL_TV_LiveBootstrap( void ) {
 
 /*
 ===============
+CL_TV_LiveMapChange
+
+Drive an in-place map change when the live stream rolls from one match's session
+(ended with TVLe) into the next (a fresh TVL1 header). Reached from
+CL_TV_NextLiveFrame when CL_TV_ReadLiveSegment returns TVSEG_NEWSTREAM, with the
+file positioned just past the new session's "TVL1" magic.
+
+Unlike the React reboot it replaces, this keeps the WASM module — and therefore
+the AudioContext and pointer lock — alive: CL_FlushMemory takes the
+REF_KEEP_CONTEXT branch (fs_game is fixed per stream, D5), so only the registered
+asset set swaps, not the GL/audio devices. Mirrors CL_TV_OpenLive's session
+bootstrap, then runs the Phase-0-proven reload recipe. Returns qtrue once the new
+session's first keyframe is applied and cgame re-inited; qfalse (atEnd set) on a
+truncated/corrupt new header.
+===============
+*/
+static qboolean CL_TV_LiveMapChange( void ) {
+	// 1. Consume the new session's header ONCE, recording the target map. Done in
+	//    its own phase because the change may then pause for an async asset fetch;
+	//    re-reading the header on each wait-frame would desync the byte stream.
+	if ( !tvPlay.awaitingAssets ) {
+		char mapname[MAX_QPATH];
+		if ( !CL_TV_ReadStreamHeader( mapname, sizeof( mapname ) ) ) {
+			Com_Printf( S_COLOR_YELLOW "TV: live map change header truncated\n" );
+			tvPlay.atEnd = qtrue;
+			return qfalse;
+		}
+		Q_strncpyz( tvPlay.pendingMap, mapname, sizeof( tvPlay.pendingMap ) );
+		tvPlay.awaitingAssets = qtrue;
+		// File now sits at the new session's first TVLs (its keyframe); it's read in
+		// the reload below once assets are present. Until then the OLD cgame keeps
+		// rendering session A — we deliberately don't reset any state yet.
+	}
+
+	// 2. Asset gate: the new map's BSP must be loadable before CL_InitCGame. If it
+	//    isn't, hand the map name to the JS loader (curl is compiled out of the WASM
+	//    build, so JS fetch is the only download transport) and wait; NextLiveFrame
+	//    re-enters here each frame via tvPlay.awaitingAssets until JS signals ready.
+	if ( !CL_TV_MapAvailable( tvPlay.pendingMap ) ) {
+		if ( !cl_tvAssetsReady->integer ) {
+			Cvar_Set( "cl_tvPendingMap", tvPlay.pendingMap );
+			return qfalse;
+		}
+		// JS finished the fetch: rescan so the new pk3's BSP is found. FS_Restart
+		// uses closemfp=qfalse, so our open live file handle (tvPlay.file) survives.
+		FS_Restart( clc.checksumFeed );
+		Cvar_Set( "cl_tvAssetsReady", "0" );
+	}
+	Cvar_Set( "cl_tvPendingMap", "" );
+	tvPlay.awaitingAssets = qfalse;
+
+	// 3. Reset per-session parse state, mirroring CL_TV_OpenLive. The new keyframe
+	//    is a full I-frame, so clear the entity/player delta baselines and the
+	//    sequence/segment counters before applying it. cl.gameState is left intact
+	//    here and reconciled by the keyframe-authoritative reader in
+	//    CL_TV_ParseFrame (stale configstrings the new keyframe omits are cleared).
+	tvPlay.bootstrapped = qfalse;
+	tvPlay.segOutLen = 0;
+	tvPlay.segCursor = 0;
+	Com_Memset( tvPlay.entities, 0, sizeof( tvPlay.entities ) );
+	Com_Memset( tvPlay.entityBitmask, 0, sizeof( tvPlay.entityBitmask ) );
+	Com_Memset( tvPlay.players, 0, sizeof( tvPlay.players ) );
+	Com_Memset( tvPlay.playerBitmask, 0, sizeof( tvPlay.playerBitmask ) );
+	cl.parseEntitiesNum = 0;
+	clc.serverMessageSequence = 0;
+	clc.serverCommandSequence = 0;
+	clc.lastExecutedServerCommand = 0;
+	clc.clientNum = 0;
+
+	// 4. Apply the new session's first keyframe (re-baselines firstServerTime and
+	//    re-asserts the TV marker via the bootstrap block inside NextLiveFrame).
+	if ( !CL_TV_NextLiveFrame() ) {
+		Com_Printf( S_COLOR_YELLOW "TV: live map change missing initial keyframe\n" );
+		tvPlay.atEnd = qtrue;
+		return qfalse;
+	}
+	tvPlay.viewpoint = CL_TV_FindFirstActivePlayer();
+	if ( tvPlay.viewpoint < 0 ) {
+		tvPlay.viewpoint = 0;
+	}
+	clc.clientNum = tvPlay.viewpoint;
+	VectorCopy( tvPlay.players[tvPlay.viewpoint].origin, tvPlay.viewOrigin );
+
+	// 5. Build snapshot #1 BEFORE the cgame re-init, mirroring CL_TV_OpenLive's
+	//    pre-return build. CG_INIT must see serverMessageSequence already past this
+	//    snapshot (it sets processedSnapshotNum to it) and serverCommandSequence at
+	//    the keyframe's value; building only after CG_INIT leaves both at 0 and the
+	//    cgame requests a command number it never received.
+	CL_TV_BuildSnapshot();
+
+	// 6. Reload the map in place (keep-context). Leaves cls.state = CA_PRIMED; the
+	//    pump in CL_SetCGameTime breaks on that so the main loop's next pass runs
+	//    CL_FirstSnapshot and re-baselines serverTime to the new session cleanly.
+	cls.state = CA_LOADING;
+	CL_FlushMemory();
+	cls.cgameStarted = qtrue;
+	CL_InitCGame();
+	// Snapshot #2, readable by the freshly-inited cgame (CG_INIT set
+	// processedSnapshotNum = snapshot #1's messageNum). Mirrors cl_main.c:2143.
+	CL_TV_BuildSnapshot();
+
+	// 7. Signal the web client (no reboot now) to refresh roster + levelshot.
+	Cvar_SetIntegerValue( "cl_tvMapSerial", cl_tvMapSerial->integer + 1 );
+	Cvar_SetIntegerValue( "cl_tvViewpoint", tvPlay.viewpoint );
+
+	Com_Printf( "TV: live map change -> %s (svFps %i)\n", tvPlay.pendingMap, tvPlay.svFps );
+	return qtrue;
+}
+
+
+/*
+===============
+CL_TV_MapAvailable
+
+Is mapname's BSP loadable from the current filesystem? False until the map's pk3
+is mounted (the live map-change gate fetches it via JS, then FS_Restarts).
+===============
+*/
+static qboolean CL_TV_MapAvailable( const char *mapname ) {
+	fileHandle_t h = FS_INVALID_HANDLE;
+	int len;
+
+	if ( !mapname[0] ) {
+		return qfalse;
+	}
+	len = FS_FOpenFileRead( va( "maps/%s.bsp", mapname ), &h, qfalse );
+	if ( h != FS_INVALID_HANDLE ) {
+		FS_FCloseFile( h );
+	}
+	return ( len > 0 ) ? qtrue : qfalse;
+}
+
+
+/*
+===============
 CL_TV_NextLiveFrame
 
 Pull and apply the next live frame, decoding the next segment when the current
 one is exhausted. Render-paced (one frame per call). Returns qtrue if a frame was
 applied, qfalse on starved/ended. Sets tvPlay.atEnd on clean end (TVLe) or a
 dropped connection. Captures firstServerTime + asserts the TV marker on the first
-applied frame.
+applied frame. On a TVLe->TVL1 boundary drives CL_TV_LiveMapChange (in-place
+reload) instead of ending.
 ===============
 */
 qboolean CL_TV_NextLiveFrame( void ) {
+	// A map change is paused waiting on the next map's assets (see the gate in
+	// CL_TV_LiveMapChange). Re-enter it each frame until JS reports them ready;
+	// don't pull live frames meanwhile (the old session keeps rendering).
+	if ( tvPlay.awaitingAssets ) {
+		return CL_TV_LiveMapChange();
+	}
 	for ( ;; ) {
 		// A complete record available in the current segment?
 		if ( tvPlay.segCursor + 4 <= tvPlay.segOutLen ) {
@@ -1219,6 +1416,11 @@ qboolean CL_TV_NextLiveFrame( void ) {
 			if ( r == TVSEG_STARVED ) {
 				if ( cl_tvStreamClosed->integer ) { tvPlay.atEnd = qtrue; }
 				return qfalse;
+			}
+			if ( r == TVSEG_NEWSTREAM ) {
+				// TVLe -> TVL1: the next match's session. Reload in place rather
+				// than ending the stream; returns with the new keyframe applied.
+				return CL_TV_LiveMapChange();
 			}
 			// TVSEG_OK: segOut refilled (segCursor=0). Every segment begins with a
 			// full keyframe (delta-from-zero), so reset the running delta baseline
