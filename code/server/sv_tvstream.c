@@ -299,9 +299,17 @@ static int SV_TVStream_BuildKeyframe( byte *buf, int bufSize ) {
 	Com_Memset( entityBitmask, 0, sizeof( entityBitmask ) );
 	for ( i = 0; i < sv.num_entities; i++ ) {
 		sharedEntity_t *ent = SV_GentityNum( i );
-		if ( ent->r.linked && !( ent->r.svFlags & SVF_NOCLIENT ) ) {
-			entityBitmask[i >> 3] |= ( 1 << ( i & 7 ) );
+		if ( !ent->r.linked ) {
+			continue;
 		}
+		// Normalize s.number to the slot before emitting (see SV_TV_WriteFrame).
+		if ( ent->s.number != i ) {
+			ent->s.number = i;
+		}
+		if ( ent->r.svFlags & SVF_NOCLIENT ) {
+			continue;
+		}
+		entityBitmask[i >> 3] |= ( 1 << ( i & 7 ) );
 	}
 	MSG_WriteData( &msg, entityBitmask, sizeof( entityBitmask ) );
 	for ( i = 0; i < MAX_GENTITIES; i++ ) {

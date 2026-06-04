@@ -401,12 +401,23 @@ void SV_TV_WriteFrame( void ) {
 	// --- Entity encoding ---
 	Com_Memset( curEntityBitmask, 0, sizeof( curEntityBitmask ) );
 
-	// Build current entity bitmask
+	// Build current entity bitmask. We run before SV_SendClientMessages, so stock's
+	// "FIXING ENT->S.NUMBER" normalization (SV_BuildClientSnapshot) hasn't fixed up
+	// entities the game left with s.number != slot yet. The wire identity is
+	// s.number but our bitmask/baseline are slot-indexed and the reader keys by
+	// number, so normalize to the slot here, exactly as stock does.
 	for ( i = 0; i < sv.num_entities; i++ ) {
 		sharedEntity_t *ent = SV_GentityNum( i );
-		if ( ent->r.linked && !( ent->r.svFlags & SVF_NOCLIENT ) ) {
-			curEntityBitmask[i >> 3] |= ( 1 << ( i & 7 ) );
+		if ( !ent->r.linked ) {
+			continue;
 		}
+		if ( ent->s.number != i ) {
+			ent->s.number = i;
+		}
+		if ( ent->r.svFlags & SVF_NOCLIENT ) {
+			continue;
+		}
+		curEntityBitmask[i >> 3] |= ( 1 << ( i & 7 ) );
 	}
 
 	// Write entity bitmask
