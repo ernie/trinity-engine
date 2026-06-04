@@ -713,6 +713,10 @@ void SV_SpawnServer( const char *mapname, qboolean killBots ) {
 	// Auto-start TV recording if enabled
 	SV_TV_AutoStart();
 
+	// (Re)bind the live-TV listener. No-op on a normal map rotation; rebinds
+	// after the 12h SV_Restart's full SV_Shutdown tore it down (idempotent).
+	SV_TVStream_Init();
+
 	// Begin the live stream session for this map (streams warmup live; .tvd
 	// recording still starts later at matchState "active").
 	SV_TV_StreamBegin();

@@ -48,10 +48,20 @@ static void SV_TVStream_DropConsumer( tvConsumer_t *c ) {
 	c->outHead = c->outTail = 0;
 }
 
+// Bind the loopback listener. Called once at process init and again from every
+// SV_SpawnServer, so it must be idempotent: a normal map rotation never runs
+// SV_Shutdown, so the listener (and its connected consumers) is still live —
+// leave it. Only the 12h SV_Restart's full SV_Shutdown closes it, after which
+// the next spawn rebinds. listenFd is >0 only while a socket is open: zero-init
+// is 0, SV_TVStream_Shutdown resets to TVS_INVALID_SOCKET (-1).
 void SV_TVStream_Init( void ) {
 	struct sockaddr_in addr;
 	int fd, i, one = 1;
 	int port;
+
+	if ( tvs.listenFd > 0 ) {
+		return; // already listening (re-entry on a normal map rotation)
+	}
 
 	tvs.listenFd = TVS_INVALID_SOCKET;
 	for ( i = 0; i < MAX_TV_STREAM_CONSUMERS; i++ ) {
