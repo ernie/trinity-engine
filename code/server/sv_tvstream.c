@@ -322,9 +322,12 @@ static int SV_TVStream_BuildKeyframe( byte *buf, int bufSize ) {
 		entityBitmask[i >> 3] |= ( 1 << ( i & 7 ) );
 	}
 	MSG_WriteData( &msg, entityBitmask, sizeof( entityBitmask ) );
+	// force=qtrue: a flagged slot must emit its number even when it equals the null
+	// baseline, else an empty linked entity (e.g. q3dm2 slot 119) is omitted and the
+	// keyframe never populates it -- the reader keeps a zeroed phantom on number 0.
 	for ( i = 0; i < MAX_GENTITIES; i++ ) {
 		if ( !( entityBitmask[i >> 3] & ( 1 << ( i & 7 ) ) ) ) continue;
-		MSG_WriteDeltaEntity( &msg, &nullEntity, &SV_GentityNum( i )->s, qfalse );
+		MSG_WriteDeltaEntity( &msg, &nullEntity, &SV_GentityNum( i )->s, qtrue );
 	}
 	MSG_WriteBits( &msg, MAX_GENTITIES - 1, GENTITYNUM_BITS ); // end marker
 

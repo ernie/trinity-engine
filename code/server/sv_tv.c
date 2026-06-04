@@ -423,7 +423,11 @@ void SV_TV_WriteFrame( void ) {
 	// Write entity bitmask
 	MSG_WriteData( &msg, curEntityBitmask, sizeof( curEntityBitmask ) );
 
-	// Write delta-encoded entities
+	// Write delta-encoded entities. force=qtrue so a bitmask-flagged slot always
+	// emits its number even when nothing changed: an empty linked entity (all
+	// non-number fields zero, e.g. q3dm2 slot 119) would otherwise be omitted from
+	// the wire yet still flagged, and the reader renders it as a zeroed phantom that
+	// clobbers cg_entities[0].
 	for ( i = 0; i < MAX_GENTITIES; i++ ) {
 		entityState_t *es;
 
@@ -432,7 +436,7 @@ void SV_TV_WriteFrame( void ) {
 		}
 
 		es = &SV_GentityNum( i )->s;
-		MSG_WriteDeltaEntity( &msg, &tv.prevEntities[i], es, qfalse );
+		MSG_WriteDeltaEntity( &msg, &tv.prevEntities[i], es, qtrue );
 	}
 
 	// Entity end marker
