@@ -77,12 +77,13 @@ static void signal_handler_fatal( int sig )
 	char msg[32];
 
 	if ( fault_caught ) {
-		printf( "DOUBLE SIGNAL FAULT: Received signal %d, exiting...\n", sig );
+		fprintf( stderr, "DOUBLE SIGNAL FAULT: Received signal %d, exiting...\n", sig );
 		Sys_Exit( 1 ); // abstraction
 	}
 	fault_caught = qtrue;
 
-	printf( "Received signal %d, exiting...\n", sig );
+	// stderr: unbuffered, so the breadcrumb survives the crash.
+	fprintf( stderr, "Received signal %d, exiting...\n", sig );
 
 #ifdef _DEBUG
 	if ( sig == SIGSEGV || sig == SIGILL || sig == SIGBUS )
@@ -100,7 +101,10 @@ static void signal_handler_fatal( int sig )
 #endif
 	SV_Shutdown( msg );
 	VM_Forced_Unload_Done();
-	Sys_Exit( 0 ); // send a 0 to avoid DOUBLE SIGNAL FAULT
+	// Crash = non-zero exit (Restart=on-failure keys off the code).
+	// The deliberate exit-0 lives in Sys_CheckPendingSignal: external
+	// stop requests are not failures.
+	Sys_Exit( 1 );
 }
 
 
