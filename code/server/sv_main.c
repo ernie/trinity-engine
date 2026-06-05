@@ -998,7 +998,8 @@ static void SVC_RemoteCommand( const netadr_t *from ) {
 		{
 			char rconGuid[33] = "";
 			int  i;
-			for ( i = 0; i < sv_maxclients->integer; i++ ) {
+			// svs.clients is NULL after SV_Shutdown (rcon killserver, then any rcon)
+			for ( i = 0; svs.clients && i < sv_maxclients->integer; i++ ) {
 				const client_t *cl = &svs.clients[i];
 				if ( cl->state < CS_CONNECTED ) continue;
 				if ( cl->netchan.remoteAddress.type == NA_BOT ) continue;
@@ -1518,6 +1519,7 @@ void SV_Frame( int msec ) {
 	}
 
 	SV_TVStream_RunListener();
+	SV_ConTap_RunListener();
 
 	if ( com_speeds->integer ) {
 		time_game = Sys_Milliseconds () - startTime;
