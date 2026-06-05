@@ -306,6 +306,7 @@
     <ClCompile Include="..\..\server\sv_main.c" />
     <ClCompile Include="..\..\server\sv_tv.c" />
     <ClCompile Include="..\..\server\sv_tvstream.c" />
+    <ClCompile Include="..\..\server\sv_contap.c" />
     <ClCompile Include="..\..\server\sv_net_chan.c" />
     <ClCompile Include="..\..\server\sv_snapshot.c" />
     <ClCompile Include="..\..\server\sv_world.c" />

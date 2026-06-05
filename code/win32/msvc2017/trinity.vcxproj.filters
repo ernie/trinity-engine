@@ -160,6 +160,9 @@
     <ClCompile Include="..\..\server\sv_tvstream.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\server\sv_contap.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\server\sv_net_chan.c">
       <Filter>Source Files</Filter>
     </ClCompile>

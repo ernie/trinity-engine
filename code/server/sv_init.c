@@ -717,6 +717,10 @@ void SV_SpawnServer( const char *mapname, qboolean killBots ) {
 	// after the 12h SV_Restart's full SV_Shutdown tore it down (idempotent).
 	SV_TVStream_Init();
 
+	// Console tap: same lifecycle. Bound + published before this spawn
+	// answers getstatus, so discovery never reads a stale port.
+	SV_ConTap_Init();
+
 	// Begin the live stream session for this map (streams warmup live; .tvd
 	// recording still starts later at matchState "active").
 	SV_TV_StreamBegin();
@@ -933,6 +937,7 @@ void SV_Shutdown( const char *finalmsg ) {
 
 	SV_TV_StreamEnd();
 	SV_TVStream_Shutdown();
+	SV_ConTap_Shutdown();
 
 	Com_Printf( "----- Server Shutdown (%s) -----\n", finalmsg );
 

@@ -487,6 +487,31 @@ void SV_TVStream_EndStream( void );   // stream session end: finalize segment + 
 qboolean SV_TVStream_IsActive( void );  // is a stream session live?
 void SV_TVStream_ForceKeyframe( void ); // emit a keyframe on the next frame
 
+// Console tap (sv_contap.c) — loopback TCP stream of raw console
+// output; kernel-assigned port published via sv_conPort serverinfo.
+#define MAX_CONTAP_CONSUMERS 4
+#define CONTAP_OUTBUF_SIZE   (64*1024) // per-consumer queue; overflow => drop consumer
+
+typedef struct {
+	int  fd;       // socket fd, or -1 if slot unused
+	byte out[CONTAP_OUTBUF_SIZE];
+	int  outHead;  // first unsent byte
+	int  outTail;  // one past last queued byte
+} conTapConsumer_t;
+
+typedef struct {
+	int              listenFd;   // listening socket: >0 open, 0 never-initialized, -1 closed
+	int              listenPort; // kernel-assigned; published as sv_conPort
+	conTapConsumer_t consumers[MAX_CONTAP_CONSUMERS];
+} conTapState_t;
+
+extern conTapState_t contap;
+
+void SV_ConTap_Init( void );        // idempotent; called from SV_SpawnServer
+void SV_ConTap_Shutdown( void );    // close listener + consumers, zero sv_conPort
+void SV_ConTap_RunListener( void ); // accept + pump (per frame)
+// SV_ConTap_Print (the Com_Printf hook) is in qcommon.h.
+
 extern cvar_t *sv_tvAuto;
 extern cvar_t *sv_tvAutoMinPlayers;
 extern cvar_t *sv_tvAutoMinPlayersSecs;

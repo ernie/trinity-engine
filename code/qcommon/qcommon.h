@@ -1284,6 +1284,10 @@ void	Sys_SetClipboardBitmap( const byte *bitmap, int length );
 
 void	Sys_Print( const char *msg );
 
+// Console-tap hook (sv_contap.c), fed by Com_Printf beside Sys_Print.
+// No-op until the tap is bound; never prints (runs inside Com_Printf).
+void	SV_ConTap_Print( const char *msg );
+
 // dedicated console status, win32-only at the moment
 void	QDECL Sys_SetStatus( const char *format, ...) __attribute__ ((format (printf, 1, 2)));
 

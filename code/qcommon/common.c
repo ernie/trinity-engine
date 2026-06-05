@@ -205,6 +205,9 @@ void FORMAT_PRINTF(1, 2) QDECL Com_Printf( const char *fmt, ... ) {
 	// echo to dedicated console and early console
 	Sys_Print( msg );
 
+	// console tap (raw, pre-ANSI)
+	SV_ConTap_Print( msg );
+
 	// logfile
 	if ( com_logfile && com_logfile->integer ) {
 		// TTimo: only open the qconsole.log if the filesystem is in an initialized state
