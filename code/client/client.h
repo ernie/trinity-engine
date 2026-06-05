@@ -228,6 +228,10 @@ typedef struct {
 	qboolean		bootstrapped;      // true once the first keyframe segment has built a snapshot
 	qboolean		needInitialCatchUp; // WASM: trim the boot-time backlog once steady play begins (see CL_TV_NextLiveFrame)
 	qboolean		liveClockResync;    // WASM: the initial catch-up jumped serverTime; snap the clock after the pump (CL_TV_ResyncLiveClock)
+	int				effKeepMs;          // WASM: current adaptive jitter cushion, TV_CATCHUP_KEEP_MS..MAX (CL_TV_AdjustLiveClock)
+	int				lastKeepAdapt;      // WASM: cls.realtime of the last cushion grow/relax step
+	qboolean		starved;            // WASM: underrun edge-trigger (set on STARVE, cleared on the next applied frame)
+	float			clockSkewAccum;     // WASM: sub-ms accumulator for the adaptive-clock rate nudge
 	byte			segIn[TVD_SEGIN_MAX];            // one live segment's compressed payload (raw, pre-zstd)
 	byte			segOut[TV_SEG_UNCOMPRESSED_MAX]; // one live segment's decompressed frames
 	size_t			segOutLen;   // decompressed bytes available in segOut (current segment)
@@ -805,6 +809,9 @@ void CL_TV_ReadFrame( void );
 qboolean CL_TV_NextLiveFrame( void );
 void CL_TV_BuildSnapshot( void );
 void CL_TV_ResyncLiveClock( void );
+#ifdef __EMSCRIPTEN__
+void CL_TV_AdjustLiveClock( void );
+#endif
 void CL_TV_Seek( int targetTime );
 
 // base backend functions

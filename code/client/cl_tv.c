@@ -51,6 +51,7 @@ static qboolean CL_TV_LiveMapChange( void );
 static qboolean CL_TV_MapAvailable( const char *mapname );
 #ifdef __EMSCRIPTEN__
 static void CL_TV_OpenLive_f( void );
+static void CL_TV_Resync_f( void );
 #endif
 
 
@@ -124,16 +125,20 @@ static int TVRing_SegmentKeyframeTime( size_t p ) {
 		| ( (unsigned int)hdr[6] << 16 ) | ( (unsigned int)hdr[7] << 24 ) );
 }
 
-// Browser-side jitter cushion (server msec) the catch-up leaves buffered.
-// Deliberately decoupled from the relay's broadcast delay (which absorbs
-// server-side jitter); this only covers client-side network/decode hitches, e.g.
-// iOS radio/timer throttling. Must clear the keyframe interval
-// (sv_tvLiveKeyframeMsec, default 2000): TVRing_CatchUp keeps whole segments, so
-// a value below the interval leaves zero slack past the playing segment and any
-// mobile hiccup underruns the ring (freeze-then-keyframe-snap). 3000 keeps the
-// segment ~one extra keyframe back (~4s realized headroom at the 2s default)
-// without re-coupling to the relay delay.
-#define TV_CATCHUP_KEEP_MS 3000
+// Browser-side jitter cushion (server msec) the catch-up leaves buffered. The
+// BASE of an adaptive range (tvPlay.effKeepMs): the steady-state clock controller
+// (CL_TV_AdjustLiveClock) holds the render edge ~effKeepMs behind the newest
+// buffered segment, and repeated underruns grow effKeepMs a segment at a time up
+// to TV_CATCHUP_KEEP_MAX (relaxing back after a quiet spell). Deliberately
+// decoupled from the relay's broadcast delay (which absorbs server-side jitter);
+// this only covers client-side network/decode hitches, e.g. iOS radio/timer
+// throttling. Must clear the keyframe interval (sv_tvLiveKeyframeMsec): TVRing_CatchUp
+// keeps whole segments, so a base below the interval leaves zero slack past the
+// playing segment. 2000 = ~2 segments at the 1s keyframe default.
+#define TV_CATCHUP_KEEP_MS  2000   // base / floor of the adaptive cushion
+#define TV_CATCHUP_KEEP_MAX 5000   // ceiling after repeated underruns
+#define TV_KEEP_STEP_MS     1000   // grow/relax the cushion one ~keyframe at a time
+#define TV_KEEP_DECAY_MS    30000  // relax one step after this long with no underrun
 
 // One-shot catch-up after a stall: drop whole stale segments so the play cursor
 // sits ~TV_CATCHUP_KEEP_MS behind the newest buffered segment, discarding the
@@ -174,6 +179,24 @@ static int TVRing_CatchUp( int keepMs ) {
 	}
 	tvRing.tail = tvRing.cursor;
 	return skipped;
+}
+
+// Keyframe serverTime of the newest complete segment buffered ahead of the play
+// cursor (0 if none). The live edge the adaptive clock controller measures
+// headroom against. Same forward scan as TVRing_CatchUp's first loop.
+static int TVRing_NewestKeyframeTime( void ) {
+	size_t scan = tvRing.cursor, newest = 0;
+	int haveNewest = 0;
+	for ( ;; ) {
+		size_t end = TVRing_SegmentEnd( scan );
+		if ( !end ) {
+			break;
+		}
+		newest = scan;
+		haveNewest = 1;
+		scan = end;
+	}
+	return haveNewest ? TVRing_SegmentKeyframeTime( newest ) : 0;
 }
 
 /*
@@ -344,6 +367,9 @@ void CL_TV_Init( void ) {
 	// Browser live entry: the JS loader feeds the stream into the byte-feed ring,
 	// then runs this (replacing "+demo live.tvd" — live no longer uses a file).
 	Cmd_AddCommand( "tv_openlive", CL_TV_OpenLive_f );
+	// Re-arm the one-shot catch-up: the React shell runs this on tab foreground so a
+	// throttled-tab backlog snaps back to ~the cushion instead of replaying it.
+	Cmd_AddCommand( "tv_resync", CL_TV_Resync_f );
 #endif
 }
 
@@ -694,6 +720,12 @@ static qboolean CL_TV_OpenLive( const char *filename ) {
 	tvPlay.segCursor = 0;
 	tvPlay.awaitingAssets = qfalse;
 	tvPlay.awaitingHeader = qfalse;
+#ifdef __EMSCRIPTEN__
+	tvPlay.effKeepMs = TV_CATCHUP_KEEP_MS;   // adaptive cushion starts at the base
+	tvPlay.lastKeepAdapt = cls.realtime;
+	tvPlay.starved = qfalse;
+	tvPlay.clockSkewAccum = 0.0f;
+#endif
 	Cvar_Set( "cl_tvMapName", mapname );
 	Cvar_Set( "cl_tvStreamClosed", "0" );
 	Cvar_Set( "cl_tvLiveEnded", "0" );
@@ -799,6 +831,20 @@ static void CL_TV_OpenLive_f( void ) {
 	cls.state = CA_CONNECTED;
 	clc.firstDemoFrameSkipped = qfalse;
 	CL_InitDownloads();
+}
+
+// Re-arm the one-shot backlog catch-up. The React shell runs `tv_resync` on tab
+// foreground: a throttled tab accumulates a ring backlog, and this trims it back
+// to ~the cushion (and snaps the clock) on the next frame rather than grinding
+// through it. Inert unless a live stream is playing and not mid map-change.
+static void CL_TV_Resync_f( void ) {
+	if ( !tvPlay.active || !tvPlay.live ) {
+		return;
+	}
+	if ( tvPlay.awaitingAssets || tvPlay.awaitingHeader ) {
+		return;   // a map change owns the clock right now; don't disturb it
+	}
+	tvPlay.needInitialCatchUp = qtrue;
 }
 #endif
 
@@ -1522,6 +1568,98 @@ void CL_TV_ResyncLiveClock( void ) {
 	cl.oldFrameServerTime = cl.snap.serverTime;
 }
 
+#ifdef __EMSCRIPTEN__
+// Adaptive clock-rate limits for CL_TV_AdjustLiveClock.
+#define TV_CLOCK_MAX_RATE 0.05f   // ±5% clock skew: below the perceptual threshold
+#define TV_CLOCK_DEADBAND 200     // ms of headroom error tolerated before correcting
+#define TV_CLOCK_GAIN     0.0005f // skew rate per ms of error past the deadband
+
+/*
+===============
+CL_TV_AdjustLiveClock
+
+Steady-state live clock controller (WASM live only). Holds the render edge
+~tvPlay.effKeepMs behind the newest buffered segment by nudging serverTimeDelta a
+few percent per frame — an imperceptible speed change that drains or refills the
+jitter cushion smoothly, instead of the visible keyframe snap a hard reseek
+causes. Only smooths sub-cushion drift; large backlogs are left to the one-shot
+segment-skip catch-up (boot / map change / foreground re-arm). Also relaxes the
+adaptive cushion back toward the base after a quiet spell. Called once per applied
+live frame from CL_SetCGameTime (CL_AdjustTimeDelta is inert for demo-backed
+playback, so there is no incumbent drift to fight).
+===============
+*/
+void CL_TV_AdjustLiveClock( void ) {
+	int newestKf, headroom, err;
+	float rate;
+
+	if ( !tvPlay.bootstrapped ) {
+		return;
+	}
+
+	// Relax the cushion one step once underruns have stopped for a while.
+	if ( tvPlay.effKeepMs > TV_CATCHUP_KEEP_MS
+		&& cls.realtime - tvPlay.lastKeepAdapt > TV_KEEP_DECAY_MS ) {
+		tvPlay.effKeepMs -= TV_KEEP_STEP_MS;
+		if ( tvPlay.effKeepMs < TV_CATCHUP_KEEP_MS ) {
+			tvPlay.effKeepMs = TV_CATCHUP_KEEP_MS;
+		}
+		tvPlay.lastKeepAdapt = cls.realtime;
+	}
+
+	newestKf = TVRing_NewestKeyframeTime();
+	if ( !newestKf ) {
+		return;   // nothing buffered ahead to measure against
+	}
+	headroom = newestKf - cl.serverTime;   // >0: live edge ahead of us (slack)
+	err = headroom - tvPlay.effKeepMs;     // >0: too much slack -> speed up to drain
+	if ( err > TV_CLOCK_DEADBAND ) {
+		rate = ( err - TV_CLOCK_DEADBAND ) * TV_CLOCK_GAIN;
+	} else if ( err < -TV_CLOCK_DEADBAND ) {
+		rate = ( err + TV_CLOCK_DEADBAND ) * TV_CLOCK_GAIN;
+	} else {
+		return;   // within deadband: run at wall-clock rate
+	}
+	if ( rate > TV_CLOCK_MAX_RATE ) {
+		rate = TV_CLOCK_MAX_RATE;
+	} else if ( rate < -TV_CLOCK_MAX_RATE ) {
+		rate = -TV_CLOCK_MAX_RATE;
+	}
+	// serverTime = realtime + serverTimeDelta, so a small per-frame delta nudge
+	// makes serverTime advance rate-fraction faster/slower than the wall clock.
+	// Accumulate the fractional milliseconds; apply whole ms to the integer delta.
+	tvPlay.clockSkewAccum += rate * (float)cls.frametime;
+	if ( tvPlay.clockSkewAccum >= 1.0f || tvPlay.clockSkewAccum <= -1.0f ) {
+		int whole = (int)tvPlay.clockSkewAccum;
+		cl.serverTimeDelta += whole;
+		tvPlay.clockSkewAccum -= (float)whole;
+	}
+}
+
+// Record a steady-state ring underrun: grow the adaptive cushion one step (capped)
+// so the next refill aims deeper. Edge-triggered via tvPlay.starved — one bump per
+// starvation episode — and ignored during boot / map-change gaps, which aren't
+// jitter underruns.
+static void CL_TV_NoteUnderrun( void ) {
+	if ( tvPlay.starved ) {
+		return;   // already counted this episode
+	}
+	tvPlay.starved = qtrue;
+	if ( !tvPlay.bootstrapped || tvPlay.needInitialCatchUp
+		|| tvPlay.awaitingAssets || tvPlay.awaitingHeader ) {
+		return;
+	}
+	if ( tvPlay.effKeepMs < TV_CATCHUP_KEEP_MAX ) {
+		tvPlay.effKeepMs += TV_KEEP_STEP_MS;
+		if ( tvPlay.effKeepMs > TV_CATCHUP_KEEP_MAX ) {
+			tvPlay.effKeepMs = TV_CATCHUP_KEEP_MAX;
+		}
+		Com_DPrintf( "TV: underrun, cushion -> %dms\n", tvPlay.effKeepMs );
+	}
+	tvPlay.lastKeepAdapt = cls.realtime;
+}
+#endif
+
 
 /*
 ===============
@@ -1602,7 +1740,7 @@ static qboolean CL_TV_LiveMapChange( void ) {
 	// compounding across maps without dropping to the jittery live edge. (The other
 	// catch-up site is the initial boot — see CL_TV_NextLiveFrame.)
 	{
-		int keepMs = TV_CATCHUP_KEEP_MS;
+		int keepMs = tvPlay.effKeepMs > 0 ? tvPlay.effKeepMs : TV_CATCHUP_KEEP_MS;
 		int skipped = TVRing_CatchUp( keepMs );
 		if ( skipped ) {
 			Com_DPrintf( "TV: map-change catch-up skipped %d segment(s), kept ~%dms buffered\n", skipped, keepMs );
@@ -1718,7 +1856,7 @@ qboolean CL_TV_NextLiveFrame( void ) {
 	// the caught-up keyframe re-syncs. Retries each frame until it skips (backlog
 	// lands a frame or two in); the TVSEG_OK path clears it if there's nothing to skip.
 	if ( tvPlay.needInitialCatchUp ) {
-		int keepMs = TV_CATCHUP_KEEP_MS;
+		int keepMs = tvPlay.effKeepMs > 0 ? tvPlay.effKeepMs : TV_CATCHUP_KEEP_MS;
 		int skipped = TVRing_CatchUp( keepMs );
 		if ( skipped ) {
 			tvPlay.needInitialCatchUp = qfalse;
@@ -1746,6 +1884,9 @@ qboolean CL_TV_NextLiveFrame( void ) {
 					tvPlay.bootstrapped = qtrue;
 					CL_TV_LiveBootstrap();
 				}
+#ifdef __EMSCRIPTEN__
+				tvPlay.starved = qfalse;   // a frame applied: end any underrun episode
+#endif
 				return qtrue;
 			}
 			// malformed / trailing padding: treat segment as exhausted
@@ -1757,6 +1898,9 @@ qboolean CL_TV_NextLiveFrame( void ) {
 			if ( r == TVSEG_ENDED ) { tvPlay.atEnd = qtrue; return qfalse; }
 			if ( r == TVSEG_STARVED ) {
 				if ( cl_tvStreamClosed->integer ) { tvPlay.atEnd = qtrue; }
+#ifdef __EMSCRIPTEN__
+				else { CL_TV_NoteUnderrun(); }   // ring ran dry mid-play: grow the cushion
+#endif
 				return qfalse;
 			}
 			if ( r == TVSEG_NEWSTREAM ) {

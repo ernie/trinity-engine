@@ -1397,6 +1397,13 @@ void CL_SetCGameTime( void ) {
 				tvPlay.liveClockResync = qfalse;
 				CL_TV_ResyncLiveClock();   // initial catch-up jumped serverTime; snap the clock to it
 			}
+#ifdef __EMSCRIPTEN__
+			else {
+				// Steady state: gently hold the render edge ~the cushion behind the
+				// live edge (drains/refills smoothly instead of snapping).
+				CL_TV_AdjustLiveClock();
+			}
+#endif
 			if ( tvPlay.bootstrapped ) {
 				Cvar_SetIntegerValue( "cl_tvTime", tvPlay.serverTime - tvPlay.firstServerTime );
 			}
