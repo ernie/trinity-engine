@@ -56,7 +56,7 @@ void SV_TV_Init( void ) {
 	sv_tvLive = Cvar_Get( "sv_tvLive", "0", CVAR_ARCHIVE );
 	Cvar_SetDescription( sv_tvLive, "Broadcast the in-progress match over a loopback TCP socket (127.0.0.1:net_port) for live browser spectating. 0 = off." );
 
-	sv_tvLiveKeyframeMsec = Cvar_Get( "sv_tvLiveKeyframeMsec", "2000", CVAR_ARCHIVE );
+	sv_tvLiveKeyframeMsec = Cvar_Get( "sv_tvLiveKeyframeMsec", "1000", CVAR_ARCHIVE_ND );
 	Cvar_SetDescription( sv_tvLiveKeyframeMsec, "Live-stream keyframe interval in milliseconds. Lower = lower late-join latency, more bandwidth." );
 }
 
