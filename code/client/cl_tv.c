@@ -36,7 +36,6 @@ cvar_t *cl_tvStreamClosed;
 cvar_t *cl_tvLiveEnded;
 cvar_t *cl_tvMapSerial;
 cvar_t *cl_tvMapName;
-cvar_t *cl_tvDelay;
 cvar_t *cl_tvPendingMap;
 cvar_t *cl_tvAssetsReady;
 
@@ -125,10 +124,16 @@ static int TVRing_SegmentKeyframeTime( size_t p ) {
 		| ( (unsigned int)hdr[6] << 16 ) | ( (unsigned int)hdr[7] << 24 ) );
 }
 
-// Fallback keep-depth (server msec) used only when cl_tvDelay hasn't been set yet
-// (the React shell plumbs the relay's live_delay_seconds into it; the test harness
-// has no React, so it falls back to this).
-#define TV_CATCHUP_KEEP_FALLBACK_MS 5000
+// Browser-side jitter cushion (server msec) the catch-up leaves buffered.
+// Deliberately decoupled from the relay's broadcast delay (which absorbs
+// server-side jitter); this only covers client-side network/decode hitches, e.g.
+// iOS radio/timer throttling. Must clear the keyframe interval
+// (sv_tvLiveKeyframeMsec, default 2000): TVRing_CatchUp keeps whole segments, so
+// a value below the interval leaves zero slack past the playing segment and any
+// mobile hiccup underruns the ring (freeze-then-keyframe-snap). 3000 keeps the
+// segment ~one extra keyframe back (~4s realized headroom at the 2s default)
+// without re-coupling to the relay delay.
+#define TV_CATCHUP_KEEP_MS 3000
 
 // One-shot catch-up after a stall: drop whole stale segments so the play cursor
 // sits ~TV_CATCHUP_KEEP_MS behind the newest buffered segment, discarding the
@@ -329,10 +334,6 @@ void CL_TV_Init( void ) {
 	// download, and on first open. A change here brackets the transition with the
 	// later cl_tvMapSerial bump.
 	cl_tvMapName = Cvar_Get( "cl_tvMapName", "", CVAR_ROM );
-	// cl_tvDelay: relay's viewer delay in ms, set by the React shell from
-	// live_delay_seconds. The map-change catch-up trims a download backlog down to
-	// this buffer depth, so the delay stays stable across reloads (no derivation).
-	cl_tvDelay = Cvar_Get( "cl_tvDelay", "0", 0 );
 	// cl_tvPendingMap: engine writes the next map's name when its pk3 isn't in the
 	// VFS; the JS loader polls it, fetches the pk3, then sets cl_tvAssetsReady=1 so
 	// the engine FS_Restarts and completes the in-place map change.
@@ -1596,12 +1597,12 @@ static qboolean CL_TV_LiveMapChange( void ) {
 
 #ifdef __EMSCRIPTEN__
 	// Catch up the backlog the pk3 download accumulated: the relay kept feeding the
-	// new session's segments while we waited, so trim the excess (keeping ~the delay
-	// buffered) rather than replaying from the now-stale first keyframe. Keeps the
-	// ~5s delay from compounding across maps without dropping to the jittery live
-	// edge. (The other catch-up site is the initial boot — see CL_TV_NextLiveFrame.)
+	// new session's segments while we waited, so trim to the small jitter cushion
+	// rather than replaying from the now-stale first keyframe. Keeps the lag from
+	// compounding across maps without dropping to the jittery live edge. (The other
+	// catch-up site is the initial boot — see CL_TV_NextLiveFrame.)
 	{
-		int keepMs = cl_tvDelay->integer > 0 ? cl_tvDelay->integer : TV_CATCHUP_KEEP_FALLBACK_MS;
+		int keepMs = TV_CATCHUP_KEEP_MS;
 		int skipped = TVRing_CatchUp( keepMs );
 		if ( skipped ) {
 			Com_DPrintf( "TV: map-change catch-up skipped %d segment(s), kept ~%dms buffered\n", skipped, keepMs );
@@ -1713,11 +1714,11 @@ qboolean CL_TV_NextLiveFrame( void ) {
 	}
 #ifdef __EMSCRIPTEN__
 	// Boot analogue of the map-change catch-up: once the boot-time backlog reaches
-	// the ring, trim to ~the delay and drop the stale bootstrap segment so the
-	// caught-up keyframe re-syncs. Retries each frame until it skips (backlog lands
-	// a frame or two in); the TVSEG_OK path clears it if there's nothing to skip.
+	// the ring, trim to the jitter cushion and drop the stale bootstrap segment so
+	// the caught-up keyframe re-syncs. Retries each frame until it skips (backlog
+	// lands a frame or two in); the TVSEG_OK path clears it if there's nothing to skip.
 	if ( tvPlay.needInitialCatchUp ) {
-		int keepMs = cl_tvDelay->integer > 0 ? cl_tvDelay->integer : TV_CATCHUP_KEEP_FALLBACK_MS;
+		int keepMs = TV_CATCHUP_KEEP_MS;
 		int skipped = TVRing_CatchUp( keepMs );
 		if ( skipped ) {
 			tvPlay.needInitialCatchUp = qfalse;
