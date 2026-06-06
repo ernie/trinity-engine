@@ -276,7 +276,12 @@ static void SV_MapRestart_f( void ) {
 	if ( sv_maxclients->modified || sv_gametype->modified || sv_pure->modified ) {
 		char	mapname[MAX_QPATH];
 
-		Com_Printf( "variable change -- restarting.\n" );
+		// Name the culprit: this full reload kicks every client, and the
+		// flags have been observed dirty with no apparent setter.
+		Com_Printf( "variable change -- restarting. (sv_maxclients mod=%d val=%s latched=%s | g_gametype mod=%d val=%s latched=%s | sv_pure mod=%d val=%s latched=%s)\n",
+			sv_maxclients->modified, sv_maxclients->string, sv_maxclients->latchedString ? sv_maxclients->latchedString : "-",
+			sv_gametype->modified, sv_gametype->string, sv_gametype->latchedString ? sv_gametype->latchedString : "-",
+			sv_pure->modified, sv_pure->string, sv_pure->latchedString ? sv_pure->latchedString : "-" );
 		// restart the map the slow way
 		Q_strncpyz( mapname, Cvar_VariableString( "mapname" ), sizeof( mapname ) );
 
