@@ -309,6 +309,13 @@ static void SV_MapRestart_f( void ) {
 	// make sure that level time is not zero
 	//sv.time = sv.time ? sv.time : 8;
 
+	// Per-match demo boundary: tournament rotates matches via map_restart,
+	// so finalize the finished match's recording while its g_matchUUID is
+	// still current, and re-arm so the next "active" starts a fresh file
+	// under the new uuid. The live stream session rides through untouched.
+	SV_TV_FinalizeRecording();
+	SV_TV_AutoStart();
+
 	SV_RestartGameProgs();
 
 	// run a few frames to allow everything to settle

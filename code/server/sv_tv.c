@@ -687,6 +687,26 @@ void SV_TV_StopRecord( qboolean discard ) {
 
 /*
 ===============
+SV_TV_FinalizeRecording
+
+Stop an active recording, discarding auto-recordings that never met the
+player threshold. Shared boundary for map change, shutdown, and
+map_restart (tournament match rotation).
+===============
+*/
+void SV_TV_FinalizeRecording( void ) {
+	if ( tv.recording && tv.autoRecording && !tv.keepRecording
+		 && sv_tvAutoMinPlayers->integer > 0 ) {
+		Com_Printf( "TV: Auto-recording did not meet player threshold, discarding.\n" );
+		SV_TV_StopRecord( qtrue );
+	} else {
+		SV_TV_StopRecord( qfalse );
+	}
+}
+
+
+/*
+===============
 SV_TV_StopRecord_f
 ===============
 */

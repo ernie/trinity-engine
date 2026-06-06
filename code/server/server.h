@@ -718,6 +718,7 @@ void SV_TV_StartRecord_f( void );
 void SV_TV_StopRecord_f( void );
 void SV_TV_WriteFrame( void );
 void SV_TV_StopRecord( qboolean discard );
+void SV_TV_FinalizeRecording( void );  // stop + threshold-based save/discard (match boundary)
 void SV_TV_ConfigstringChanged( int index );
 void SV_TV_CaptureServerCommand( int target, const char *cmd );
 void SV_TV_AutoStart( void );
