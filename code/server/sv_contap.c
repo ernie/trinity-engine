@@ -76,7 +76,6 @@ void SV_ConTap_Init( void ) {
 	}
 
 	sv_conTap = Cvar_Get( "sv_conTap", "0", CVAR_ARCHIVE );
-	// SERVERINFO|ROM, engine-set at runtime: the mapname pattern.
 	sv_conPort = Cvar_Get( "sv_conPort", "0", CVAR_SERVERINFO | CVAR_ROM );
 
 	if ( !sv_conTap->integer ) {
