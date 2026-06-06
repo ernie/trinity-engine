@@ -64,6 +64,7 @@ static fileHandle_t com_journalFile = FS_INVALID_HANDLE ; // events are written 
 fileHandle_t com_journalDataFile = FS_INVALID_HANDLE; // config files are written here
 
 cvar_t	*com_viewlog;
+static cvar_t *com_writeConfig;
 cvar_t	*com_speeds;
 cvar_t	*com_developer;
 cvar_t	*com_dedicated;
@@ -3915,6 +3916,8 @@ void Com_Init( char *commandLine ) {
 	Cvar_SetDescription( com_showtrace, "Debugging tool that prints out trace information." );
 	com_viewlog = Cvar_Get( "viewlog", "0", 0 );
 	Cvar_SetDescription( com_viewlog, "Toggle the display of the startup console window over the game screen." );
+	com_writeConfig = Cvar_Get( "com_writeConfig", "1", 0 );
+	Cvar_SetDescription( com_writeConfig, "Write archived cvars back to " Q3CONFIG_CFG ". Disable on multi-instance dedicated hosts that share a homepath, where the write-back cross-contaminates instances." );
 	com_speeds = Cvar_Get( "com_speeds", "0", 0 );
 	Cvar_SetDescription( com_speeds, "Prints speed information per frame to the console. Used for debugging." );
 	com_cameraMode = Cvar_Get( "com_cameraMode", "0", CVAR_CHEAT );
@@ -4107,6 +4110,10 @@ void Com_WriteConfiguration( void ) {
 		return;
 	}
 	cvar_modifiedFlags &= ~CVAR_ARCHIVE;
+
+	if ( !com_writeConfig->integer ) {
+		return;
+	}
 
 	Com_WriteConfigToFile( Q3CONFIG_CFG );
 
