@@ -61,10 +61,25 @@ and seeking via replay from the beginning.
 - `sv_tvAutoMinPlayersSecs` — seconds the threshold must be continuously met (0 = instantaneous)
 - `sv_tvDownload` — notify clients to download the completed demo via HTTP at map change (requires `sv_dlURL`)
 - `cl_tvDownload` — opt in to automatic TV demo downloads from the server
-- Client-side viewpoint switching and seek during playback
     - 0 = No download, ever
     - 1 = Offer download. Cgame-controlled handling. For Trinity, show a dialog. 1 = default to decline after `cg_tvdTimeout` seconds
     - 2 = Offer download. Cgame-controlled handling. For Trinity, show a dialog. 2 = default to accept after `cg_tvdTimeout` seconds
+- Client-side viewpoint switching and seek during playback
+
+#### Live streaming
+
+The same TV capture can be broadcast while the match is being played.
+With `sv_tvLive 1` the dedicated server offers the in-progress match as
+a `TVL1` byte stream on a loopback TCP socket (same port number as the
+UDP game port); a consumer such as the
+[Trinity tracker](https://github.com/ernie/trinity-tracker) relays it to
+browser viewers, where this engine's WASM build plays it live (`cl_tv`).
+The stream survives map changes on one connection — each map session
+ends with an end marker and the next starts with a fresh header.
+
+- `sv_tvLive` — offer the live TVL1 stream tap (default `0`)
+- `sv_tvLiveKeyframeMsec` — keyframe cadence for the live stream, in ms (default `1000`); the relay derives its viewer holdback from it
+- `tv_resync` — (WASM build) command the embedding page runs on tab foreground, so a throttled tab's backlog snaps back to the playback cushion instead of replaying
 
 ### Web Demo Player (Emscripten/WebAssembly)
 
@@ -83,6 +98,11 @@ Requires the [Emscripten SDK](https://emscripten.org/docs/getting_started/downlo
 ### Server Lifecycle Callbacks
 
 Game DLL callbacks for server startup and shutdown events, enabling integration with external tooling for statistics tracking and server management.
+
+### Dedicated-Server Operations
+
+- `sv_conTap` — with `1`, stream the server console over a loopback TCP socket on a kernel-assigned port, advertised read-only in serverinfo as `sv_conPort` (`0` = no tap offered). The Trinity tracker consumes this for `trinity console`.
+- `com_writeConfig` — with `0`, never write archived cvars back to `q3config.cfg` (`q3config_server.cfg` on dedicated servers). Disable on multi-instance dedicated hosts that share a homepath, where the write-back cross-contaminates instances.
 
 ## Game Data
 
