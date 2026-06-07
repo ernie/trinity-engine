@@ -305,9 +305,9 @@ static void SV_Startup( void ) {
 		Com_Error( ERR_FATAL, "SV_Startup: svs.initialized" );
 	}
 
-	SV_AllocClients( sv_maxclients->integer );
-
-	sv_maxclients->modified = qfalse;
+	// SV_BoundMaxClients flushes a boot-time latched value; sizing from
+	// sv_maxclients->integer directly allocated the default for good.
+	SV_AllocClients( SV_BoundMaxClients( 1 ) );
 
 	svs.initialized = qtrue;
 
