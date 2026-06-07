@@ -767,6 +767,11 @@ static qboolean CL_TV_OpenLive( const char *filename ) {
 	}
 	clc.clientNum = tvPlay.viewpoint;
 	VectorCopy( tvPlay.players[tvPlay.viewpoint].origin, tvPlay.viewOrigin );
+
+	// Mark the bootstrap "cs" dump executed (CG_INIT reads the populated
+	// gameState itself; replaying it post-init re-fires change handlers).
+	// Before BuildSnapshot, so its injected scores command still executes.
+	clc.lastExecutedServerCommand = clc.serverCommandSequence;
 	CL_TV_BuildSnapshot();
 
 #ifdef __EMSCRIPTEN__
@@ -1269,9 +1274,9 @@ static void CL_TV_ParseFrame( byte *data, int len, qboolean isKeyframe ) {
 
 			CL_TV_UpdateConfigstring( csIndex, csData, csLen );
 
-			// Notify cgame so it registers new models/sounds/etc.
-			// Skip during seek (tv_seek_sync handles bulk re-registration).
-			if ( !tvPlay.seeking ) {
+			// Notify cgame so it registers new models/sounds/etc. Skip during
+			// seek and post-catch-up reconcile (tv_seek_sync bulk re-syncs).
+			if ( !tvPlay.seeking && !tvPlay.reconcileSilent ) {
 				CL_TV_SendConfigstring( csIndex, csData, csLen );
 			}
 		}
@@ -1287,7 +1292,7 @@ static void CL_TV_ParseFrame( byte *data, int len, qboolean isKeyframe ) {
 				continue; // already empty
 			}
 			CL_TV_UpdateConfigstring( i, "", 0 );
-			if ( !tvPlay.seeking ) {
+			if ( !tvPlay.seeking && !tvPlay.reconcileSilent ) {
 				CL_TV_SendConfigstring( i, "", 0 );
 			}
 		}
@@ -1780,6 +1785,9 @@ static qboolean CL_TV_LiveMapChange( void ) {
 	clc.clientNum = tvPlay.viewpoint;
 	VectorCopy( tvPlay.players[tvPlay.viewpoint].origin, tvPlay.viewOrigin );
 
+	// Swallow the keyframe's "cs" diff dump — see CL_TV_OpenLive's bootstrap.
+	clc.lastExecutedServerCommand = clc.serverCommandSequence;
+
 	// 5. Build snapshot #1 BEFORE the cgame re-init, mirroring CL_TV_OpenLive's
 	//    pre-return build. CG_INIT must see serverMessageSequence already past this
 	//    snapshot (it sets processedSnapshotNum to it) and serverCommandSequence at
@@ -1861,6 +1869,7 @@ qboolean CL_TV_NextLiveFrame( void ) {
 		if ( skipped ) {
 			tvPlay.needInitialCatchUp = qfalse;
 			tvPlay.liveClockResync = qtrue;        // serverTime jumps below — snap the clock after the pump
+			tvPlay.reconcileSilent = qtrue;        // the reconciling keyframe replays skipped history — no per-cs events
 			tvPlay.segCursor = tvPlay.segOutLen;   // abandon the stale bootstrap segment
 			Com_DPrintf( "TV: initial catch-up skipped %d segment(s), kept ~%dms buffered\n", skipped, keepMs );
 		}
@@ -1879,6 +1888,11 @@ qboolean CL_TV_NextLiveFrame( void ) {
 				tvPlay.segCursor += 4;
 				CL_TV_ParseFrame( tvPlay.segOut + tvPlay.segCursor, (int)fsz, isKeyframe );
 				tvPlay.segCursor += fsz;
+				if ( isKeyframe && tvPlay.reconcileSilent ) {
+					// deliver the suppressed changes as state, not events
+					tvPlay.reconcileSilent = qfalse;
+					CL_TV_WriteCommand( va( "tv_seek_sync %i", tvPlay.viewpoint ) );
+				}
 				if ( !tvPlay.bootstrapped ) {
 					tvPlay.firstServerTime = tvPlay.serverTime;
 					tvPlay.bootstrapped = qtrue;

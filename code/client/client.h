@@ -228,6 +228,7 @@ typedef struct {
 	qboolean		bootstrapped;      // true once the first keyframe segment has built a snapshot
 	qboolean		needInitialCatchUp; // WASM: trim the boot-time backlog once steady play begins (see CL_TV_NextLiveFrame)
 	qboolean		liveClockResync;    // WASM: the initial catch-up jumped serverTime; snap the clock after the pump (CL_TV_ResyncLiveClock)
+	qboolean		reconcileSilent;    // WASM: a catch-up skipped history; the next keyframe's configstring changes are state sync, not live events
 	int				effKeepMs;          // WASM: current adaptive jitter cushion, TV_CATCHUP_KEEP_MS..MAX (CL_TV_AdjustLiveClock)
 	int				lastKeepAdapt;      // WASM: cls.realtime of the last cushion grow/relax step
 	qboolean		starved;            // WASM: underrun edge-trigger (set on STARVE, cleared on the next applied frame)
