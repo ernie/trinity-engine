@@ -4400,9 +4400,10 @@ static void CL_SetServerInfo(serverInfo_t *server, const char *info, int ping) {
 			server->punkbuster = atoi(Info_ValueForKey(info, "punkbuster"));
 			server->g_humanplayers = atoi(Info_ValueForKey(info, "g_humanplayers"));
 			server->g_needpass = atoi(Info_ValueForKey(info, "g_needpass"));
-			// Trinity mode profile: trust g_mode only from servers advertising the
-			// Trinity engine marker, so non-Trinity servers never carry a mode.
-			if ( !Q_strncmp( Info_ValueForKey(info, "engine"), "trinity-engine", 14 ) &&
+			// Trinity mode profile: trust g_mode only from servers advertising a
+			// Trinity-family engine marker (trinity-engine/-vr/-quest), so
+			// non-Trinity servers never carry a mode.
+			if ( !Q_strncmp( Info_ValueForKey(info, "engine"), "trinity-", 8 ) &&
 					*Info_ValueForKey(info, "g_mode") ) {
 				server->mode = atoi(Info_ValueForKey(info, "g_mode"));
 			} else {
