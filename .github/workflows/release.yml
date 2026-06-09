@@ -348,12 +348,6 @@ jobs:
         if-no-files-found: error
         retention-days: 5
 
-    - name: Upload DMG to release (draft)
-      uses: softprops/action-gh-release@v2
-      with:
-        files: trinity-macos-universal2.dmg
-        draft: true
-
   web:
     name: Release Web
     runs-on: ubuntu-latest
@@ -394,11 +388,20 @@ jobs:
       - name: Download build artifacts
         uses: actions/download-artifact@v8
 
-      - name: Stage pre-built macOS DMG for checksumming
-        # The actual DMG was uploaded directly to the (draft) release by
-        # the macOS job to preserve the custom file icon (an xattr that
-        # the artifact round-trip through Linux strips). We still need
-        # the artifact copy here to include the DMG in sha256sums.txt.
+      - name: Stage pre-built macOS DMG
+        # Signed, notarized, and stapled on the macOS runner. Moving it to
+        # the top level lets the checksum and release steps treat it
+        # alongside the other platform artifacts; the Linux runner never
+        # touches the DMG structure or the stapled xattrs inside.
+        #
+        # Note: the custom *file* icon on the .dmg (set via
+        # NSWorkspace.setIcon in macos-make-dmg.sh) lives in a resource-fork
+        # xattr and is NOT preserved here — but it can't be preserved
+        # anywhere downstream either. GitHub release assets are data-fork
+        # only, so the icon xattr is stripped the moment the .dmg becomes an
+        # asset, regardless of which runner uploads it. The *volume* icon
+        # (a real file inside the disk image) survives and is what users see
+        # on mount.
         run: mv macos-universal2/trinity-macos-universal2.dmg .
 
       - name: Download Trinity assets
@@ -471,10 +474,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          # DMG was uploaded directly by the macOS job (preserves custom
-          # file icon xattr); don't re-upload the xattr-stripped copy.
-          # draft: false un-drafts the release created by the macOS job.
-          draft: false
           files: |
             *.zip
+            *.dmg
             sha256sums.txt
