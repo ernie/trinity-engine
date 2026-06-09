@@ -800,6 +800,8 @@ static void SVC_Info( const netadr_t *from ) {
 	Info_SetValueForKey( infostring, "g_humanplayers", va( "%i", humans ) );
 	Info_SetValueForKey( infostring, "sv_maxclients", va( "%i", sv.maxclients - sv_privateClients->integer ) );
 	Info_SetValueForKey( infostring, "gametype", va( "%i", sv_gametype->integer ) );
+	// Trinity mode profile; empty (key omitted) on QVMs without g_mode.
+	Info_SetValueForKey( infostring, "g_mode", Cvar_VariableString( "g_mode" ) );
 	Info_SetValueForKey( infostring, "pure", va( "%i", sv.pure ) );
 	Info_SetValueForKey( infostring, "g_needpass", va( "%d", Cvar_VariableIntegerValue( "g_needpass" ) ) );
 
