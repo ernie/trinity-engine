@@ -432,6 +432,7 @@ typedef struct {
 	int			punkbuster;
 	int			g_humanplayers;
 	int			g_needpass;
+	int			mode;			// Trinity g_mode, or -1 if not a Trinity server
 } serverInfo_t;
 
 typedef struct {
