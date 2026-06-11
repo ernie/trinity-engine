@@ -355,10 +355,8 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
                     document.exitPointerLock();
                 }
             };
-            // iOS bfcache: a cross-document back freezes this page instead of
-            // unloading it, looping the engine's last audio buffer forever — so
-            // tear down synchronously on pagehide (async callbacks never run in
-            // a frozen page). A restored frozen page has no engine; reload it.
+            // iOS bfcache: back freezes the page instead of unloading it, looping
+            // the last audio buffer — tear down on pagehide, reload on restore.
             window.addEventListener('pagehide', mod.shutdown);
             window.addEventListener('pageshow', (e) => {
                 if (e.persisted) window.location.reload();
