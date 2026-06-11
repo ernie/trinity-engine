@@ -350,10 +350,19 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
                 // Clean up event listeners added by this loader
                 document.removeEventListener('click', resumeAudio, true);
                 document.removeEventListener('touchstart', resumeAudio, true);
+                window.removeEventListener('pagehide', mod.shutdown);
                 if (document.pointerLockElement === canvas) {
                     document.exitPointerLock();
                 }
             };
+            // iOS bfcache: a cross-document back freezes this page instead of
+            // unloading it, looping the engine's last audio buffer forever — so
+            // tear down synchronously on pagehide (async callbacks never run in
+            // a frozen page). A restored frozen page has no engine; reload it.
+            window.addEventListener('pagehide', mod.shutdown);
+            window.addEventListener('pageshow', (e) => {
+                if (e.persisted) window.location.reload();
+            });
             mod.addRunDependency('setup-trinity-filesystem');
             try {
                     const config = await configPromise;
