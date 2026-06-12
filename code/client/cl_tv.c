@@ -2494,7 +2494,12 @@ const char *CL_TV_GetPlayerList( void ) {
 		// Info_ValueForKey uses a 2-entry static buffer, so copy results
 		// before making more than 2 calls
 		Q_strncpyz( nameBuf, Info_ValueForKey( cs, "n" ), sizeof( nameBuf ) );
-		Q_strncpyz( modelBuf, Info_ValueForKey( cs, "model" ), sizeof( modelBuf ) );
+		// Prefer the head model: in team gametypes "model" is the shared
+		// team body, and the tracker's portraits are head-based site-wide.
+		Q_strncpyz( modelBuf, Info_ValueForKey( cs, "hmodel" ), sizeof( modelBuf ) );
+		if ( !modelBuf[0] ) {
+			Q_strncpyz( modelBuf, Info_ValueForKey( cs, "model" ), sizeof( modelBuf ) );
+		}
 		isVR = atoi( Info_ValueForKey( cs, "vr" ) );
 
 		len += Com_sprintf( buf + len, sizeof( buf ) - len, "%i\t%s\t%i\t%s\t%i\n",
