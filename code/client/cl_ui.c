@@ -448,14 +448,18 @@ static int LAN_CompareServers( int source, int sortKey, int sortDir, int s1, int
 			res = Q_stricmp( server1->mapName, server2->mapName );
 			break;
 		case SORT_CLIENTS:
-			if (server1->clients < server2->clients) {
-				res = -1;
-			}
-			else if (server1->clients > server2->clients) {
-				res = 1;
-			}
-			else {
-				res = 0;
+			{
+				int c1 = server1->clients, c2 = server2->clients;
+				if ( Cvar_VariableIntegerValue( "ui_browserExcludeBots" ) ) {
+					c1 = server1->g_humanplayers;
+					c2 = server2->g_humanplayers;
+				}
+				// sub sort by max clients
+				if ( c1 == c2 ) {
+					c1 = server1->maxClients;
+					c2 = server2->maxClients;
+				}
+				res = (c1 < c2) ? -1 : (c1 > c2) ? 1 : 0;
 			}
 			break;
 		case SORT_GAME:

@@ -4398,7 +4398,9 @@ static void CL_SetServerInfo(serverInfo_t *server, const char *info, int ping) {
 			server->minPing = atoi(Info_ValueForKey(info, "minping"));
 			server->maxPing = atoi(Info_ValueForKey(info, "maxping"));
 			server->punkbuster = atoi(Info_ValueForKey(info, "punkbuster"));
-			server->g_humanplayers = atoi(Info_ValueForKey(info, "g_humanplayers"));
+			server->g_humanplayers = strlen(Info_ValueForKey(info, "g_humanplayers"))
+				? atoi(Info_ValueForKey(info, "g_humanplayers"))
+				: server->clients;
 			server->g_needpass = atoi(Info_ValueForKey(info, "g_needpass"));
 			// Trinity mode profile: trust g_mode only from servers advertising a
 			// Trinity-family engine marker (trinity-engine/-vr/-quest), so
