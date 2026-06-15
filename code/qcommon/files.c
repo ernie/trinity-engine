@@ -221,7 +221,18 @@ static const unsigned pak_checksums[] = {
 //#define PRE_RELEASE_TADEMO
 
 #define USE_PK3_CACHE
+#ifndef DEDICATED
+// The persistent pk3 cache (pk3cache.dat) only speeds up startup re-checksumming,
+// which matters for a frequently-relaunched client but not a long-lived server.
+// On dedicated servers it's pure liability: several instances commonly share one
+// fs_homepath, and the cache file is rewritten with a plain truncating, unlocked
+// fopen(...,"wb") on every FS_Startup. Concurrent writers interleave and can leave
+// a pak's stored checksum garbled; since the entry's size/mtime/ctime still match
+// the real file, the bad checksum passes validation and the server advertises a
+// referenced checksum that matches no actual file, breaking client downloads.
+// Dedicated builds therefore keep only the in-memory cache and recompute fresh.
 #define USE_PK3_CACHE_FILE
+#endif
 
 #define USE_HANDLE_CACHE
 #define MAX_CACHED_HANDLES 384
