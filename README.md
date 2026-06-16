@@ -156,7 +156,6 @@ _This repository does not contain any game content so in order to play you must 
 - optimized OpenGL renderer
 - optimized Vulkan renderer
 - raw mouse input support, enabled automatically instead of DirectInput(**\in_mouse 1**) if available
-- unlagged mouse events processing, can be reverted by setting **\in_lagged 1**
 - **\in_minimize** - hotkey for minimize/restore main window (win32-only, direct replacement for Q3Minimizer)
 - **\video-pipe** - to use external ffmpeg binary as an encoder for better quality and smaller output files
 - significally reworked QVM (Quake Virtual Machine)

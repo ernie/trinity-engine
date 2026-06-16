@@ -1098,6 +1098,7 @@ static void VM_Fixup( instruction_t *buf, int instructionCount )
 		//n + 3: label1:
 		// ...
 		//n + x: label2:
+		// NOTE: this transform is not suitable for FP to handle NaNs
 		if ( ( ops[i->op].flags & (JUMP | FPU) ) == JUMP && !(i+1)->jused && (i+1)->op == OP_CONST && (i+2)->op == OP_JUMP ) {
 			if ( i->value == n + 3 && (i+1)->value >= n + 3 ) {
 				i->op = InvertCondition( i->op );
@@ -1118,6 +1119,19 @@ static void VM_Fixup( instruction_t *buf, int instructionCount )
 					n += 3;
 					continue;
 				}
+			}
+		}
+
+		// local = func() ; return local -> return func(), assume that local is not used/referenced afterwards
+		if ( (i + 1)->op == OP_CONST && (i + 2)->op == OP_CALL && (i + 3)->op == OP_STORE4 && (i + 4)->op == OP_LOCAL && (i + 5)->op == OP_LOAD4 && (i + 6)->op == OP_LEAVE ) {
+			if ( i->value == (i + 4)->value && !(i + 4)->jused ) {
+				(i + 0)->op = OP_IGNORE; (i + 0)->value = 0;
+				(i + 3)->op = OP_IGNORE; (i + 3)->value = 2; // jump over 2 next instructions
+				(i + 4)->op = OP_IGNORE; (i + 4)->value = 0;
+				(i + 5)->op = OP_IGNORE; (i + 5)->value = 0;
+				i += 7;
+				n += 7;
+				continue;
 			}
 		}
 
@@ -1317,7 +1331,8 @@ const char *VM_CheckInstructions( instruction_t *buf,
 			// locate endproc
 			for ( endp = 0, n = i+1 ; n < instructionCount; n++ ) {
 				if ( buf[n].op == OP_PUSH && buf[n+1].op == OP_LEAVE ) {
-					buf[n+1].endp = 1;
+					buf[n+0].endp = 1; // OP_PUSH
+					buf[n+1].endp = 1; // OP_LEAVE
 					endp = n;
 					break;
 				}
@@ -1610,12 +1625,14 @@ __noJTS:
 			}
 			// if there is a switch statement in function -
 			// mark all potential jump labels
-			if ( ci->swtch )
+			if ( ci->swtch ) {
 				v = ci->swtch;
-			if ( ci->opStack > 0 )
-				ci->jused = 0;
-			else if ( v )
+			}
+			if ( ci->opStack > 0 ) {
+				// ci->jused = 0; // do not reset already marked targets
+			} else if ( v ) {
 				ci->jused = 1;
+			}
 		}
 	}
 

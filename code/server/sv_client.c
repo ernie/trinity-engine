@@ -1029,7 +1029,7 @@ static void SV_SendClientGameState( client_t *client ) {
 	const svEntity_t *svEnt;
 	msg_t		msg;
 	byte		msgBuffer[ MAX_MSGLEN_BUF ];
-	qboolean	csUpdated;
+	int			csUpdated;
 
 	Com_DPrintf( "SV_SendClientGameState() for %s\n", client->name );
 
@@ -1054,6 +1054,9 @@ static void SV_SendClientGameState( client_t *client ) {
 	Com_Memset( &client->lastUsercmd, 0x0, sizeof( client->lastUsercmd ) );
 	client->lastUsercmd.serverTime = sv.time - 1;
 
+	// don't delta from messages prior to this gamestate
+	client->deltaStart = client->netchan.outgoingSequence;
+
 	MSG_Init( &msg, msgBuffer, MAX_MSGLEN );
 
 	// NOTE, MRE: all server->client messages now acknowledge
@@ -1071,7 +1074,7 @@ static void SV_SendClientGameState( client_t *client ) {
 	MSG_WriteLong( &msg, client->reliableSequence );
 
 	// write the configstrings
-	csUpdated = qfalse;
+	csUpdated = 0;
 	for ( start = 0 ; start < MAX_CONFIGSTRINGS ; start++ ) {
 		if ( *sv.configstrings[ start ] != '\0' ) {
 			MSG_WriteByte( &msg, svc_configstring );
@@ -1087,17 +1090,29 @@ static void SV_SendClientGameState( client_t *client ) {
 			}
 		}
 		if ( client->csUpdated[start] ) {
-			csUpdated = qtrue;
+			csUpdated++;
 		}
-		client->csUpdated[start] = qfalse;
 	}
 
 	if ( client->gamestateAck == GSA_INIT ) {
 		// inital submission, accept any messageAcknowledge with matching serverId
 		client->gamestateAck = GSA_SENT_ONCE;
 	} else {
-		if ( client->gamestateAck == GSA_SENT_ONCE && !csUpdated ) {
+		const int cmdCap = client->reliableSequence - client->reliableAcknowledge;
+		if ( csUpdated > 0 && cmdCap + csUpdated >= MAX_RELIABLE_COMMANDS - 1 ) {
+			// too much cs updates, could lead to command overflow
+			for ( start = 0; start < MAX_CONFIGSTRINGS; start++ ) {
+				if ( client->csUpdated[start] ) {
+					client->csUpdated[start] = qfalse;
+				}
+			}
+		} else {
+			// can handle cs updates later without potential overflow
+			csUpdated = 0;
+		}
+		if ( ( client->gamestateAck == GSA_SENT_ONCE || client->gamestateAck == GSA_ACKED ) && csUpdated == 0 ) {
 			// if no configstrings being updated since last submission then assume that we're (re)sending identical gamestate
+			client->gamestateAck = GSA_SENT_ONCE;
 		} else {
 			// expect exact messageAcknowledge
 			client->gamestateAck = GSA_SENT_MANY;
@@ -1129,7 +1144,7 @@ static void SV_SendClientGameState( client_t *client ) {
 		if ( client->netchan.remoteAddress.type == NA_LOOPBACK ) {
 			Com_Error( ERR_DROP, "gamestate overflow" );
 		} else {
-			NET_OutOfBandPrint( NS_SERVER, &client->netchan.remoteAddress, "print\n" S_COLOR_RED "SERVER ERROR: gamestate overflow\n" );
+			NET_OutOfBandPrint( NS_SERVER, &client->netchan.remoteAddress, "print\n" S_COLOR_ERROR "SERVER ERROR: gamestate overflow\n" );
 			SV_DropClient( client, "gamestate overflow" );
 		}
 		return;
@@ -1175,7 +1190,7 @@ void SV_ClientEnterWorld( client_t *client ) {
 	ent->s.number = clientNum;
 	client->gentity = ent;
 
-	client->deltaMessage = client->netchan.outgoingSequence - (PACKET_BACKUP + 1); // force delta reset
+	client->deltaActive = qfalse;				// force delta reset
 	client->lastSnapshotTime = svs.time - 9999; // generate a snapshot immediately
 
 	// call the game begin function
@@ -1258,6 +1273,9 @@ static void SV_DoneDownload_f( client_t *cl ) {
 
 	// resend the game state to update any clients that entered during the download
 	SV_SendClientGameState( cl );
+
+	// apply rate to avoid retranmission after late gamestate acknowledge check
+	SVC_RateLimit( &cl->gamestate_rate, 1, 1000 );
 }
 
 
@@ -1863,7 +1881,10 @@ void SV_UserinfoChanged( client_t *cl, qboolean updateUserinfo, qboolean runFilt
 		ip = NET_AdrToString( &cl->netchan.remoteAddress );
 
 	if ( !Info_SetValueForKey( cl->userinfo, "ip", ip ) )
+	{
 		SV_DropClient( cl, "userinfo string length exceeded" );
+		return;
+	}
 
 	Info_SetValueForKey( cl->userinfo, "tld", cl->tld );
 
@@ -2174,11 +2195,7 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 	usercmd_t	cmds[MAX_PACKET_USERCMDS], *cmd;
 	const usercmd_t *oldcmd;
 
-	if ( delta ) {
-		cl->deltaMessage = cl->messageAcknowledge;
-	} else {
-		cl->deltaMessage = cl->netchan.outgoingSequence - ( PACKET_BACKUP + 1 ); // force delta reset
-	}
+	cl->deltaActive = delta;
 
 	cmdCount = MSG_ReadByte( msg );
 
@@ -2216,7 +2233,7 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 	if ( cl->state == CS_PRIMED ) {
 		if ( sv.pure != 0 && !cl->gotCP ) {
 			// we didn't get a cp yet, don't assume anything and just send the gamestate all over again
-			if ( !SVC_RateLimit( &cl->gamestate_rate, 2, 1000 ) ) {
+			if ( !SVC_RateLimit( &cl->gamestate_rate, 1, 1000 ) ) {
 				Com_DPrintf( "%s: didn't get cp command, resending gamestate\n", cl->name );
 				SV_SendClientGameState( cl );
 			}
@@ -2233,7 +2250,7 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 	}
 
 	if ( cl->state != CS_ACTIVE ) {
-		cl->deltaMessage = cl->netchan.outgoingSequence - ( PACKET_BACKUP + 1 ); // force delta reset
+		// cl->deltaActive = qfalse; // force delta reset
 		return;
 	}
 

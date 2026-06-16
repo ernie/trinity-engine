@@ -102,7 +102,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define R_OPSTACKTOP	R_R15
 #endif
 
-#define FUNC_ALIGN		4
+#define FUNC_ALIGN		16
 
 /*
   -------------
@@ -213,6 +213,7 @@ static	int jumpSizeChanged;
 #endif
 
 static	int	funcOffset[ FUNC_LAST ];
+static	qboolean forceDataMask;
 
 // literal pool
 #ifdef USE_LITERAL_POOL
@@ -1856,7 +1857,7 @@ static void EmitJump( instruction_t *i, int op, int addr )
 static void EmitCallAddr( vm_t *vm, int addr )
 {
 	const int v = instructionOffsets[ addr ] - compiledOfs;
-	EmitString( "E8" );
+	Emit1( 0xE8 );
 	Emit4( v - 5 );
 }
 
@@ -1864,14 +1865,14 @@ static void EmitCallAddr( vm_t *vm, int addr )
 static void EmitCallOffset( func_t Func )
 {
 	const int v = funcOffset[ Func ] - compiledOfs;
-	EmitString( "E8" );		// call +funcOffset[ Func ]
+	Emit1( 0xE8 );		// call +funcOffset[ Func ]
 	Emit4( v - 5 );
 }
 
 
 static void emit_CheckReg( vm_t *vm, uint32_t reg, func_t func )
 {
-	if ( vm->forceDataMask || !( vm_rtChecks->integer & VM_RTCHECK_DATA ) )
+	if ( forceDataMask )
 	{
 #if idx64
 		emit_and_rx( reg, R_DATAMASK );					// reg = reg & dataMask
@@ -1889,7 +1890,7 @@ static void emit_CheckReg( vm_t *vm, uint32_t reg, func_t func )
 
 	// error reporting
 	EmitString( "0F 87" );			// ja +errorFunction
-	Emit4( funcOffset[ func ] - compiledOfs - 6 );
+	Emit4( funcOffset[ func ] - compiledOfs - 4 );
 }
 
 
@@ -1908,14 +1909,13 @@ static void emit_CheckJump( vm_t *vm, uint32_t reg, int32_t proc_base, int32_t p
 		emit_lea( rx, reg, -proc_base );			// lea edx, [reg - procBase]
 		emit_op_rx_imm32( X_CMP, rx, proc_len );	// cmp edx, proc_len
 		unmask_rx( rx );
-
 		EmitString( "0F 87" );						// ja +funcOffset[FUNC_BADJ]
-		Emit4( funcOffset[ FUNC_BADJ ] - compiledOfs - 6 );
+		Emit4( funcOffset[ FUNC_BADJ ] - compiledOfs - 4 );
 	} else {
 		// check if reg >= instructionCount
 		emit_op_rx_imm32( X_CMP, reg, vm->instructionCount );	// cmp reg, vm->instructionCount
 		EmitString( "0F 83" );									// jae +funcOffset[ FUNC_ERRJ ]
-		Emit4( funcOffset[ FUNC_ERRJ ] - compiledOfs - 6 );
+		Emit4( funcOffset[ FUNC_ERRJ ] - compiledOfs - 4 );
 	}
 }
 
@@ -1930,7 +1930,7 @@ static void emit_CheckProc( vm_t *vm, instruction_t *ins )
 		emit_op_rx_imm32( X_CMP, R_PSTACK, vm->stackBottom ); // cmp programStack, vm->stackBottom
 #endif
 		EmitString( "0F 8C" );					// jl +funcOffset[ FUNC_PSOF ]
-		Emit4( funcOffset[ FUNC_PSOF ] - compiledOfs - 6 );
+		Emit4( funcOffset[ FUNC_PSOF ] - compiledOfs - 4 );
 	}
 
 	// opStack overflow check
@@ -1948,7 +1948,7 @@ static void emit_CheckProc( vm_t *vm, instruction_t *ins )
 #endif
 
 		EmitString( "0F 87" );			// ja +funcOffset[FUNC_OSOF]
-		Emit4( funcOffset[ FUNC_OSOF ] - compiledOfs - 6 );
+		Emit4( funcOffset[ FUNC_OSOF ] - compiledOfs - 4 );
 
 		unmask_rx( rx );
 	}
@@ -1973,7 +1973,7 @@ static void EmitCallFunc( vm_t *vm )
 	init_opstack(); // to avoid any side-effects on emit_CheckJump()
 
 	emit_test_rx( R_EAX, R_EAX );		// test eax, eax
-	EmitString( "7C" );					// jl +offset (SystemCall)
+	Emit1( 0x7C );					// jl +offset (SystemCall)
 	Emit1( sysCallOffset );				// will be valid after first pass
 	sysCallOffset = compiledOfs;
 
@@ -2285,6 +2285,10 @@ static qboolean ConstOptimize( vm_t *vm, instruction_t *ci, instruction_t *ni )
 {
 	var_addr_t var;
 
+	if ( ni->jused ) {
+		return qfalse;
+	}
+
 	switch ( ni->op ) {
 
 		case OP_STORE4:	{
@@ -2301,7 +2305,8 @@ static qboolean ConstOptimize( vm_t *vm, instruction_t *ci, instruction_t *ni )
 				var.size = 4;
 				wipe_var_range( &var );
 			} else {
-				int rx = load_rx_opstack( R_EAX | RCONST ); dec_opstack(); // eax = *opstack; opstack -= 4
+				int rx = load_rx_opstack( forceDataMask ? R_EAX : R_EAX | RCONST );
+				dec_opstack(); // eax = *opStack; opStack -= 4
 				emit_CheckReg( vm, rx, FUNC_DATW );
 				emit_store_imm32_index( ci->value, R_DATABASE, rx ); // (dword*)dataBase[ eax ] = 0x12345678
 				unmask_rx( rx );
@@ -2321,7 +2326,8 @@ static qboolean ConstOptimize( vm_t *vm, instruction_t *ci, instruction_t *ni )
 				var.size = 2;
 				wipe_var_range( &var );
 			} else {
-				int rx = load_rx_opstack( R_EAX | RCONST ); dec_opstack(); // eax = *opstack; opstack -= 4
+				int rx = load_rx_opstack( forceDataMask ? R_EAX : R_EAX | RCONST );
+				dec_opstack(); // eax = *opStack; opStack -= 4
 				emit_CheckReg( vm, rx, FUNC_DATW );
 				emit_store2_imm16_index( ci->value, R_DATABASE, rx ); // (word*)dataBase[ eax ] = 0x12345678
 				unmask_rx( rx );
@@ -2341,7 +2347,8 @@ static qboolean ConstOptimize( vm_t *vm, instruction_t *ci, instruction_t *ni )
 				var.size = 1;
 				wipe_var_range( &var );
 			} else {
-				int rx = load_rx_opstack( R_EAX | RCONST ); dec_opstack(); // eax = *opstack; opstack -= 4
+				int rx = load_rx_opstack( forceDataMask ? R_EAX : R_EAX | RCONST );
+				dec_opstack(); // eax = *opStack; opStack -= 4
 				emit_CheckReg( vm, rx, FUNC_DATW );
 				emit_store1_imm8_index( ci->value, R_DATABASE, rx ); // (char*)dataBase[ eax ] = 0x12345678
 				unmask_rx( rx );
@@ -2506,7 +2513,7 @@ static qboolean ConstOptimize( vm_t *vm, instruction_t *ci, instruction_t *ni )
 		}	
 
 		case OP_JUMP:
-			flush_volatile();
+			flush_opstack();
 			EmitJump( ni, ni->op, ci->value );
 			ip += 1; // OP_JUMP
 			return qtrue;
@@ -2522,6 +2529,7 @@ static qboolean ConstOptimize( vm_t *vm, instruction_t *ci, instruction_t *ni )
 		case OP_LEI:
 		case OP_LTI: {
 			int rx = load_rx_opstack( R_EAX | RCONST ); dec_opstack(); // eax = *opstack; opstack -= 4
+			flush_nonvolatile();
 			if ( ci->value == 0 && ( ni->op == OP_EQ || ni->op == OP_NE ) ) {
 				emit_test_rx( rx, rx );						// test eax, eax
 			} else{
@@ -2539,6 +2547,30 @@ static qboolean ConstOptimize( vm_t *vm, instruction_t *ci, instruction_t *ni )
 #endif
 
 
+#ifdef MACRO_OPTIMIZE
+/*
+=================
+VM_FindSameInst
+
+Search for the same base instruction ahead
+=================
+*/
+static qboolean VM_FindSameInst( const instruction_t *base, int offset, int count ) {
+	const instruction_t *next = base + offset;
+	while ( count-- > 0 ) {
+		if ( next->jused ) {
+			break;
+		}
+		if ( next->op == base->op && next->value == base->value ) {
+			return qtrue;
+		}
+		next++;
+	}
+	return qfalse;
+}
+#endif
+
+
 /*
 =================
 VM_FindMOps
@@ -2546,6 +2578,7 @@ VM_FindMOps
 Search for known macro-op sequences
 =================
 */
+#ifdef MACRO_OPTIMIZE
 static void VM_FindMOps( instruction_t *buf, int instructionCount )
 {
 	instruction_t *i;
@@ -2556,11 +2589,12 @@ static void VM_FindMOps( instruction_t *buf, int instructionCount )
 
 	while ( n < instructionCount )
 	{
-		if ( i->op == OP_LOCAL ) {
-#ifdef MACRO_OPTIMIZE
-			// OP_LOCAL + OP_LOCAL + OP_LOAD4 + OP_CONST + OP_XXX + OP_STORE4
-			if ( ( i + 1 )->op == OP_LOCAL && i->value == ( i + 1 )->value && ( i + 2 )->op == OP_LOAD4 && ( i + 3 )->op == OP_CONST && ( i + 4 )->op != OP_UNDEF && ( i + 5 )->op == OP_STORE4 ) {
-				int v = ( i + 4 )->op;
+		if ( i->op == OP_LOCAL || i->op == OP_CONST ) {
+			// OP_LOCAL|OP_CONST + OP_LOCAL|OP_CONST + OP_LOAD4 + OP_CONST + OP_XXX + OP_STORE4
+			if ( (i + 1)->op == i->op && i->value == (i + 1)->value && (i + 2)->op == OP_LOAD4 && (i + 3)->op == OP_CONST && (i + 4)->op != OP_UNDEF && (i + 5)->op == OP_STORE4 
+				// also check this local/global variable not referenced afterwards - otherwise load/op/store/load forwarding is preferable
+				&& !VM_FindSameInst(i, 6, min(instructionCount - n - 1, 8) ) ) {
+				int v = (i + 4)->op;
 				if ( v == OP_ADD ) {
 					i->op = MOP_ADD;
 					i += 6; n += 6;
@@ -2587,23 +2621,13 @@ static void VM_FindMOps( instruction_t *buf, int instructionCount )
 					continue;
 				}
 			}
-#endif
-			if ( (i+1)->op == OP_CONST && (i+2)->op == OP_CALL && (i+3)->op == OP_STORE4 && (i+4)->op == OP_LOCAL && (i+5)->op == OP_LOAD4 && (i+6)->op == OP_LEAVE ) {
-				if ( i->value == (i+4)->value && !(i+4)->jused ) {
-					(i+0)->op = OP_IGNORE; (i+0)->value = 0;
-					(i+3)->op = OP_IGNORE; (i+3)->value = 0;
-					(i+4)->op = OP_IGNORE; (i+4)->value = 0;
-					(i+5)->op = OP_IGNORE; (i+5)->value = 0;
-					i += 7;
-					n += 7;
-					continue;
-				}
-			}
 		}
+
 		i++;
 		n++;
 	}
 }
+#endif // MACRO_OPTIMIZE
 
 
 #ifdef MACRO_OPTIMIZE
@@ -2615,6 +2639,7 @@ EmitMOPs
 static qboolean EmitMOPs( vm_t *vm, instruction_t *ci, macro_op_t op )
 {
 	uint32_t reg_base;
+	var_addr_t var;
 	int n;
 
 	if ( (ci + 1 )->op == OP_LOCAL )
@@ -2622,40 +2647,46 @@ static qboolean EmitMOPs( vm_t *vm, instruction_t *ci, macro_op_t op )
 	else
 		reg_base = R_DATABASE;
 
+	var.base = reg_base;
+	var.addr = ci->value;
+	var.size = 4;
+
+	wipe_var_range( &var );
+
 	switch ( op )
 	{
-		//[local] += CONST
+		//[var] += CONST
 		case MOP_ADD:
 			n = inst[ ip + 2 ].value;
-			emit_op_mem_imm( X_ADD, R_PROCBASE, ci->value, n );
+			emit_op_mem_imm( X_ADD, reg_base, ci->value, n );
 			ip += 5;
 			return qtrue;
 
-		//[local] -= CONST
+		//[var] -= CONST
 		case MOP_SUB:
 			n = inst[ ip + 2 ].value;
-			emit_op_mem_imm( X_SUB, R_PROCBASE, ci->value, n );
+			emit_op_mem_imm( X_SUB, reg_base, ci->value, n );
 			ip += 5;
 			return qtrue;
 
-		//[local] &= CONST
+		//[var] &= CONST
 		case MOP_BAND:
 			n = inst[ ip + 2 ].value;
-			emit_op_mem_imm( X_AND, R_PROCBASE, ci->value, n );
+			emit_op_mem_imm( X_AND, reg_base, ci->value, n );
 			ip += 5;
 			return qtrue;
 
-		//[local] |= CONST
+		//[var] |= CONST
 		case MOP_BOR:
 			n = inst[ ip + 2 ].value;
-			emit_op_mem_imm( X_OR, R_PROCBASE, ci->value, n );
+			emit_op_mem_imm( X_OR, reg_base, ci->value, n );
 			ip += 5;
 			return qtrue;
 
-		//[local] ^= CONST
+		//[var] ^= CONST
 		case MOP_BXOR:
 			n = inst[ ip + 2 ].value;
-			emit_op_mem_imm( X_XOR, R_PROCBASE, ci->value, n );
+			emit_op_mem_imm( X_XOR, reg_base, ci->value, n );
 			ip += 5;
 			return qtrue;
 	}
@@ -2736,7 +2767,9 @@ qboolean VM_Compile( vm_t *vm, vmHeader_t *header ) {
 
 	VM_ReplaceInstructions( vm, inst );
 
+#ifdef MACRO_OPTIMIZE
 	VM_FindMOps( inst, vm->instructionCount );
+#endif
 
 #if JUMP_OPTIMIZE
 	for ( i = 0; i < header->instructionCount; i++ ) {
@@ -2756,6 +2789,12 @@ qboolean VM_Compile( vm_t *vm, vmHeader_t *header ) {
 
 	code = NULL; // we will allocate memory later, after last defined pass
 	instructionPointers = NULL;
+
+	if ( vm->forceDataMask || ( vm_rtChecks->integer & VM_RTCHECK_DATA ) == 0 ) {
+		forceDataMask = qtrue;
+	} else {
+		forceDataMask = qfalse;
+	}
 
 	memset( funcOffset, 0, sizeof( funcOffset ) );
 
@@ -2872,7 +2911,7 @@ __compile:
 		{
 			// we can safely perform register optimizations only in case if
 			// we are 100% sure that current instruction is not a jump label
-			flush_volatile();
+			flush_opstack();
 		}
 
 		instructionOffsets[ ip++ ] = compiledOfs;
@@ -2884,6 +2923,7 @@ __compile:
 				break;
 
 			case OP_IGNORE:
+				ip += ci->value;
 				break;
 
 			case OP_BREAK:
@@ -3006,8 +3046,8 @@ __compile:
 
 			case OP_JUMP:
 				rx[0] = load_rx_opstack( R_EAX | RCONST ); dec_opstack(); // eax = *opstack; opstack -= 4
-				flush_volatile();
 				emit_CheckJump( vm, rx[0], proc_base, proc_len );		// check if eax is within current proc
+				flush_opstack();
 #if idx64
 				emit_jump_index( R_INSPOINTERS, rx[0] );				// jmp qword ptr [instructionPointers + rax*8]
 #else
@@ -3028,6 +3068,7 @@ __compile:
 			case OP_GEU: {
 				rx[0] = load_rx_opstack( R_EAX | RCONST ); dec_opstack(); // eax = *opstack; opstack -= 4
 				rx[1] = load_rx_opstack( R_EDX | RCONST ); dec_opstack(); // edx = *opstack; opstack -= 4
+				flush_nonvolatile();
 				emit_cmp_rx( rx[1], rx[0] ); // cmp edx, eax
 				unmask_rx( rx[0] );
 				unmask_rx( rx[1] );
@@ -3044,6 +3085,7 @@ __compile:
 				if ( HasSSEFP() ) {
 					sx[0] = load_sx_opstack( R_XMM0 | RCONST ); dec_opstack(); // xmm0 = *opstack; opstack -= 4
 					sx[1] = load_sx_opstack( R_XMM1 | RCONST ); dec_opstack(); // xmm1 = *opstack; opstack -= 4
+					flush_nonvolatile();
 					if ( ci->op == OP_EQF || ci->op == OP_NEF ) {
 						emit_ucomiss( sx[1], sx[0] );	// ucomiss xmm1, xmm0
 					} else {
@@ -3057,6 +3099,7 @@ __compile:
 					// legacy x87 path
 					flush_opstack_top(); dec_opstack();
 					flush_opstack_top(); dec_opstack();
+					flush_nonvolatile();
 					if ( HasFCOM() ) {
 						emit_fld( R_OPSTACK, 8 );		// fld dword ptr [opStack+8]
 						emit_fld( R_OPSTACK, 4 );		// fld dword ptr [opStack+4]
@@ -3094,7 +3137,7 @@ __compile:
 						}
 					} else {
 						// address stored in register
-						rx[0] = load_rx_opstack( R_EAX | RCONST );		// eax = *opstack
+						rx[0] = load_rx_opstack( forceDataMask ? R_EAX : R_EAX | RCONST );		// eax = *opstack
 						emit_CheckReg( vm, rx[0], FUNC_DATR );
 						sx[0] = alloc_sx( R_XMM0 );
 						emit_load_sx_index( sx[0], R_DATABASE, rx[0] ); // xmmm0 = dataBase[eax]
@@ -3163,8 +3206,11 @@ __compile:
 					} // not cached, perform load
 				} else {
 					// address stored in register
-					// rx[0] = rx[1] = load_rx_opstack( R_EAX );		// target, address = *opstack
-					load_rx_opstack2( &rx[0], R_EDX, &rx[1], R_EAX ); // target, address = *opstack
+					if ( forceDataMask ) {
+						rx[0] = rx[1] = load_rx_opstack( R_EAX );			// target = address = *opStack
+					} else {
+						load_rx_opstack2( &rx[0], R_EDX, &rx[1], R_EAX );	// target, address (const) = *opStack
+					}
 
 					emit_CheckReg( vm, rx[1], FUNC_DATR );			// check address bounds
 					if ( (ci+1)->op == sign_extend && sign_extend != OP_UNDEF ) {
@@ -3202,7 +3248,8 @@ __compile:
 						wipe_var_range( &var );
 						set_sx_var( sx[0], &var );									// update metadata
 					} else {
-						rx[1] = load_rx_opstack( R_EDX | RCONST ); dec_opstack();	// edx = *opstack; opstack -= 4
+						rx[1] = load_rx_opstack( forceDataMask ? R_EDX : R_EDX | RCONST );
+						dec_opstack();												// edx = *opStack; opStack -= 4
 						emit_CheckReg( vm, rx[1], FUNC_DATW );
 						emit_store_sx_index( sx[0], R_DATABASE, rx[1] );			// dataBase[edx] = xmm0
 						unmask_rx( rx[1] );
@@ -3224,7 +3271,8 @@ __compile:
 						set_rx_var( rx[0], &var ); // update metadata
 					} else {
 						// address specified by register
-						rx[1] = load_rx_opstack( R_EDX | RCONST ); dec_opstack();	// edx = *opstack; opstack -= 4
+						rx[1] = load_rx_opstack( forceDataMask ? R_EDX : R_EDX | RCONST );
+						dec_opstack();	// edx = *opStack; opStack -= 4
 						emit_CheckReg( vm, rx[1], FUNC_DATW );
 						switch ( ci->op ) {
 							case OP_STORE1: emit_store1_index( rx[0], R_DATABASE, rx[1] ); break;	// (byte*)dataBase[edx] = al
@@ -3480,46 +3528,52 @@ __compile:
 		// error functions
 		// ***************
 
-		// bad jump
-		EmitAlign( FUNC_ALIGN );
-		funcOffset[FUNC_BADJ] = compiledOfs;
-		EmitBADJFunc( vm );
+		if ( vm_rtChecks->integer & VM_RTCHECK_JUMP ) {
+			// bad jump
+			EmitAlign( FUNC_ALIGN );
+			funcOffset[FUNC_BADJ] = compiledOfs;
+			EmitBADJFunc( vm );
 
-		// error jump
-		EmitAlign( FUNC_ALIGN );
-		funcOffset[FUNC_ERRJ] = compiledOfs;
-		EmitERRJFunc( vm );
+			// error jump
+			EmitAlign( FUNC_ALIGN );
+			funcOffset[FUNC_ERRJ] = compiledOfs;
+			EmitERRJFunc( vm );
+		}
 
-		// programStack overflow
-		EmitAlign( FUNC_ALIGN );
-		funcOffset[FUNC_PSOF] = compiledOfs;
-		EmitPSOFFunc( vm );
+		if ( vm_rtChecks->integer & VM_RTCHECK_PSTACK ) {
+			// programStack overflow
+			EmitAlign( FUNC_ALIGN );
+			funcOffset[FUNC_PSOF] = compiledOfs;
+			EmitPSOFFunc( vm );
+		}
 
-		// opStack overflow
-		EmitAlign( FUNC_ALIGN );
-		funcOffset[FUNC_OSOF] = compiledOfs;
-		EmitOSOFFunc( vm );
+		if ( vm_rtChecks->integer & VM_RTCHECK_OPSTACK ) {
+			// opStack overflow
+			EmitAlign( FUNC_ALIGN );
+			funcOffset[FUNC_OSOF] = compiledOfs;
+			EmitOSOFFunc( vm );
+		}
 
-		// read access range violation
-		EmitAlign( FUNC_ALIGN );
-		funcOffset[ FUNC_DATR ] = compiledOfs;
-		EmitDATRFunc( vm );
+		if ( vm_rtChecks->integer & VM_RTCHECK_DATA && !vm->forceDataMask ) {
+			// read access range violation
+			EmitAlign( FUNC_ALIGN );
+			funcOffset[FUNC_DATR] = compiledOfs;
+			EmitDATRFunc( vm );
 
-		// write access range violation
-		EmitAlign( FUNC_ALIGN );
-		funcOffset[ FUNC_DATW ] = compiledOfs;
-		EmitDATWFunc( vm );
+			// write access range violation
+			EmitAlign( FUNC_ALIGN );
+			funcOffset[FUNC_DATW] = compiledOfs;
+			EmitDATWFunc( vm );
+		}
 
 		EmitAlign( sizeof( intptr_t ) ); // for instructionPointers
 
 #if JUMP_OPTIMIZE
 		if ( pass == PASS_COMPRESS && ++num_compress < NUM_COMPRESSIONS && jumpSizeChanged ) {
-			pass = PASS_COMPRESS;
 			goto __compile;
 		}
 		if ( jumpSizeChanged ) {
 			if ( pass == PASS_EXPAND_ONLY ) {
-				pass = PASS_EXPAND_ONLY;
 				goto __compile;
 			}
 		}
@@ -3535,7 +3589,7 @@ __compile:
 			return qfalse;
 		}
 		instructionPointers = (intptr_t*)(byte*)(code + PAD( compiledOfs, 8 ) + PAD( numLiterals * 4, 8 ));
-		if ( numLiterals ) {
+		if ( numLiterals != 0 ) {
 			uint32_t* litPtr = (uint32_t*)(code + PAD( compiledOfs, 8 ));
 			for ( i = 0; i < numLiterals; i++ ) {
 				litPtr[i] = litList[i].value;

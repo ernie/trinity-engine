@@ -877,7 +877,7 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 	case WM_MOUSEMOVE:
 		if ( IN_MouseActive() ) {
 			int mstate = (wParam & (MK_LBUTTON|MK_RBUTTON)) + ((wParam & (MK_MBUTTON|MK_XBUTTON1|MK_XBUTTON2)) >> 2);
-			IN_Win32MouseEvent( LOWORD(lParam), HIWORD(lParam), mstate );
+			IN_Win32MouseEvent( mstate );
 			return 0;
 		}
 		break;

@@ -57,7 +57,7 @@ SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
 
 AUX_SOURCE_DIRECTORY(code/qcommon QCOMMON_SRCS)
 # exclude platform-dependent QVM bytecode compilers
-list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alxp].*.c")
+list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alpx].*.c")
 # add platform-dependent QVM bytecode compilers
 IF(EMSCRIPTEN)
 	# Emscripten uses interpreted VM only - no native bytecode compiler
@@ -92,6 +92,7 @@ ELSEIF(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le|ppc64")
 		SET(RENDEXT _ppc64)
 		list(APPEND QCOMMON_SRCS code/qcommon/vm_powerpc.c)
 	ENDIF()
+	ADD_COMPILE_OPTIONS(-mcpu=power8 -mvsx)
 ELSE()
 	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE -DNO_VM_COMPILED)
 	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE -DNO_VM_COMPILED)
