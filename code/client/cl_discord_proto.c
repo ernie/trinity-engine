@@ -79,7 +79,9 @@ int Discord_BuildSetActivity( char *out, int outSize, const discordActivity_t *a
 	body = snprintf( out + 8, outSize - 8,
 		"{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":%d,\"activity\":"
 		"{%s\"timestamps\":{\"start\":%d},"
-		"\"assets\":{\"large_image\":\"logo\",\"large_text\":\"Trinity\"}}},"
+		"\"assets\":{\"large_image\":\"logo\",\"large_text\":\"Trinity\"},"
+		"\"buttons\":[{\"label\":\"Get Trinity!\",\"url\":\"https://trinity.run\"},"
+		"{\"label\":\"Join the Discord!\",\"url\":\"https://discord.gg/xq2jqDDsKF\"}]}},"
 		"\"nonce\":\"%d\"}",
 		pid, fields, act->startTimestamp, nonce );
 

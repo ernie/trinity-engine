@@ -187,6 +187,22 @@ static void test_set_activity_omits_empty_fields( void ) {
     CHECK( strstr( buf + 8, "\"details\"" ) == NULL );    /* no empty details key */
 }
 
+static void test_set_activity_has_buttons( void ) {
+    /* a fixed two-button call to action accompanies every activity */
+    char buf[1024];
+    discordActivity_t act;
+    int n;
+    memset( &act, 0, sizeof( act ) );
+    strcpy( act.details, "In Menus" );
+    n = Discord_BuildSetActivity( buf, sizeof( buf ), &act, 1, 1 );
+    CHECK( n > 8 );
+    CHECK( strstr( buf + 8, "\"buttons\":[" ) != NULL );
+    CHECK( strstr( buf + 8, "\"label\":\"Get Trinity!\"" ) != NULL );
+    CHECK( strstr( buf + 8, "\"url\":\"https://trinity.run\"" ) != NULL );
+    CHECK( strstr( buf + 8, "\"label\":\"Join the Discord!\"" ) != NULL );
+    CHECK( strstr( buf + 8, "https://discord.gg/xq2jqDDsKF" ) != NULL );
+}
+
 int main( void ) {
     test_escape();
     test_handshake();
@@ -201,6 +217,7 @@ int main( void ) {
     test_map_activity_watching();
     test_map_activity_prefers_message();
     test_set_activity_omits_empty_fields();
+    test_set_activity_has_buttons();
     if ( failures ) { printf( "%d FAILURES\n", failures ); return 1; }
     printf( "all proto tests passed\n" );
     return 0;
