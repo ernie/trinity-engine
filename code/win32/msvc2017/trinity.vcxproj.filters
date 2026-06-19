@@ -28,6 +28,12 @@
     <ClCompile Include="..\..\client\cl_main.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\client\cl_discord_proto.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\client\cl_discord.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\client\cl_tv.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -193,6 +199,9 @@
     <ClCompile Include="..\win_main.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\win_discord.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\win_minimize.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -232,6 +241,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\client\client.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\client\cl_discord.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\client\cl_discord_proto.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\qcommon\cm_local.h">

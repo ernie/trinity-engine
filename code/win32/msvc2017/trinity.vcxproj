@@ -286,6 +286,8 @@
     <ClCompile Include="..\..\client\cl_trinity.c" />
     <ClCompile Include="..\..\client\cl_trinity_rconset.c" />
     <ClCompile Include="..\..\client\cl_tv.c" />
+    <ClCompile Include="..\..\client\cl_discord_proto.c" />
+    <ClCompile Include="..\..\client\cl_discord.c" />
     <ClCompile Include="..\..\client\cl_net_chan.c" />
     <ClCompile Include="..\..\client\cl_parse.c" />
     <ClCompile Include="..\..\client\cl_scrn.c" />
@@ -348,6 +350,7 @@
     <ClCompile Include="..\..\server\sv_world.c" />
     <ClCompile Include="..\win_input.c" />
     <ClCompile Include="..\win_main.c" />
+    <ClCompile Include="..\win_discord.c" />
     <ClCompile Include="..\win_minimize.c" />
     <ClCompile Include="..\win_qvk.c" />
     <ClCompile Include="..\win_shared.c" />
@@ -378,6 +381,8 @@
   <ItemGroup>
     <ClInclude Include="..\..\cgame\cg_public.h" />
     <ClInclude Include="..\..\client\client.h" />
+    <ClInclude Include="..\..\client\cl_discord.h" />
+    <ClInclude Include="..\..\client\cl_discord_proto.h" />
     <ClInclude Include="..\..\client\cl_curl.h" />
     <ClInclude Include="..\..\client\cl_trinity_rconset.h" />
     <ClInclude Include="..\..\client\keycodes.h" />

@@ -1170,6 +1170,8 @@ Q3OBJ = \
   $(B)/client/cl_tv.o \
   $(B)/client/cl_trinity.o \
   $(B)/client/cl_trinity_rconset.o \
+  $(B)/client/cl_discord_proto.o \
+  $(B)/client/cl_discord.o \
   \
   $(B)/client/cm_load.o \
   $(B)/client/cm_patch.o \
@@ -1336,7 +1338,8 @@ ifdef MINGW
     $(B)/client/win_main.o \
     $(B)/client/win_shared.o \
     $(B)/client/win_syscon.o \
-    $(B)/client/win_resource.o
+    $(B)/client/win_resource.o \
+    $(B)/client/win_discord.o
 
 ifeq ($(USE_SDL),1)
     Q3OBJ += \
@@ -1369,6 +1372,7 @@ else # !MINGW
   Q3OBJ += \
     $(B)/client/unix_main.o \
     $(B)/client/unix_shared.o \
+    $(B)/client/unix_discord.o \
     $(B)/client/linux_signals.o
 
 ifeq ($(USE_SDL),1)

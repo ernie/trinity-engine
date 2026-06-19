@@ -11,7 +11,7 @@
 #	include <winsock2.h>
 #	include <ws2tcpip.h>
 typedef int socklen_t;
-#	define CT_INVALID_SOCKET INVALID_SOCKET
+#	define CT_INVALID_SOCKET (-1)
 #	define ct_close closesocket
 #	define ct_wouldblock(e) ((e) == WSAEWOULDBLOCK)
 #	define CT_SEND_FLAGS 0

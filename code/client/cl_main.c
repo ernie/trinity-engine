@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_main.c  -- client main loop
 
 #include "client.h"
+#include "cl_discord.h"
 #include "cl_trinity.h"
 #include "cl_trinity_rconset.h"
 #include "../qcommon/autoupdate.h"
@@ -3331,6 +3332,8 @@ void CL_Frame( int msec, int realMsec ) {
 	SCR_RunCinematic();
 
 	Con_RunConsole();
+
+	CL_Discord_Frame();
 }
 
 
@@ -4299,6 +4302,8 @@ void CL_Init( void ) {
 	Cvar_Get( "cl_guid", "", CVAR_USERINFO | CVAR_ROM | CVAR_PROTECTED );
 	CL_UpdateGUID( NULL, 0 );
 
+	CL_Discord_Init();
+
 	Com_Printf( "----- Client Initialization Complete -----\n" );
 }
 
@@ -4331,6 +4336,8 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 
 	// clear and mute all sounds until next registration
 	S_DisableSounds();
+
+	CL_Discord_Shutdown();
 
 	CL_ShutdownVMs();
 

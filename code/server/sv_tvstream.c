@@ -9,7 +9,7 @@
 #	include <winsock2.h>
 #	include <ws2tcpip.h>
 typedef int socklen_t;
-#	define TVS_INVALID_SOCKET INVALID_SOCKET
+#	define TVS_INVALID_SOCKET (-1)
 #	define tvs_close closesocket
 #	define tvs_wouldblock(e) ((e) == WSAEWOULDBLOCK)
 #	define TVS_SEND_FLAGS 0

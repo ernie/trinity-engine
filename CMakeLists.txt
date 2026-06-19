@@ -162,6 +162,10 @@ ENDIF()
 IF(NOT USE_OPENAL)
 	list(REMOVE_ITEM CLIENT_SRCS code/client/snd_openal.c code/client/qal.c)
 ENDIF()
+# Discord Rich Presence is compiled out on Emscripten; call sites are neutralized by cl_discord.h
+IF(EMSCRIPTEN)
+	list(REMOVE_ITEM CLIENT_SRCS code/client/cl_discord.c code/client/cl_discord_proto.c)
+ENDIF()
 
 #ADD_LIBRARY(client OBJECT ${CLIENT_SRCS})
 
@@ -286,6 +290,7 @@ ELSEIF(UNIX)
 			list(APPEND Q3_UI_SRCS code/unix/linux_qvk.c)
 		ENDIF()
 	ENDIF()
+	list(APPEND Q3_UI_SRCS code/unix/unix_discord.c)
 
 	IF(APPLE)
 		SET(EXE_TYPE MACOSX_BUNDLE)
@@ -314,7 +319,8 @@ ELSEIF(WIN32)
 		code/win32/win_minimize.c
 		code/win32/win_qgl.c
 		code/win32/win_snd.c
-		code/win32/win_wndproc.c)
+		code/win32/win_wndproc.c
+		code/win32/win_discord.c)
 	IF(USE_VULKAN)
 		list(APPEND Q3_UI_SRCS code/win32/win_qvk.c)
 	ENDIF()
