@@ -220,6 +220,7 @@
     <ClCompile Include="..\..\renderer\tr_light.c" />
     <ClCompile Include="..\..\renderer\tr_main.c" />
     <ClCompile Include="..\..\renderer\tr_marks.c" />
+    <ClCompile Include="..\..\renderer\tr_decals.c" />
     <ClCompile Include="..\..\renderer\tr_mesh.c" />
     <ClCompile Include="..\..\renderer\tr_model.c" />
     <ClCompile Include="..\..\renderer\tr_model_iqm.c" />

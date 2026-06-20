@@ -65,6 +65,9 @@
     <ClCompile Include="..\..\renderer\tr_marks.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\renderer\tr_decals.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\renderer\tr_mesh.c">
       <Filter>Source Files</Filter>
     </ClCompile>

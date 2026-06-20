@@ -2457,5 +2457,9 @@ void RE_LoadWorldMap( const char *name ) {
 	// only set tr.world now that we know the entire level has loaded properly
 	tr.world = &s_worldData;
 
+	// clear stale decals from the previous map; also binds each slot's vertex
+	// window for use by RE_ProjectDecal, which must not run before this
+	RE_ClearDecals();
+
 	ri.FS_FreeFile( buffer.v );
 }

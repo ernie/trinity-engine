@@ -210,6 +210,7 @@ cvar_t	*r_marksOnTriangleMeshes;
 cvar_t	*r_aviMotionJpegQuality;
 cvar_t	*r_screenshotJpegQuality;
 
+
 static cvar_t *r_maxpolys;
 static cvar_t* r_maxpolyverts;
 int		max_polys;
@@ -1387,6 +1388,7 @@ static void R_Register( void )
 	r_screenshotJpegQuality = ri.Cvar_Get("r_screenshotJpegQuality", "90", CVAR_ARCHIVE);
 	ri.Cvar_SetDescription( r_screenshotJpegQuality, "Controls quality of Jpeg screenshots when using screenshotJpeg." );
 
+
 	r_maxpolys = ri.Cvar_Get( "r_maxpolys", va("%d", MAX_POLYS), 0);
 	ri.Cvar_SetDescription( r_maxpolys, "Maximum number of polygons to draw in a scene." );
 	r_maxpolyverts = ri.Cvar_Get( "r_maxpolyverts", va("%d", MAX_POLYVERTS), 0);
@@ -1674,6 +1676,8 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.GetConfig = RE_GetConfig;
 	re.VertexLighting = RE_VertexLighting;
 	re.SyncRender = RE_SyncRender;
+	re.ProjectDecal = RE_ProjectDecal;
+	re.ClearDecals = RE_ClearDecals;
 
 	return &re;
 }

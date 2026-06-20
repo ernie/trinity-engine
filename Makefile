@@ -932,6 +932,7 @@ Q3REND1OBJ = \
   $(B)/rend1/tr_light.o \
   $(B)/rend1/tr_main.o \
   $(B)/rend1/tr_marks.o \
+  $(B)/rend1/tr_decals.o \
   $(B)/rend1/tr_mesh.o \
   $(B)/rend1/tr_model.o \
   $(B)/rend1/tr_model_iqm.o \
@@ -977,6 +978,7 @@ Q3REND2OBJ = \
   $(B)/rend2/tr_light.o \
   $(B)/rend2/tr_main.o \
   $(B)/rend2/tr_marks.o \
+  $(B)/rend2/tr_decals.o \
   $(B)/rend2/tr_mesh.o \
   $(B)/rend2/tr_model.o \
   $(B)/rend2/tr_model_iqm.o \
@@ -1046,6 +1048,7 @@ Q3RENDVOBJ = \
   $(B)/rendv/tr_light.o \
   $(B)/rendv/tr_main.o \
   $(B)/rendv/tr_marks.o \
+  $(B)/rendv/tr_decals.o \
   $(B)/rendv/tr_mesh.o \
   $(B)/rendv/tr_model.o \
   $(B)/rendv/tr_model_iqm.o \

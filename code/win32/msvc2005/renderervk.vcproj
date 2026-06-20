@@ -331,6 +331,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\renderervk\tr_decals.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\renderervk\tr_mesh.c"
 				>
 			</File>

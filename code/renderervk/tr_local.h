@@ -1419,6 +1419,7 @@ extern	cvar_t	*r_printShaders;
 
 extern cvar_t	*r_marksOnTriangleMeshes;
 
+
 //====================================================================
 
 void R_SwapBuffers( int );
@@ -1756,6 +1757,16 @@ MARKERS, POLYGON PROJECTION ON WORLD POLYGONS
 ============================================================
 */
 
+void R_BoxSurfaces_r(mnode_t *node, vec3_t mins, vec3_t maxs, surfaceType_t **list,
+		int listsize, int *listlength, vec3_t dir, qboolean radial);
+
+#ifndef MAX_VERTS_ON_POLY
+#define MAX_VERTS_ON_POLY 64
+#endif
+
+void R_ChopPolyBehindPlane( int numInPoints, vec3_t inPoints[MAX_VERTS_ON_POLY],
+		int *numOutPoints, vec3_t outPoints[MAX_VERTS_ON_POLY],
+		vec3_t normal, vec_t dist, vec_t epsilon );
 int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projection,
 				   int maxPoints, vec3_t pointBuffer, int maxFragments, markFragment_t *fragmentBuffer );
 
@@ -1776,6 +1787,10 @@ void RE_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *vert
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
+void RE_ProjectDecal( const vec3_t origin, float radius, float orientation,
+		qhandle_t hShader, const float rgba[4], int lifeTime );
+void RE_ClearDecals( void );
+void R_AddDecalSurfaces( void );
 
 void RE_RenderScene( const refdef_t *fd );
 
@@ -1951,6 +1966,16 @@ typedef enum {
 // the main view, all the 3D icons, etc
 #define	MAX_POLYS		8192
 #define	MAX_POLYVERTS	32768
+
+#define MAX_DECAL_FRAGMENTS		4096
+#define MAX_DECAL_VERTS_PER_FRAG	16
+
+typedef struct {
+	srfPoly_t	srf;
+	int			spawnTime;
+	int			lifeTime;
+	byte		baseColor[4];
+} decal_t;
 
 // all of the information needed by the back end must be
 // contained in a backEndData_t

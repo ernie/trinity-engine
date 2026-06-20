@@ -228,6 +228,7 @@
     <ClCompile Include="..\..\renderervk\tr_light.c" />
     <ClCompile Include="..\..\renderervk\tr_main.c" />
     <ClCompile Include="..\..\renderervk\tr_marks.c" />
+    <ClCompile Include="..\..\renderervk\tr_decals.c" />
     <ClCompile Include="..\..\renderervk\tr_mesh.c" />
     <ClCompile Include="..\..\renderervk\tr_model.c" />
     <ClCompile Include="..\..\renderervk\tr_model_iqm.c" />

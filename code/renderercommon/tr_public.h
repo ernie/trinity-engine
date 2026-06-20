@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_types.h"
 #include "vulkan/vulkan.h"
 
-#define	REF_API_VERSION		8
+#define	REF_API_VERSION		9
 
 //
 // these are the functions exported by the refresh module
@@ -121,6 +121,10 @@ typedef struct {
 	void	(*VertexLighting)( qboolean allowed );
 	void	(*SyncRender)( void );
 
+	// enhanced blood decals: radial projected decal onto nearby world surfaces
+	void	(*ProjectDecal)( const vec3_t origin, float radius, float orientation,
+				qhandle_t hShader, const float rgba[4], int lifeTime );
+	void	(*ClearDecals)( void );
 
 } refexport_t;
 

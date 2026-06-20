@@ -511,6 +511,11 @@ static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
 		return qtrue;
 	}
 
+	if ( !Q_stricmp( key, "trap_R_ProjectDecal" ) && re.ProjectDecal ) {
+		Com_sprintf( value, valueSize, "%i", CG_R_PROJECTDECAL );
+		return qtrue;
+	}
+
 #if defined(USE_VOIP) && !defined(DEDICATED)
 	if ( !Q_stricmp( key, "voip_talking" ) ) {
 		byte mask[(MAX_CLIENTS + 7) / 8];
@@ -933,6 +938,10 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 	case CG_TRAP_GETVALUE:
 		VM_CHECKBOUNDS( cgvm, args[1], args[2] );
 		return CL_GetValue( VMA(1), args[2], VMA(3) );
+
+	case CG_R_PROJECTDECAL:
+		re.ProjectDecal( VMA(1), VMF(2), VMF(3), args[4], VMA(5), args[6] );
+		return 0;
 
 	default:
 		Com_Error( ERR_DROP, "Bad cgame system trap: %ld", (long int) args[0] );

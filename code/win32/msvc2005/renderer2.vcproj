@@ -378,6 +378,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\renderer2\tr_decals.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\renderer2\tr_mesh.c"
 				>
 			</File>
