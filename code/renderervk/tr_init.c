@@ -1928,6 +1928,10 @@ void R_Init( void ) {
 
 	R_InitShaders();
 
+	// Drop decals carried over a vid_restart; their shader handles are
+	// stale now that R_InitShaders has rebuilt the shader list.
+	RE_ClearDecals();
+
 	R_InitSkins();
 
 	R_ModelInit();
