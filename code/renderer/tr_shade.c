@@ -79,6 +79,17 @@ void R_BindAnimatedImage( const textureBundle_t *bundle ) {
 		return;
 	}
 
+	// RF_ANIMFRAME: caller drives the frame via refEntity->frame instead of by time.
+	if ( backEnd.currentEntity && ( backEnd.currentEntity->e.renderfx & RF_ANIMFRAME ) ) {
+		index = backEnd.currentEntity->e.frame;
+		if ( index < 0 ) {
+			index = 0;
+		}
+		index %= bundle->numImageAnimations;
+		GL_Bind( bundle->image[ index ] );
+		return;
+	}
+
 	// it is necessary to do this messy calc to make sure animations line up
 	// exactly with waveforms of the same frequency
 	//v = tess.shaderTime * bundle->imageAnimationSpeed * FUNCTABLE_SIZE;
