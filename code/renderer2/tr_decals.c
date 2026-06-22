@@ -173,23 +173,23 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 	for ( i = 0; i < numSurfaces; i++ ) {
 
 		if ( *surfaces[i] == SF_FACE ) {
-			srfSurfaceFace_t *face = (srfSurfaceFace_t *)surfaces[i];
-			int *indexes = (int *)( (byte *)face + face->ofsIndices );
+			srfBspSurface_t	*face = (srfBspSurface_t *)surfaces[i];
+			glIndex_t		*indexes = face->indexes;
 
 			// flat face: build the frame from the face's outward normal; back
 			// faces (e.g. a ledge underside) are rejected by the front-facing
 			// test in R_DecalClipTriangle.
-			VectorCopy( face->plane.normal, normal );
+			VectorCopy( face->cullPlane.normal, normal );
 			R_DecalAxisFromNormal( normal, orientation, axis );
-			for ( k = 0; k < face->numIndices; k += 3 ) {
+			for ( k = 0; k < face->numIndexes; k += 3 ) {
 				for ( m = 0; m < 3; m++ ) {
-					VectorCopy( &face->points[0][0] + VERTEXSIZE * indexes[k + m], tri[m] );
+					VectorCopy( face->verts[ indexes[k + m] ].xyz, tri[m] );
 				}
 				R_DecalClipTriangle( origin, size, reach, axis, texScale, hShader, color, lifeTime, tri );
 			}
 		}
 		else if ( *surfaces[i] == SF_GRID ) {
-			srfGridMesh_t *grid = (srfGridMesh_t *)surfaces[i];
+			srfBspSurface_t	*grid = (srfBspSurface_t *)surfaces[i];
 			vec3_t	sumNormal = { 0, 0, 0 };
 			vec3_t	sharedNormal, cen;
 			int		t;
@@ -198,7 +198,7 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 			// the whole patch shares ONE texture frame (segments then connect)
 			for ( m = 0; m < grid->height - 1; m++ ) {
 				for ( n = 0; n < grid->width - 1; n++ ) {
-					drawVert_t *dv = grid->verts + m * grid->width + n;
+					srfVert_t *dv = grid->verts + m * grid->width + n;
 					for ( t = 0; t < 2; t++ ) {
 						if ( t == 0 ) {
 							VectorCopy( dv[0].xyz, tri[0] );
@@ -234,7 +234,7 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 			// pass 2: clip every segment with the shared frame
 			for ( m = 0; m < grid->height - 1; m++ ) {
 				for ( n = 0; n < grid->width - 1; n++ ) {
-					drawVert_t *dv = grid->verts + m * grid->width + n;
+					srfVert_t *dv = grid->verts + m * grid->width + n;
 					for ( t = 0; t < 2; t++ ) {
 						if ( t == 0 ) {
 							VectorCopy( dv[0].xyz, tri[0] );
@@ -255,7 +255,7 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 			}
 		}
 		else if ( *surfaces[i] == SF_TRIANGLES && r_marksOnTriangleMeshes->integer ) {
-			srfTriangles_t *cts = (srfTriangles_t *)surfaces[i];
+			srfBspSurface_t	*cts = (srfBspSurface_t *)surfaces[i];
 			vec3_t	sumNormal = { 0, 0, 0 };
 			vec3_t	sharedNormal, cen;
 
@@ -328,6 +328,6 @@ void R_AddDecalSurfaces( void ) {
 		}
 
 		sh = R_GetShaderByHandle( d->srf.hShader );
-		R_AddDrawSurf( (surfaceType_t *)&d->srf, sh, d->srf.fogIndex, 0 );
+		R_AddDrawSurf( (surfaceType_t *)&d->srf, sh, d->srf.fogIndex, 0, 0, 0 );
 	}
 }
