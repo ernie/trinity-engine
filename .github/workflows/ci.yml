@@ -54,3 +54,23 @@ jobs:
         run: |
           codesign --verify --deep --strict --verbose=2 \
             build/release-darwin-universal2/Trinity.app
+
+  build-web:
+    # Mirrors the release workflow's web job so pushes/PRs catch breakage in
+    # code that ONLY the Emscripten build compiles — notably renderer2 (the web
+    # engine uses RENDERER_DEFAULT=opengl2, while the Makefile release jobs
+    # default USE_OPENGL2=0 and never build it). Without this, a renderer2-only
+    # break is invisible until a release tag fires release.yml's web job.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 5.0.1
+
+      - name: Build web engine
+        run: make web
