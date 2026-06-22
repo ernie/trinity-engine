@@ -2,7 +2,7 @@
   "cvars": {
     "r_fullscreen": 0,
     "cg_damageEffect": 1,
-    "cg_bloodParticles": 1,
+    "com_blood": 2,
     "r_lodCurveError": 8192,
     "r_picmip": 0,
     "r_lodBias": -2,
