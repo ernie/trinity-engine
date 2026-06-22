@@ -4023,10 +4023,11 @@ a single large text block that can be scanned for shader names
 */
 static void ScanAndLoadShaderFiles( void )
 {
-	char **shaderFiles, **mtrFiles;
+	char **shaderFiles, **mtrFiles, **shaderxFiles;
 	char *buffers[MAX_SHADER_FILES];
 	char *xbuffers[MAX_SHADER_FILES];
-	int numShaderFiles, numMtrFiles;
+	char *sxbuffers[MAX_SHADER_FILES];
+	int numShaderFiles, numMtrFiles, numShaderxFiles;
 	int i;
 	const char *token, *hashMem;
 	char *textEnd;
@@ -4038,8 +4039,10 @@ static void ScanAndLoadShaderFiles( void )
 	// scan for legacy shader files
 	shaderFiles = ri.FS_ListFiles( "scripts", ".shader", &numShaderFiles );
 	mtrFiles = ri.FS_ListFiles( "scripts", ".mtrx", &numMtrFiles );
+	// extended .shaderx shaders (rend2 always has a programmable pipeline)
+	shaderxFiles = ri.FS_ListFiles( "scripts", ".shaderx", &numShaderxFiles );
 
-	if ( (!shaderFiles || !numShaderFiles) && (!mtrFiles || !numMtrFiles) ) {
+	if ( (!shaderFiles || !numShaderFiles) && (!mtrFiles || !numMtrFiles) && (!shaderxFiles || !numShaderxFiles) ) {
 		ri.Printf( PRINT_WARNING, "WARNING: no shader files found\n" );
 		return;
 	}
@@ -4050,14 +4053,18 @@ static void ScanAndLoadShaderFiles( void )
 	if ( numMtrFiles > MAX_SHADER_FILES ) {
 		numMtrFiles = MAX_SHADER_FILES;
 	}
+	if ( numShaderxFiles > MAX_SHADER_FILES ) {
+		numShaderxFiles = MAX_SHADER_FILES;
+	}
 
 	sum = 0;
 	sum += loadShaderBuffers( mtrFiles, numMtrFiles, xbuffers );
 	sum += loadShaderBuffers( shaderFiles, numShaderFiles, buffers );
+	sum += loadShaderBuffers( shaderxFiles, numShaderxFiles, sxbuffers );
 
 	// build single large buffer
-	s_shaderText = ri.Hunk_Alloc( sum + numMtrFiles*2 + numShaderFiles*2 + 1, h_low );
-	s_shaderText[ 0 ] = s_shaderText[ sum + numMtrFiles*2 + numShaderFiles*2 ] = '\0';
+	s_shaderText = ri.Hunk_Alloc( sum + numMtrFiles*2 + numShaderFiles*2 + numShaderxFiles*2 + 1, h_low );
+	s_shaderText[ 0 ] = s_shaderText[ sum + numMtrFiles*2 + numShaderFiles*2 + numShaderxFiles*2 ] = '\0';
 
 	textEnd = s_shaderText;
 
@@ -4083,12 +4090,21 @@ static void ScanAndLoadShaderFiles( void )
 			ri.FS_FreeFile( xbuffers[ i ] );
 		}
 	}
+	for ( i = numShaderxFiles - 1; i >= 0 ; i-- ) {
+		if ( sxbuffers[ i ] ) {
+			textEnd = Q_stradd( textEnd, sxbuffers[ i ] );
+			textEnd = Q_stradd( textEnd, "\n" );
+			ri.FS_FreeFile( sxbuffers[ i ] );
+		}
+	}
 
 	// free up memory
 	if ( mtrFiles )
 		ri.FS_FreeFileList( mtrFiles );
 	if ( shaderFiles )
 		ri.FS_FreeFileList( shaderFiles );
+	if ( shaderxFiles )
+		ri.FS_FreeFileList( shaderxFiles );
 
 	//COM_Compress( s_shaderText );
 	Com_Memset( shaderTextHashTableSizes, 0, sizeof( shaderTextHashTableSizes ) );
