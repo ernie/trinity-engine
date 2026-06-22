@@ -60,7 +60,7 @@ static void R_DecalAxisFromNormal( const vec3_t normal, float orientation, vec3_
 // Clip one triangle to the decal's square footprint, on the triangle's own
 // plane, and store the result as a ring decal fragment. axis[0] is the
 // surface's outward unit normal; tri are the 3 positions.
-static void R_DecalClipTriangle( const vec3_t origin, float radius, vec3_t axis[3],
+static void R_DecalClipTriangle( const vec3_t origin, float size, float reach, vec3_t axis[3],
 		float texScale, qhandle_t hShader, const byte color[4], int lifeTime, vec3_t tri[3] ) {
 	vec3_t		poly[2][MAX_VERTS_ON_POLY];
 	vec3_t		neg;
@@ -73,7 +73,7 @@ static void R_DecalClipTriangle( const vec3_t origin, float radius, vec3_t axis[
 	// plane (small tolerance so blood sitting right on a surface still takes).
 	// This stops blood bleeding onto back faces, e.g. the underside of a ledge.
 	d = DotProduct( origin, axis[0] ) - DotProduct( tri[0], axis[0] );
-	if ( d < -0.1f || d > radius ) {
+	if ( d < -0.1f || d > reach ) {
 		return;
 	}
 
@@ -87,19 +87,19 @@ static void R_DecalClipTriangle( const vec3_t origin, float radius, vec3_t axis[
 	baseS = DotProduct( origin, axis[1] );
 	baseT = DotProduct( origin, axis[2] );
 
-	// clip to the square footprint: |dot(P,axis1) - baseS| <= radius (and axis2)
-	R_ChopPolyBehindPlane( numPoly, poly[ping], &numPoly, poly[!ping], axis[1], baseS - radius, 0.0f );
+	// clip to the square footprint: |dot(P,axis1) - baseS| <= size (and axis2)
+	R_ChopPolyBehindPlane( numPoly, poly[ping], &numPoly, poly[!ping], axis[1], baseS - size, 0.0f );
 	ping ^= 1; if ( numPoly < 3 ) return;
 
 	VectorNegate( axis[1], neg );
-	R_ChopPolyBehindPlane( numPoly, poly[ping], &numPoly, poly[!ping], neg, -( baseS + radius ), 0.0f );
+	R_ChopPolyBehindPlane( numPoly, poly[ping], &numPoly, poly[!ping], neg, -( baseS + size ), 0.0f );
 	ping ^= 1; if ( numPoly < 3 ) return;
 
-	R_ChopPolyBehindPlane( numPoly, poly[ping], &numPoly, poly[!ping], axis[2], baseT - radius, 0.0f );
+	R_ChopPolyBehindPlane( numPoly, poly[ping], &numPoly, poly[!ping], axis[2], baseT - size, 0.0f );
 	ping ^= 1; if ( numPoly < 3 ) return;
 
 	VectorNegate( axis[2], neg );
-	R_ChopPolyBehindPlane( numPoly, poly[ping], &numPoly, poly[!ping], neg, -( baseT + radius ), 0.0f );
+	R_ChopPolyBehindPlane( numPoly, poly[ping], &numPoly, poly[!ping], neg, -( baseT + size ), 0.0f );
 	ping ^= 1; if ( numPoly < 3 ) return;
 
 	if ( numPoly > MAX_DECAL_VERTS_PER_FRAG ) {
@@ -141,7 +141,7 @@ static qboolean R_DecalTriNormal( vec3_t tri[3], vec3_t normal ) {
 	return ( VectorNormalize( normal ) > 1e-4f ) ? qtrue : qfalse;
 }
 
-void RE_ProjectDecal( const vec3_t origin, float radius, float orientation,
+void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orientation,
 		qhandle_t hShader, const float rgba[4], int lifeTime ) {
 	vec3_t			mins, maxs;
 	surfaceType_t	*surfaces[64];
@@ -151,7 +151,7 @@ void RE_ProjectDecal( const vec3_t origin, float radius, float orientation,
 	float			texScale;
 	int				numSurfaces, i, k, m, n;
 
-	if ( tr.world == NULL || radius <= 0 || hShader == 0 ) {
+	if ( tr.world == NULL || size <= 0 || hShader == 0 ) {
 		return;
 	}
 
@@ -159,11 +159,11 @@ void RE_ProjectDecal( const vec3_t origin, float radius, float orientation,
 	color[1] = (byte)( rgba[1] * 255 );
 	color[2] = (byte)( rgba[2] * 255 );
 	color[3] = (byte)( rgba[3] * 255 );
-	texScale = 0.5f / radius;
+	texScale = 0.5f / size;
 
 	for ( i = 0; i < 3; i++ ) {
-		mins[i] = origin[i] - radius;
-		maxs[i] = origin[i] + radius;
+		mins[i] = origin[i] - reach;
+		maxs[i] = origin[i] + reach;
 	}
 
 	tr.viewCount++;
@@ -185,7 +185,7 @@ void RE_ProjectDecal( const vec3_t origin, float radius, float orientation,
 				for ( m = 0; m < 3; m++ ) {
 					VectorCopy( &face->points[0][0] + VERTEXSIZE * indexes[k + m], tri[m] );
 				}
-				R_DecalClipTriangle( origin, radius, axis, texScale, hShader, color, lifeTime, tri );
+				R_DecalClipTriangle( origin, size, reach, axis, texScale, hShader, color, lifeTime, tri );
 			}
 		}
 		else if ( *surfaces[i] == SF_GRID ) {
@@ -215,7 +215,7 @@ void RE_ProjectDecal( const vec3_t origin, float radius, float orientation,
 						VectorAdd( tri[0], tri[1], cen );
 						VectorAdd( cen, tri[2], cen );
 						VectorScale( cen, 1.0f / 3.0f, cen );
-						if ( Distance( cen, origin ) > radius ) {
+						if ( Distance( cen, origin ) > reach ) {
 							continue;	// only segments the decal sphere overlaps
 						}
 						// only front-facing segments contribute (no back-of-curve bleed)
@@ -249,7 +249,7 @@ void RE_ProjectDecal( const vec3_t origin, float radius, float orientation,
 						if ( !R_DecalTriNormal( tri, normal ) || DotProduct( normal, sharedNormal ) <= 0.0f ) {
 							continue;
 						}
-						R_DecalClipTriangle( origin, radius, axis, texScale, hShader, color, lifeTime, tri );
+						R_DecalClipTriangle( origin, size, reach, axis, texScale, hShader, color, lifeTime, tri );
 					}
 				}
 			}
@@ -270,7 +270,7 @@ void RE_ProjectDecal( const vec3_t origin, float radius, float orientation,
 				VectorAdd( tri[0], tri[1], cen );
 				VectorAdd( cen, tri[2], cen );
 				VectorScale( cen, 1.0f / 3.0f, cen );
-				if ( Distance( cen, origin ) > radius ) {
+				if ( Distance( cen, origin ) > reach ) {
 					continue;
 				}
 				// only front-facing segments contribute (no back-of-curve bleed)
@@ -292,7 +292,7 @@ void RE_ProjectDecal( const vec3_t origin, float radius, float orientation,
 				if ( !R_DecalTriNormal( tri, normal ) || DotProduct( normal, sharedNormal ) <= 0.0f ) {
 					continue;	// skip back-facing segments
 				}
-				R_DecalClipTriangle( origin, radius, axis, texScale, hShader, color, lifeTime, tri );
+				R_DecalClipTriangle( origin, size, reach, axis, texScale, hShader, color, lifeTime, tri );
 			}
 		}
 	}

@@ -1787,7 +1787,7 @@ void RE_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *vert
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
-void RE_ProjectDecal( const vec3_t origin, float radius, float orientation,
+void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orientation,
 		qhandle_t hShader, const float rgba[4], int lifeTime );
 void RE_ClearDecals( void );
 void R_AddDecalSurfaces( void );

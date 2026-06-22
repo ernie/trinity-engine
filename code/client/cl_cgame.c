@@ -946,7 +946,7 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return CL_GetValue( VMA(1), args[2], VMA(3) );
 
 	case CG_R_PROJECTDECAL:
-		re.ProjectDecal( VMA(1), VMF(2), VMF(3), args[4], VMA(5), args[6] );
+		re.ProjectDecal( VMA(1), VMF(2), VMF(3), VMF(4), args[5], VMA(6), args[7] );
 		return 0;
 
 	default:
