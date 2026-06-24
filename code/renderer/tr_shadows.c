@@ -61,7 +61,7 @@ static float R_ShadowClipDist( const vec3_t start, const vec3_t dir, float maxDi
 
 typedef struct {
 	int		i2;
-	int		facing;
+	int		count;	// signed directed-edge accumulator
 } edgeDef_t;
 
 #define	MAX_EDGE_DEFS	32
@@ -73,64 +73,68 @@ static	int			numLitTris;
 static	int			litTriIndexes[SHADER_MAX_INDEXES];
 static	float		clipDists[SHADER_MAX_VERTEXES];
 static	qboolean	needsTrace[SHADER_MAX_VERTEXES];
+static	int			weld[SHADER_MAX_VERTEXES];
 
-static void R_AddEdgeDef( int i1, int i2, int f ) {
-	int		c;
+// Accumulate an undirected edge with a signed count, oriented by lo<hi.
+// A manifold edge between two lit tris gets +1 and -1 (opposite windings) ->
+// net 0 -> not a silhouette. A boundary/silhouette edge gets one sign only ->
+// net +/-1 -> emitted. Non-manifold edges sum to a consistent net value, keeping
+// stencil parity balanced instead of leaking.
+static void R_AddSilEdge( int a, int b ) {
+	int		lo, hi, dir, c, k;
 
-	c = numEdgeDefs[ i1 ];
-	if ( c == MAX_EDGE_DEFS ) {
-		return;		// overflow
+	if ( a == b ) {
+		return;		// degenerate after welding
 	}
-	edgeDefs[ i1 ][ c ].i2 = i2;
-	edgeDefs[ i1 ][ c ].facing = f;
+	if ( a < b ) { lo = a; hi = b; dir =  1; }
+	else         { lo = b; hi = a; dir = -1; }
 
-	numEdgeDefs[ i1 ]++;
+	c = numEdgeDefs[ lo ];
+	for ( k = 0; k < c; k++ ) {
+		if ( edgeDefs[ lo ][ k ].i2 == hi ) {	// existing undirected edge
+			edgeDefs[ lo ][ k ].count += dir;
+			return;
+		}
+	}
+	if ( c < MAX_EDGE_DEFS ) {
+		edgeDefs[ lo ][ c ].i2    = hi;
+		edgeDefs[ lo ][ c ].count = dir;
+		numEdgeDefs[ lo ]++;
+	}
 }
 
 
 static void R_CalcShadowEdges( void ) {
-	qboolean sil_edge;
-	int		i;
-	int		c, c2;
-	int		j, k;
-	int		i2;
+	int		lo, k;
 
 	tess.numIndexes = 0;
 
-	// an edge is NOT a silhouette edge if its face doesn't face the light,
-	// or if it has a reverse paired edge that also faces the light.
-	// A well behaved polyhedron would have exactly two faces for each edge,
-	// but lots of models have dangling edges or overfanned edges
-	for ( i = 0; i < tess.numVertexes; i++ ) {
-		c = numEdgeDefs[ i ];
-		for ( j = 0 ; j < c ; j++ ) {
-			if ( !edgeDefs[ i ][ j ].facing ) {
+	// emit a silhouette quad for every edge with a non-zero signed count.
+	// net>0 keeps the lo->hi orientation, net<0 reverses it, so the emitted
+	// winding always matches the lit triangle that contributed the edge.
+	for ( lo = 0; lo < tess.numVertexes; lo++ ) {
+		int c = numEdgeDefs[ lo ];
+		for ( k = 0; k < c; k++ ) {
+			int hi  = edgeDefs[ lo ][ k ].i2;
+			int net = edgeDefs[ lo ][ k ].count;
+			int ia, ib, n;
+
+			if ( net == 0 ) {
 				continue;
 			}
+			if ( net > 0 ) { ia = lo; ib = hi; }
+			else           { ia = hi; ib = lo; net = -net; }
 
-			sil_edge = qtrue;
-			i2 = edgeDefs[ i ][ j ].i2;
-			c2 = numEdgeDefs[ i2 ];
-			for ( k = 0 ; k < c2 ; k++ ) {
-				if ( edgeDefs[ i2 ][ k ].i2 == i && edgeDefs[ i2 ][ k ].facing ) {
-					sil_edge = qfalse;
-					break;
-				}
-			}
-
-			// if it doesn't share the edge with another front facing
-			// triangle, it is a sil edge
-			if ( sil_edge ) {
+			for ( n = 0; n < net; n++ ) {		// net is ~always 1
 				if ( tess.numIndexes > ARRAY_LEN( tess.indexes ) - 6 ) {
-					i = tess.numVertexes;
-					break;
+					return;
 				}
-				tess.indexes[ tess.numIndexes + 0 ] = i;
-				tess.indexes[ tess.numIndexes + 1 ] = i + tess.numVertexes;
-				tess.indexes[ tess.numIndexes + 2 ] = i2;
-				tess.indexes[ tess.numIndexes + 3 ] = i2;
-				tess.indexes[ tess.numIndexes + 4 ] = i + tess.numVertexes;
-				tess.indexes[ tess.numIndexes + 5 ] = i2 + tess.numVertexes;
+				tess.indexes[ tess.numIndexes + 0 ] = ia;
+				tess.indexes[ tess.numIndexes + 1 ] = ia + tess.numVertexes;
+				tess.indexes[ tess.numIndexes + 2 ] = ib;
+				tess.indexes[ tess.numIndexes + 3 ] = ib;
+				tess.indexes[ tess.numIndexes + 4 ] = ia + tess.numVertexes;
+				tess.indexes[ tess.numIndexes + 5 ] = ib + tess.numVertexes;
 				tess.numIndexes += 6;
 			}
 		}
@@ -176,6 +180,42 @@ void RB_ShadowTessEnd( void ) {
 		// computation so we can identify silhouette edge vertices and only trace those)
 		Com_Memset( numEdgeDefs, 0, tess.numVertexes * sizeof( numEdgeDefs[0] ) );
 
+		// build positional weld map: weld[i] = canonical vertex index sharing i's
+		// position. UV seams split one logical vertex into several index copies;
+		// welding by position collapses them so the silhouette forms closed loops.
+		// Hashed on tess.xyz before extrusion (only indices < tess.numVertexes).
+		{
+			#define WELD_EPS    0.05f
+			#define WELD_INVEPS ( 1.0f / WELD_EPS )
+			// hsize must be a power of two for the open-addressing probe to cover
+			// every slot. next_pow2( 2*numVertexes ) < 4*SHADER_MAX_VERTEXES, so the
+			// table always fits and no (non-pow2) cap is needed.
+			static int htab[ 4 * SHADER_MAX_VERTEXES ];
+			int hsize = 1;
+			while ( hsize < tess.numVertexes * 2 ) hsize <<= 1;
+			Com_Memset( htab, 0xff, hsize * sizeof( htab[0] ) );	// fill with -1
+
+			for ( i = 0; i < tess.numVertexes; i++ ) {
+				int kx = (int)floorf( tess.xyz[i][0] * WELD_INVEPS + 0.5f );
+				int ky = (int)floorf( tess.xyz[i][1] * WELD_INVEPS + 0.5f );
+				int kz = (int)floorf( tess.xyz[i][2] * WELD_INVEPS + 0.5f );
+				unsigned h = ( (unsigned)kx * 73856093u ) ^ ( (unsigned)ky * 19349663u )
+						   ^ ( (unsigned)kz * 83492791u );
+				h &= (unsigned)( hsize - 1 );
+				weld[i] = i;
+				for ( ; htab[h] != -1; h = ( h + 1 ) & ( hsize - 1 ) ) {
+					int j = htab[h];
+					if ( (int)floorf( tess.xyz[j][0] * WELD_INVEPS + 0.5f ) == kx &&
+						 (int)floorf( tess.xyz[j][1] * WELD_INVEPS + 0.5f ) == ky &&
+						 (int)floorf( tess.xyz[j][2] * WELD_INVEPS + 0.5f ) == kz ) {
+						weld[i] = weld[j];	// same position -> share canonical id
+						break;
+					}
+				}
+				if ( weld[i] == i ) htab[h] = i;	// first occurrence claims the slot
+			}
+		}
+
 		numTris = tess.numIndexes / 3;
 		for ( i = 0 ; i < numTris ; i++ ) {
 			int		i1, i2, i3;
@@ -202,10 +242,12 @@ void RB_ShadowTessEnd( void ) {
 				facing[ i ] = 0;
 			}
 
-			// create the edges
-			R_AddEdgeDef( i1, i2, facing[ i ] );
-			R_AddEdgeDef( i2, i3, facing[ i ] );
-			R_AddEdgeDef( i3, i1, facing[ i ] );
+			// create the silhouette edges from welded indices, lit tris only
+			if ( facing[ i ] ) {
+				R_AddSilEdge( weld[i1], weld[i2] );
+				R_AddSilEdge( weld[i2], weld[i3] );
+				R_AddSilEdge( weld[i3], weld[i1] );
+			}
 		}
 
 		// save lit-facing triangle indices for back cap generation
@@ -295,6 +337,21 @@ void RB_ShadowTessEnd( void ) {
 					clipDists[i3] = capD;
 				}
 			}
+		}
+
+		// Unify clip distance across welded groups before extruding. Silhouette
+		// sides reference welded canonical indices while the caps reference original
+		// indices; a canonical vertex may never have been ray-traced (needsTrace
+		// marks only original lit-tri indices), so without this its side extrudes
+		// the full distance while the cap lands on the floor -> the volume tears
+		// open and stretches to a point. Give each group the nearest clip distance
+		// of its members so sides and caps extrude to the same place.
+		if ( r_shadowClip->integer && tr.world ) {
+			for ( i = 0; i < tess.numVertexes; i++ )
+				if ( clipDists[i] < clipDists[ weld[i] ] )
+					clipDists[ weld[i] ] = clipDists[i];
+			for ( i = 0; i < tess.numVertexes; i++ )
+				clipDists[i] = clipDists[ weld[i] ];
 		}
 
 		// Phase C: extrude vertices using final clip distances
