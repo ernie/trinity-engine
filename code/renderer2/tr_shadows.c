@@ -23,6 +23,31 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 
 /*
+=================
+R_ShadowClipDist
+
+Trace a ray through the clip BSP (which includes detail brushes) to find
+the nearest solid surface, then place the shadow back face just past it.
+=================
+*/
+static float R_ShadowClipDist( const vec3_t start, const vec3_t dir, float maxDist ) {
+	trace_t	trace;
+	vec3_t	end;
+
+	VectorMA( start, maxDist, dir, end );
+
+	ri.CM_PointTrace( &trace, start, end, CONTENTS_SOLID );
+
+	if ( trace.fraction >= 1.0f ) {
+		return maxDist;	// no solid hit, use full distance
+	}
+
+	// place back face just past the wall surface
+	return trace.fraction * maxDist + r_shadowClipPenetration->value;
+}
+
+
+/*
 
   for a projection shadow:
 
@@ -36,111 +61,92 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 typedef struct {
 	int		i2;
-	int		facing;
+	int		count;	// signed directed-edge accumulator
 } edgeDef_t;
 
 #define	MAX_EDGE_DEFS	32
 
 static	edgeDef_t	edgeDefs[SHADER_MAX_VERTEXES][MAX_EDGE_DEFS];
 static	int			numEdgeDefs[SHADER_MAX_VERTEXES];
-//static	int			facing[SHADER_MAX_INDEXES/3];
-//static	vec3_t		shadowXyz[SHADER_MAX_VERTEXES];
+static	int			facing[SHADER_MAX_INDEXES/3];
+static	int			numLitTris;
+static	int			litTriIndexes[SHADER_MAX_INDEXES];
+static	float		clipDists[SHADER_MAX_VERTEXES];
+static	qboolean	needsTrace[SHADER_MAX_VERTEXES];
+static	int			weld[SHADER_MAX_VERTEXES];
 
-void R_AddEdgeDef( int i1, int i2, int facing ) {
-	int		c;
+// Accumulate an undirected edge with a signed count, oriented by lo<hi.
+// A manifold edge between two lit tris gets +1 and -1 (opposite windings) ->
+// net 0 -> not a silhouette. A boundary/silhouette edge gets one sign only ->
+// net +/-1 -> emitted. Non-manifold edges sum to a consistent net value, keeping
+// stencil parity balanced instead of leaking.
+static void R_AddSilEdge( int a, int b ) {
+	int		lo, hi, dir, c, k;
 
-	c = numEdgeDefs[ i1 ];
-	if ( c == MAX_EDGE_DEFS ) {
-		return;		// overflow
+	if ( a == b ) {
+		return;		// degenerate after welding
 	}
-	edgeDefs[ i1 ][ c ].i2 = i2;
-	edgeDefs[ i1 ][ c ].facing = facing;
+	if ( a < b ) { lo = a; hi = b; dir =  1; }
+	else         { lo = b; hi = a; dir = -1; }
 
-	numEdgeDefs[ i1 ]++;
+	c = numEdgeDefs[ lo ];
+	for ( k = 0; k < c; k++ ) {
+		if ( edgeDefs[ lo ][ k ].i2 == hi ) {	// existing undirected edge
+			edgeDefs[ lo ][ k ].count += dir;
+			return;
+		}
+	}
+	if ( c < MAX_EDGE_DEFS ) {
+		edgeDefs[ lo ][ c ].i2    = hi;
+		edgeDefs[ lo ][ c ].count = dir;
+		numEdgeDefs[ lo ]++;
+	}
 }
 
-void R_RenderShadowEdges( void ) {
-	// FIXME: implement this
-#if 0
-	int		i;
+/*
+=================
+R_CalcShadowEdges
 
-#if 0
-	int		numTris;
+Build indexed quads for silhouette edges into tess.indexes.
+Projected vertices are at tess.xyz[i + tess.numVertexes].
+Ported from renderervk (OpenGL winding order).
+=================
+*/
+static void R_CalcShadowEdges( void ) {
+	int		lo, k;
 
-	// dumb way -- render every triangle's edges
-	numTris = tess.numIndexes / 3;
+	tess.numIndexes = 0;
 
-	for ( i = 0 ; i < numTris ; i++ ) {
-		int		i1, i2, i3;
+	// emit a silhouette quad for every edge with a non-zero signed count.
+	// net>0 keeps the lo->hi orientation, net<0 reverses it, so the emitted
+	// winding always matches the lit triangle that contributed the edge.
+	for ( lo = 0; lo < tess.numVertexes; lo++ ) {
+		int c = numEdgeDefs[ lo ];
+		for ( k = 0; k < c; k++ ) {
+			int hi  = edgeDefs[ lo ][ k ].i2;
+			int net = edgeDefs[ lo ][ k ].count;
+			int ia, ib, n;
 
-		if ( !facing[i] ) {
-			continue;
-		}
-
-		i1 = tess.indexes[ i*3 + 0 ];
-		i2 = tess.indexes[ i*3 + 1 ];
-		i3 = tess.indexes[ i*3 + 2 ];
-
-		qglBegin( GL_TRIANGLE_STRIP );
-		qglVertex3fv( tess.xyz[ i1 ] );
-		qglVertex3fv( shadowXyz[ i1 ] );
-		qglVertex3fv( tess.xyz[ i2 ] );
-		qglVertex3fv( shadowXyz[ i2 ] );
-		qglVertex3fv( tess.xyz[ i3 ] );
-		qglVertex3fv( shadowXyz[ i3 ] );
-		qglVertex3fv( tess.xyz[ i1 ] );
-		qglVertex3fv( shadowXyz[ i1 ] );
-		qglEnd();
-	}
-#else
-	int		c, c2;
-	int		j, k;
-	int		i2;
-	int		c_edges, c_rejected;
-	int		hit[2];
-
-	// an edge is NOT a silhouette edge if its face doesn't face the light,
-	// or if it has a reverse paired edge that also faces the light.
-	// A well behaved polyhedron would have exactly two faces for each edge,
-	// but lots of models have dangling edges or overfanned edges
-	c_edges = 0;
-	c_rejected = 0;
-
-	for ( i = 0 ; i < tess.numVertexes ; i++ ) {
-		c = numEdgeDefs[ i ];
-		for ( j = 0 ; j < c ; j++ ) {
-			if ( !edgeDefs[ i ][ j ].facing ) {
+			if ( net == 0 ) {
 				continue;
 			}
+			if ( net > 0 ) { ia = lo; ib = hi; }
+			else           { ia = hi; ib = lo; net = -net; }
 
-			hit[0] = 0;
-			hit[1] = 0;
-
-			i2 = edgeDefs[ i ][ j ].i2;
-			c2 = numEdgeDefs[ i2 ];
-			for ( k = 0 ; k < c2 ; k++ ) {
-				if ( edgeDefs[ i2 ][ k ].i2 == i ) {
-					hit[ edgeDefs[ i2 ][ k ].facing ]++;
+			for ( n = 0; n < net; n++ ) {		// net is ~always 1
+				if ( tess.numIndexes > ARRAY_LEN( tess.indexes ) - 6 ) {
+					return;
 				}
-			}
-
-			// if it doesn't share the edge with another front facing
-			// triangle, it is a sil edge
-			if ( hit[ 1 ] == 0 ) {
-				qglBegin( GL_TRIANGLE_STRIP );
-				qglVertex3fv( tess.xyz[ i ] );
-				qglVertex3fv( shadowXyz[ i ] );
-				qglVertex3fv( tess.xyz[ i2 ] );
-				qglVertex3fv( shadowXyz[ i2 ] );
-				qglEnd();
-				c_edges++;
-			} else {
-				c_rejected++;
+				tess.indexes[ tess.numIndexes + 0 ] = ia;
+				tess.indexes[ tess.numIndexes + 1 ] = ia + tess.numVertexes;
+				tess.indexes[ tess.numIndexes + 2 ] = ib;
+				tess.indexes[ tess.numIndexes + 3 ] = ib;
+				tess.indexes[ tess.numIndexes + 4 ] = ia + tess.numVertexes;
+				tess.indexes[ tess.numIndexes + 5 ] = ib + tess.numVertexes;
+				tess.numIndexes += 6;
 			}
 		}
 	}
-#endif
-#endif
 }
 
 /*
@@ -156,12 +162,9 @@ triangleFromEdge[ v1 ][ v2 ]
 =================
 */
 void RB_ShadowTessEnd( void ) {
-	// FIXME: implement this
-#if 0
 	int		i;
 	int		numTris;
 	vec3_t	lightDir;
-	GLboolean rgba[4];
 
 	if ( glConfig.stencilBits < 4 ) {
 		return;
@@ -169,16 +172,48 @@ void RB_ShadowTessEnd( void ) {
 
 	VectorCopy( backEnd.currentEntity->modelLightDir, lightDir );
 
-	// project vertexes away from light direction
-	for ( i = 0 ; i < tess.numVertexes ; i++ ) {
-		VectorMA( tess.xyz[i], -512, lightDir, shadowXyz[i] );
+	// decide which triangles face the light (must happen before clip distance
+	// computation so we can identify silhouette edge vertices and only trace those)
+	Com_Memset( numEdgeDefs, 0, tess.numVertexes * sizeof( numEdgeDefs[0] ) );
+
+	// build positional weld map: weld[i] = canonical vertex index sharing i's
+	// position. UV seams split one logical vertex into several index copies;
+	// welding by position collapses them so the silhouette forms closed loops.
+	// Hashed on tess.xyz before extrusion (only indices < tess.numVertexes).
+	{
+		#define WELD_EPS    0.05f
+		#define WELD_INVEPS ( 1.0f / WELD_EPS )
+		// hsize must be a power of two for the open-addressing probe to cover
+		// every slot. next_pow2( 2*numVertexes ) < 4*SHADER_MAX_VERTEXES, so the
+		// table always fits and no (non-pow2) cap is needed.
+		static int htab[ 4 * SHADER_MAX_VERTEXES ];
+		int hsize = 1;
+		while ( hsize < tess.numVertexes * 2 ) hsize <<= 1;
+		Com_Memset( htab, 0xff, hsize * sizeof( htab[0] ) );	// fill with -1
+
+		for ( i = 0; i < tess.numVertexes; i++ ) {
+			int kx = (int)floorf( tess.xyz[i][0] * WELD_INVEPS + 0.5f );
+			int ky = (int)floorf( tess.xyz[i][1] * WELD_INVEPS + 0.5f );
+			int kz = (int)floorf( tess.xyz[i][2] * WELD_INVEPS + 0.5f );
+			unsigned h = ( (unsigned)kx * 73856093u ) ^ ( (unsigned)ky * 19349663u )
+					   ^ ( (unsigned)kz * 83492791u );
+			h &= (unsigned)( hsize - 1 );
+			weld[i] = i;
+			for ( ; htab[h] != -1; h = ( h + 1 ) & ( hsize - 1 ) ) {
+				int j = htab[h];
+				if ( (int)floorf( tess.xyz[j][0] * WELD_INVEPS + 0.5f ) == kx &&
+					 (int)floorf( tess.xyz[j][1] * WELD_INVEPS + 0.5f ) == ky &&
+					 (int)floorf( tess.xyz[j][2] * WELD_INVEPS + 0.5f ) == kz ) {
+					weld[i] = weld[j];	// same position -> share canonical id
+					break;
+				}
+			}
+			if ( weld[i] == i ) htab[h] = i;	// first occurrence claims the slot
+		}
 	}
 
-	// decide which triangles face the light
-	Com_Memset( numEdgeDefs, 0, 4 * tess.numVertexes );
-
 	numTris = tess.numIndexes / 3;
-	for ( i = 0 ; i < numTris ; i++ ) {
+	for ( i = 0; i < numTris; i++ ) {
 		int		i1, i2, i3;
 		vec3_t	d1, d2, normal;
 		float	*v1, *v2, *v3;
@@ -197,45 +232,206 @@ void RB_ShadowTessEnd( void ) {
 		CrossProduct( d1, d2, normal );
 
 		d = DotProduct( normal, lightDir );
-		if ( d > 0 ) {
-			facing[ i ] = 1;
-		} else {
-			facing[ i ] = 0;
-		}
+		facing[ i ] = ( d > 0 ) ? 1 : 0;
 
-		// create the edges
-		R_AddEdgeDef( i1, i2, facing[ i ] );
-		R_AddEdgeDef( i2, i3, facing[ i ] );
-		R_AddEdgeDef( i3, i1, facing[ i ] );
+		// create the silhouette edges from welded indices, lit tris only
+		if ( facing[ i ] ) {
+			R_AddSilEdge( weld[i1], weld[i2] );
+			R_AddSilEdge( weld[i2], weld[i3] );
+			R_AddSilEdge( weld[i3], weld[i1] );
+		}
 	}
 
-	// draw the silhouette edges
+	// save lit-facing triangle indices for back cap generation
+	numLitTris = 0;
+	for ( i = 0; i < numTris; i++ ) {
+		if ( facing[i] ) {
+			litTriIndexes[ numLitTris*3 + 0 ] = tess.indexes[ i*3 + 0 ];
+			litTriIndexes[ numLitTris*3 + 1 ] = tess.indexes[ i*3 + 1 ];
+			litTriIndexes[ numLitTris*3 + 2 ] = tess.indexes[ i*3 + 2 ];
+			numLitTris++;
+		}
+	}
+
+	// project vertexes away from light direction, clipped to BSP walls
+	{
+		float	extrusionDist = r_shadowDistance->value;
+		vec3_t	worldNegLightDir;
+
+		if ( r_shadowClip->integer && tr.world ) {
+			int j;
+
+			// entity-local lightDir to world space, negated for extrusion
+			for ( j = 0; j < 3; j++ )
+				worldNegLightDir[j] = -( lightDir[0] * backEnd.or.axis[0][j]
+									   + lightDir[1] * backEnd.or.axis[1][j]
+									   + lightDir[2] * backEnd.or.axis[2][j] );
+
+			// mark vertices on lit-facing triangles — back-facing vertices
+			// don't contribute to silhouette edges or back caps, so skip them
+			Com_Memset( needsTrace, 0, tess.numVertexes * sizeof( needsTrace[0] ) );
+			for ( i = 0; i < numTris; i++ ) {
+				if ( facing[i] ) {
+					needsTrace[ tess.indexes[ i*3 + 0 ] ] = qtrue;
+					needsTrace[ tess.indexes[ i*3 + 1 ] ] = qtrue;
+					needsTrace[ tess.indexes[ i*3 + 2 ] ] = qtrue;
+				}
+			}
+		}
+
+		// Phase A: compute per-vertex clip distances (skip back-facing vertices)
+		for ( i = 0; i < tess.numVertexes; i++ ) {
+			clipDists[i] = extrusionDist;
+
+			if ( r_shadowClip->integer && tr.world && needsTrace[i] ) {
+				int j;
+				vec3_t worldPos;
+				float clipped;
+				for ( j = 0; j < 3; j++ )
+					worldPos[j] = tess.xyz[i][0] * backEnd.or.axis[0][j]
+								+ tess.xyz[i][1] * backEnd.or.axis[1][j]
+								+ tess.xyz[i][2] * backEnd.or.axis[2][j]
+								+ backEnd.or.origin[j];
+
+				clipped = R_ShadowClipDist( worldPos, worldNegLightDir, clipDists[i] );
+				if ( clipped < clipDists[i] )
+					clipDists[i] = clipped;
+			}
+		}
+
+		// Phase B: fix corner gaps by extending clip distances across triangles.
+		// Capped per-vertex to avoid bleeding through thin walls.
+		if ( r_shadowClip->integer && tr.world ) {
+			int t, numTrisLocal = tess.numIndexes / 3;
+			for ( t = 0; t < numTrisLocal; t++ ) {
+				int i1 = tess.indexes[ t*3 + 0 ];
+				int i2 = tess.indexes[ t*3 + 1 ];
+				int i3 = tess.indexes[ t*3 + 2 ];
+				float maxD = clipDists[i1];
+				float capD;
+				if ( clipDists[i2] > maxD ) maxD = clipDists[i2];
+				if ( clipDists[i3] > maxD ) maxD = clipDists[i3];
+				// skip if any vertex didn't hit solid
+				if ( maxD >= extrusionDist )
+					continue;
+				// cap: max r_shadowClipExtension units extension per vertex
+				capD = maxD;
+				if ( capD > clipDists[i1] + r_shadowClipExtension->value ) {
+					if ( clipDists[i1] + r_shadowClipExtension->value > clipDists[i1] )
+						clipDists[i1] += r_shadowClipExtension->value;
+				} else {
+					clipDists[i1] = capD;
+				}
+				if ( capD > clipDists[i2] + r_shadowClipExtension->value ) {
+					if ( clipDists[i2] + r_shadowClipExtension->value > clipDists[i2] )
+						clipDists[i2] += r_shadowClipExtension->value;
+				} else {
+					clipDists[i2] = capD;
+				}
+				if ( capD > clipDists[i3] + r_shadowClipExtension->value ) {
+					if ( clipDists[i3] + r_shadowClipExtension->value > clipDists[i3] )
+						clipDists[i3] += r_shadowClipExtension->value;
+				} else {
+					clipDists[i3] = capD;
+				}
+			}
+		}
+
+		// Unify clip distance across welded groups before extruding: sides use
+		// welded indices, caps use original ones, so without this a group's side
+		// and cap extrude to different distances and the volume tears open. Give
+		// each group the nearest clip distance of its members.
+		if ( r_shadowClip->integer && tr.world ) {
+			for ( i = 0; i < tess.numVertexes; i++ )
+				if ( clipDists[i] < clipDists[ weld[i] ] )
+					clipDists[ weld[i] ] = clipDists[i];
+			for ( i = 0; i < tess.numVertexes; i++ )
+				clipDists[i] = clipDists[ weld[i] ];
+		}
+
+		// Phase C: extrude vertices using final clip distances
+		for ( i = 0; i < tess.numVertexes; i++ ) {
+			VectorMA( tess.xyz[i], -clipDists[i], lightDir, tess.xyz[i+tess.numVertexes] );
+		}
+	}
+
+	R_CalcShadowEdges();
+
+	// append back cap: lit-facing triangles at extruded positions, reversed winding
+	for ( i = 0; i < numLitTris; i++ ) {
+		if ( tess.numIndexes > ARRAY_LEN( tess.indexes ) - 3 )
+			break;
+		tess.indexes[ tess.numIndexes + 0 ] = litTriIndexes[ i*3 + 0 ] + tess.numVertexes;
+		tess.indexes[ tess.numIndexes + 1 ] = litTriIndexes[ i*3 + 2 ] + tess.numVertexes;
+		tess.indexes[ tess.numIndexes + 2 ] = litTriIndexes[ i*3 + 1 ] + tess.numVertexes;
+		tess.numIndexes += 3;
+	}
+
+	// double vertex count: projected vertices follow originals in tess.xyz
+	tess.numVertexes *= 2;
+
+	// upload position-only (shadow rendering doesn't need normals/texcoords/etc)
+	RB_UpdateTessVao( ATTR_POSITION );
+
+	// bind textureColorShader for stencil-only rendering. renderer2 has no
+	// view/projection UBO, so feed the entity's combined MVP directly (it's live
+	// here since RB_ShadowTessEnd runs from RB_EndSurface with the orientation set).
+	{
+		shaderProgram_t *sp = &tr.textureColorShader;
+		vec4_t color;
+
+		GLSL_BindProgram( sp );
+		GLSL_SetUniformMat4( sp, UNIFORM_MODELVIEWPROJECTIONMATRIX, glState.modelviewProjection );
+		VectorSet4( color, 0.2f, 0.2f, 0.2f, 1.0f );
+		GLSL_SetUniformVec4( sp, UNIFORM_COLOR, color );
+		GLSL_SetUniformInt( sp, UNIFORM_ALPHATEST, 0 );
+	}
 
 	GL_BindToTMU( tr.whiteImage, TB_COLORMAP );
 	GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
-	qglColor3f( 0.2f, 0.2f, 0.2f );
 
 	// don't write to the color buffer
-	qglGetBooleanv(GL_COLOR_WRITEMASK, rgba);
 	qglColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
 
 	qglEnable( GL_STENCIL_TEST );
-	qglStencilFunc( GL_ALWAYS, 1, 255 );
+	qglStencilFunc( GL_EQUAL, 0, 0x80 );   // skip entity-marked pixels (bit 7 set)
+	qglStencilMask( 0x7F );                 // only write shadow count to bits 0-6
 
-	GL_Cull( CT_BACK_SIDED );
-	qglStencilOp( GL_KEEP, GL_KEEP, GL_INCR );
+	// mirrors reverse triangle winding, so swap cull modes
+	{
+		cullType_t backCull  = backEnd.viewParms.isMirror ? CT_FRONT_SIDED : CT_BACK_SIDED;
+		cullType_t frontCull = backEnd.viewParms.isMirror ? CT_BACK_SIDED  : CT_FRONT_SIDED;
 
-	R_RenderShadowEdges();
+		// draw back-sided (stencil increment)
+		GL_Cull( backCull );
+		qglStencilOp( GL_KEEP, GL_KEEP, GL_INCR );
+		R_DrawElements( tess.numIndexes, tess.firstIndex );
 
-	GL_Cull( CT_FRONT_SIDED );
-	qglStencilOp( GL_KEEP, GL_KEEP, GL_DECR );
+		// draw front-sided (stencil decrement)
+		GL_Cull( frontCull );
+		qglStencilOp( GL_KEEP, GL_KEEP, GL_DECR );
+		R_DrawElements( tess.numIndexes, tess.firstIndex );
+	}
 
-	R_RenderShadowEdges();
+	qglStencilMask( 0xFF );
 
+	// reenable color writes unconditionally rather than restoring a saved mask:
+	// color writes are always on in the surface loop, and a GL_COLOR_WRITEMASK
+	// readback is unreliable on WebGL (a failed read would black out the scene).
+	qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 
-	// re-enable writing to the color buffer
-	qglColorMask(rgba[0], rgba[1], rgba[2], rgba[3]);
-#endif
+	qglDisable( GL_STENCIL_TEST );
+
+	backEnd.doneShadows = qtrue;
+
+	tess.numIndexes = 0;
+	tess.numVertexes /= 2;
+
+	// extrusion into the upper half of the 2x tess buffers can dirty the
+	// RB_EndSurface canary sentinels; clear them so the next surface isn't
+	// falsely flagged as overflowed.
+	tess.xyz[SHADER_MAX_VERTEXES-1][0] = 0;
+	tess.indexes[SHADER_MAX_INDEXES-1] = 0;
 }
 
 
@@ -243,46 +439,88 @@ void RB_ShadowTessEnd( void ) {
 =================
 RB_ShadowFinish
 
-Darken everything that is is a shadow volume.
+Darken everything that is in a shadow volume.
 We have to delay this until everything has been shadowed,
 because otherwise shadows from different body parts would
 overlap and double darken.
 =================
 */
 void RB_ShadowFinish( void ) {
-	// FIXME: implement this
-#if 0
+	if ( !backEnd.doneShadows ) {
+		return;
+	}
+
+	backEnd.doneShadows = qfalse;
+
 	if ( r_shadows->integer != 2 ) {
 		return;
 	}
 	if ( glConfig.stencilBits < 4 ) {
 		return;
 	}
-	qglEnable( GL_STENCIL_TEST );
-	qglStencilFunc( GL_NOTEQUAL, 0, 255 );
 
-	GL_Cull( CT_TWO_SIDED );
+	// build fullscreen quad in ortho coordinates (0,0)-(vidWidth,vidHeight)
+	{
+		float w = (float)glConfig.vidWidth;
+		float h = (float)glConfig.vidHeight;
+
+		tess.numVertexes = 0;
+		tess.numIndexes = 0;
+		tess.firstIndex = 0;
+
+		VectorSet4( tess.xyz[0], 0, 0, 0.5f, 1.0f );
+		VectorSet4( tess.xyz[1], w, 0, 0.5f, 1.0f );
+		VectorSet4( tess.xyz[2], w, h, 0.5f, 1.0f );
+		VectorSet4( tess.xyz[3], 0, h, 0.5f, 1.0f );
+		tess.numVertexes = 4;
+
+		tess.indexes[0] = 0;
+		tess.indexes[1] = 1;
+		tess.indexes[2] = 2;
+		tess.indexes[3] = 0;
+		tess.indexes[4] = 2;
+		tess.indexes[5] = 3;
+		tess.numIndexes = 6;
+	}
+
+	// upload geometry
+	RB_UpdateTessVao( ATTR_POSITION );
+
+	// bind textureColorShader with a fullscreen ortho MVP. renderer2 has no
+	// view/projection UBO (renderergl2's GLSL_BindFullscreenOrthoBuffers), so
+	// build the ortho matrix inline — matching RB_SetGL2D's convention — and feed
+	// it as the single UNIFORM_MODELVIEWPROJECTIONMATRIX. This touches no glState,
+	// so no model-matrix save/restore is needed.
+	{
+		shaderProgram_t *sp = &tr.textureColorShader;
+		vec4_t color;
+		mat4_t orthoMvp;
+
+		Mat4Ortho( 0.0f, (float)glConfig.vidWidth, (float)glConfig.vidHeight, 0.0f, 0.0f, 1.0f, orthoMvp );
+
+		GLSL_BindProgram( sp );
+		GLSL_SetUniformMat4( sp, UNIFORM_MODELVIEWPROJECTIONMATRIX, orthoMvp );
+		VectorSet4( color, 0.6f, 0.6f, 0.6f, 1.0f );
+		GLSL_SetUniformVec4( sp, UNIFORM_COLOR, color );
+		GLSL_SetUniformInt( sp, UNIFORM_ALPHATEST, 0 );
+	}
 
 	GL_BindToTMU( tr.whiteImage, TB_COLORMAP );
 
-    qglLoadIdentity ();
+	GL_Cull( CT_TWO_SIDED );
 
-	qglColor3f( 0.6f, 0.6f, 0.6f );
-	GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO );
+	qglEnable( GL_STENCIL_TEST );
+	qglStencilFunc( GL_NOTEQUAL, 0, 0x7F );  // check shadow bits 0-6 only
 
-//	qglColor3f( 1, 0, 0 );
-//	GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
+	GL_State( GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO );
 
-	qglBegin( GL_QUADS );
-	qglVertex3f( -100, 100, -10 );
-	qglVertex3f( 100, 100, -10 );
-	qglVertex3f( 100, -100, -10 );
-	qglVertex3f( -100, -100, -10 );
-	qglEnd ();
+	R_DrawElements( tess.numIndexes, tess.firstIndex );
 
-	qglColor4f(1,1,1,1);
 	qglDisable( GL_STENCIL_TEST );
-#endif
+
+	tess.numIndexes = 0;
+	tess.numVertexes = 0;
+	tess.firstIndex = 0;
 }
 
 

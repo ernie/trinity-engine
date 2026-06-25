@@ -158,13 +158,14 @@ typedef enum {
 
 	SS_UNDERWATER,		// for items that should be drawn in front of the water plane
 
-	SS_BLEND0,			// regular transparency and filters
+	SS_STENCIL_SHADOW,	// stencil shadow volumes (before blended surfaces)
+
+	SS_BLEND0 = 17,		// regular transparency and filters
 	SS_BLEND1,			// generally only used for additive type effects
 	SS_BLEND2,
 	SS_BLEND3,
 
 	SS_BLEND6,
-	SS_STENCIL_SHADOW,
 	SS_ALMOST_NEAREST,	// gun smoke puffs
 
 	SS_NEAREST			// blood blobs
@@ -1461,6 +1462,7 @@ typedef struct {
 	qboolean	isHyperspace;
 	const trRefEntity_t *currentEntity;
 	qboolean	skyRenderedThisView;	// flag for drawing sun
+	qboolean	doneShadows;			// set once stencil shadow volumes have been drawn; RB_ShadowFinish darkens then clears it
 
 	qboolean	projection2D;	// if qtrue, drawstretchpic doesn't need to change modes
 	byte		color2D[4];
@@ -1733,6 +1735,10 @@ extern	cvar_t	*r_shownormals;					// draws wireframe normals
 extern	cvar_t	*r_clear;						// force screen clear every frame
 
 extern	cvar_t	*r_shadows;						// controls shadows: 0 = none, 1 = blur, 2 = stencil, 3 = black planar projection
+extern	cvar_t	*r_shadowDistance;				// shadow volume extrusion distance in game units
+extern	cvar_t	*r_shadowClip;					// clip stencil shadows against BSP walls
+extern	cvar_t	*r_shadowClipPenetration;		// how far shadow back faces extend past a wall surface
+extern	cvar_t	*r_shadowClipExtension;			// max distance a shadow vertex can be extended to match neighbors
 extern	cvar_t	*r_flares;						// light flares
 
 extern	cvar_t	*r_intensity;
@@ -1886,6 +1892,7 @@ qboolean R_CalcTangentVectors(srfVert_t * dv[3]);
 void R_LocalPointToWorld (const vec3_t local, vec3_t world);
 int R_CullBox (vec3_t bounds[2]);
 int R_CullLocalBox( const vec3_t bounds[2] );
+int R_CullLocalBoxExpanded( const vec3_t bounds[2], float expand );
 int R_CullPointAndRadiusEx( const vec3_t origin, float radius, const cplane_t* frustum, int numPlanes );
 int R_CullPointAndRadius( const vec3_t origin, float radius );
 int R_CullLocalPointAndRadius( const vec3_t origin, float radius );
@@ -2018,7 +2025,7 @@ typedef struct stageVars
 typedef struct shaderCommands_s 
 {
 	glIndex_t	indexes[SHADER_MAX_INDEXES] QALIGN(16);
-	vec4_t		xyz[SHADER_MAX_VERTEXES] QALIGN(16);
+	vec4_t		xyz[SHADER_MAX_VERTEXES*2] QALIGN(16); // 2x needed for shadows
 	int16_t		normal[SHADER_MAX_VERTEXES][4] QALIGN(16);
 	int16_t		tangent[SHADER_MAX_VERTEXES][4] QALIGN(16);
 	vec2_t		texCoords[SHADER_MAX_VERTEXES] QALIGN(16);

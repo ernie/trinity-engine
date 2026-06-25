@@ -1213,7 +1213,9 @@ static void RB_SurfaceVaoMdvMesh(const srfVaoMdvMesh_t * surface)
 
 	//GLimp_LogComment("--- RB_SurfaceVaoMdvMesh ---\n");
 
-	if (ShaderRequiresCPUDeforms(tess.shader))
+	// shadow volumes need CPU-side tess (xyz/normals) to build the silhouette,
+	// so force the CPU mesh path for the shadow shader instead of the VAO fast path
+	if (ShaderRequiresCPUDeforms(tess.shader) || tess.shader == tr.shadowShader)
 	{
 		RB_SurfaceMesh(surface->mdvSurface);
 		return;

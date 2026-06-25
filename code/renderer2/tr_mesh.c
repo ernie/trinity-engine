@@ -287,9 +287,10 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	shader_t		*shader = NULL;
 	int				cull;
 	int				lod;
-	int				fogNum;
+	int				fogNum = 0;
 	int             cubemapIndex;
 	qboolean		personalModel;
+	qboolean		shadowOnly = qfalse;
 
 	// don't add third_person objects if not in a portal
 	personalModel = (ent->e.renderfx & RF_THIRD_PERSON) && !(tr.viewParms.isPortal 
@@ -330,7 +331,27 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	//
 	cull = R_CullModel ( model, ent );
 	if ( cull == CULL_OUT ) {
-		return;
+		if ( r_shadows->integer != 2
+			|| personalModel
+			|| (ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK | RF_FIRST_PERSON )) ) {
+			return;
+		}
+		// expanded bounds for shadow cull: still render shadows for off-screen
+		// casters so their shadows don't pop when the caster leaves the view
+		{
+			vec3_t bounds[2];
+			mdvFrame_t *oldFrame = model->frames + ent->e.oldframe;
+			mdvFrame_t *newFrame = model->frames + ent->e.frame;
+			int k;
+			for (k = 0; k < 3; k++) {
+				bounds[0][k] = oldFrame->bounds[0][k] < newFrame->bounds[0][k] ? oldFrame->bounds[0][k] : newFrame->bounds[0][k];
+				bounds[1][k] = oldFrame->bounds[1][k] > newFrame->bounds[1][k] ? oldFrame->bounds[1][k] : newFrame->bounds[1][k];
+			}
+			if ( R_CullLocalBoxExpanded( bounds, r_shadowDistance->value ) == CULL_OUT ) {
+				return;
+			}
+		}
+		shadowOnly = qtrue;
 	}
 
 	//
@@ -343,7 +364,9 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	//
 	// see if we are in a fog volume
 	//
-	fogNum = R_ComputeFogNum( model, ent );
+	if ( !shadowOnly ) {
+		fogNum = R_ComputeFogNum( model, ent );
+	}
 
 	cubemapIndex = R_CubemapForPoint(ent->e.origin);
 
@@ -386,9 +409,9 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 
 		// stencil shadows can't do personal models unless I polyhedron clip
 		if ( !personalModel
-			&& r_shadows->integer == 2 
+			&& r_shadows->integer == 2
 			&& fogNum == 0
-			&& !(ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK ) ) 
+			&& !(ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK | RF_FIRST_PERSON ) )
 			&& shader->sort == SS_OPAQUE ) {
 			R_AddDrawSurf( (void *)&model->vaoSurfaces[i], tr.shadowShader, 0, qfalse, qfalse, 0 );
 		}
@@ -402,7 +425,7 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 		}
 
 		// don't add third_person objects if not viewing through a portal
-		if ( !personalModel ) {
+		if ( !personalModel && !shadowOnly ) {
 			R_AddDrawSurf((void *)&model->vaoSurfaces[i], shader, fogNum, qfalse, qfalse, cubemapIndex );
 		}
 

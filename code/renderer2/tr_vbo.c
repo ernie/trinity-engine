@@ -419,7 +419,7 @@ void R_InitVaos(void)
 
 	tr.numVaos = 0;
 
-	vertexesSize  = sizeof(tess.xyz[0]);
+	vertexesSize  = sizeof(tess.xyz[0]) * 2; // 2x position for shadow projection
 	vertexesSize += sizeof(tess.normal[0]);
 	vertexesSize += sizeof(tess.tangent[0]);
 	vertexesSize += sizeof(tess.color[0]);
@@ -466,7 +466,7 @@ void R_InitVaos(void)
 	tess.vao->attribs[ATTR_INDEX_COLOR         ].normalized = GL_TRUE;
 	tess.vao->attribs[ATTR_INDEX_LIGHTDIRECTION].normalized = GL_TRUE;
 
-	tess.vao->attribs[ATTR_INDEX_POSITION      ].offset = offset; offset += sizeof(tess.xyz[0])         * SHADER_MAX_VERTEXES;
+	tess.vao->attribs[ATTR_INDEX_POSITION      ].offset = offset; offset += sizeof(tess.xyz[0])         * SHADER_MAX_VERTEXES * 2; // 2x for shadow projection
 	tess.vao->attribs[ATTR_INDEX_NORMAL        ].offset = offset; offset += sizeof(tess.normal[0])      * SHADER_MAX_VERTEXES;
 	tess.vao->attribs[ATTR_INDEX_TANGENT       ].offset = offset; offset += sizeof(tess.tangent[0])     * SHADER_MAX_VERTEXES;
 	tess.vao->attribs[ATTR_INDEX_TEXCOORD      ].offset = offset; offset += sizeof(tess.texCoords[0])   * SHADER_MAX_VERTEXES;
@@ -593,7 +593,8 @@ void RB_UpdateTessVao(unsigned int attribBits)
 	backEnd.pc.c_dynamicVaoDraws++;
 
 	// update the default VAO
-	if(tess.numVertexes > 0 && tess.numVertexes <= SHADER_MAX_VERTEXES && tess.numIndexes > 0 && tess.numIndexes <= SHADER_MAX_INDEXES)
+	// 2x vertex limit accommodates shadow projection which doubles vertex count
+	if(tess.numVertexes > 0 && tess.numVertexes <= SHADER_MAX_VERTEXES * 2 && tess.numIndexes > 0 && tess.numIndexes <= SHADER_MAX_INDEXES)
 	{
 		int attribIndex;
 		int attribUpload;

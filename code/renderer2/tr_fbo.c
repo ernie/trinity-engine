@@ -282,12 +282,13 @@ void FBO_Init(void)
 	{
 		tr.renderFbo = FBO_Create("_render", tr.renderDepthImage->width, tr.renderDepthImage->height);
 		FBO_CreateBuffer(tr.renderFbo, hdrFormat, 0, multisample);
-		FBO_CreateBuffer(tr.renderFbo, GL_DEPTH_COMPONENT24, 0, multisample);
+		// packed depth+stencil: scene FBO needs a stencil buffer for cg_shadows 2
+		FBO_CreateBuffer(tr.renderFbo, GL_DEPTH24_STENCIL8, 0, multisample);
 		R_CheckFBO(tr.renderFbo);
 
 		tr.msaaResolveFbo = FBO_Create("_msaaResolve", tr.renderDepthImage->width, tr.renderDepthImage->height);
 		FBO_AttachImage(tr.msaaResolveFbo, tr.renderImage, GL_COLOR_ATTACHMENT0, 0);
-		FBO_AttachImage(tr.msaaResolveFbo, tr.renderDepthImage, GL_DEPTH_ATTACHMENT, 0);
+		FBO_AttachImage(tr.msaaResolveFbo, tr.renderDepthImage, GL_DEPTH_STENCIL_ATTACHMENT, 0);
 		R_CheckFBO(tr.msaaResolveFbo);
 	}
 	else if (r_hdr->integer
@@ -300,7 +301,7 @@ void FBO_Init(void)
 	{
 		tr.renderFbo = FBO_Create("_render", tr.renderDepthImage->width, tr.renderDepthImage->height);
 		FBO_AttachImage(tr.renderFbo, tr.renderImage, GL_COLOR_ATTACHMENT0, 0);
-		FBO_AttachImage(tr.renderFbo, tr.renderDepthImage, GL_DEPTH_ATTACHMENT, 0);
+		FBO_AttachImage(tr.renderFbo, tr.renderDepthImage, GL_DEPTH_STENCIL_ATTACHMENT, 0);
 		R_CheckFBO(tr.renderFbo);
 	}
 
@@ -316,7 +317,7 @@ void FBO_Init(void)
 	{
 		tr.screenScratchFbo = FBO_Create("screenScratch", tr.screenScratchImage->width, tr.screenScratchImage->height);
 		FBO_AttachImage(tr.screenScratchFbo, tr.screenScratchImage, GL_COLOR_ATTACHMENT0, 0);
-		FBO_AttachImage(tr.screenScratchFbo, tr.renderDepthImage, GL_DEPTH_ATTACHMENT, 0);
+		FBO_AttachImage(tr.screenScratchFbo, tr.renderDepthImage, GL_DEPTH_STENCIL_ATTACHMENT, 0);
 		R_CheckFBO(tr.screenScratchFbo);
 	}
 
@@ -324,7 +325,7 @@ void FBO_Init(void)
 	{
 		tr.sunRaysFbo = FBO_Create("_sunRays", tr.renderDepthImage->width, tr.renderDepthImage->height);
 		FBO_AttachImage(tr.sunRaysFbo, tr.sunRaysImage, GL_COLOR_ATTACHMENT0, 0);
-		FBO_AttachImage(tr.sunRaysFbo, tr.renderDepthImage, GL_DEPTH_ATTACHMENT, 0);
+		FBO_AttachImage(tr.sunRaysFbo, tr.renderDepthImage, GL_DEPTH_STENCIL_ATTACHMENT, 0);
 		R_CheckFBO(tr.sunRaysFbo);
 	}
 

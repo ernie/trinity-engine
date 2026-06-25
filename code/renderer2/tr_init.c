@@ -167,6 +167,10 @@ cvar_t	*r_drawBuffer;
 cvar_t	*r_lightmap;
 cvar_t	*r_vertexLight;
 cvar_t	*r_shadows;
+cvar_t	*r_shadowDistance;
+cvar_t	*r_shadowClip;
+cvar_t	*r_shadowClipPenetration;
+cvar_t	*r_shadowClipExtension;
 cvar_t	*r_flares;
 cvar_t	*r_nobind;
 cvar_t	*r_singleShader;
@@ -1379,6 +1383,16 @@ static void R_Register( void )
 	r_noportals = ri.Cvar_Get ("r_noportals", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription(r_noportals, "Disables in-game portals, valid values: 0: Portals enabled\n 1: Portals disabled\n 2: Portals and mirrors disabled" );
 	r_shadows = ri.Cvar_Get( "cg_shadows", "1", 0 );
+	r_shadowDistance = ri.Cvar_Get( "r_shadowDistance", "256", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_shadowDistance, "Stencil shadow (cg_shadows 2) extrusion distance" );
+	r_shadowClip = ri.Cvar_Get( "r_shadowClip", "1", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_shadowClip, "Clip stencil shadow volumes against solid surfaces to prevent wall/floor bleed-through" );
+	r_shadowClipPenetration = ri.Cvar_Get( "r_shadowClipPenetration", "4", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_shadowClipPenetration, "How far (in game units) shadow back faces extend past a wall surface. "
+		"Lower values reduce bleed-through on thin walls; too low may cause flickering at wall surfaces. Default: 4" );
+	r_shadowClipExtension = ri.Cvar_Get( "r_shadowClipExtension", "20", CVAR_ARCHIVE_ND );
+	ri.Cvar_SetDescription( r_shadowClipExtension, "Max distance (in game units) a shadow vertex can be extended to match its neighbors. "
+		"Higher values produce smoother long shadows but may bleed through thin walls near corners. Default: 20" );
 
 	r_marksOnTriangleMeshes = ri.Cvar_Get("r_marksOnTriangleMeshes", "0", CVAR_ARCHIVE);
 	ri.Cvar_SetDescription( r_marksOnTriangleMeshes, "Enables impact marks on triangle mesh surfaces (ie: MD3 models.) Requires impact marks to be enabled in the game code." );

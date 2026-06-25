@@ -3,6 +3,7 @@
     "r_fullscreen": 0,
     "cg_damageEffect": 1,
     "com_blood": 2,
+    "cg_shadows": 2,
     "r_lodCurveError": 8192,
     "r_picmip": 0,
     "r_lodBias": -2,

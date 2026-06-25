@@ -282,6 +282,21 @@ int R_CullLocalBox( const vec3_t localBounds[2] ) {
 }
 
 /*
+** R_CullLocalBoxExpanded
+** Cull test with bounds expanded by 'expand' in all directions.
+*/
+int R_CullLocalBoxExpanded( const vec3_t bounds[2], float expand ) {
+	vec3_t expanded[2];
+	expanded[0][0] = bounds[0][0] - expand;
+	expanded[0][1] = bounds[0][1] - expand;
+	expanded[0][2] = bounds[0][2] - expand;
+	expanded[1][0] = bounds[1][0] + expand;
+	expanded[1][1] = bounds[1][1] + expand;
+	expanded[1][2] = bounds[1][2] + expand;
+	return R_CullLocalBox( expanded );
+}
+
+/*
 =================
 R_CullBox
 

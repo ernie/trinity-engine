@@ -2326,6 +2326,11 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 				dataFormat = GL_DEPTH_COMPONENT;
 				dataType = GL_UNSIGNED_INT;
 				break;
+			case GL_DEPTH24_STENCIL8:
+				internalFormat = GL_DEPTH24_STENCIL8;
+				dataFormat = GL_DEPTH_STENCIL;
+				dataType = GL_UNSIGNED_INT_24_8;
+				break;
 			case GL_RGBA16F_ARB:
 				// GL_RGBA16F_ARB (0x881A) is same value as GL_RGBA16F in GLES3
 				dataFormat = GL_RGBA;
@@ -2425,6 +2430,7 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 		case GL_DEPTH_COMPONENT16_ARB:
 		case GL_DEPTH_COMPONENT24_ARB:
 		case GL_DEPTH_COMPONENT32_ARB:
+		case GL_DEPTH24_STENCIL8:
 #ifndef __EMSCRIPTEN__
 			// Fix for sampling depth buffer on old nVidia cards.
 			// GL_DEPTH_TEXTURE_MODE does not exist in GLES/WebGL.
@@ -3013,7 +3019,8 @@ static void R_CreateBuiltinImages( void ) {
 		if (r_drawSunRays->integer)
 			tr.sunRaysImage = R_CreateImage("*sunRays", NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, rgbFormat);
 
-		tr.renderDepthImage  = R_CreateImage("*renderdepth",  NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_DEPTH_COMPONENT24);
+		// packed depth+stencil so the scene FBO has a stencil buffer for cg_shadows 2
+		tr.renderDepthImage  = R_CreateImage("*renderdepth",  NULL, width, height, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_DEPTH24_STENCIL8);
 		tr.textureDepthImage = R_CreateImage("*texturedepth", NULL, PSHADOW_MAP_SIZE, PSHADOW_MAP_SIZE, IMGTYPE_COLORALPHA, IMGFLAG_NO_COMPRESSION | IMGFLAG_CLAMPTOEDGE, GL_DEPTH_COMPONENT24);
 
 		{

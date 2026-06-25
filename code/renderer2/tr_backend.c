@@ -373,6 +373,7 @@ static void RB_BeginDrawingView (void) {
 	if ( r_measureOverdraw->integer || r_shadows->integer == 2 )
 	{
 		clearBits |= GL_STENCIL_BUFFER_BIT;
+		qglStencilMask( 0xFF );  // ensure all stencil bits are cleared
 	}
 	if ( r_fastsky->integer && !( backEnd.refdef.rdflags & RDF_NOWORLDMODEL ) )
 	{
@@ -386,6 +387,11 @@ static void RB_BeginDrawingView (void) {
 	}
 
 	qglClear( clearBits );
+
+	// Prevent stencil state leaking between views
+	if ( r_shadows->integer == 2 ) {
+		qglDisable( GL_STENCIL_TEST );
+	}
 
 	if ( ( backEnd.refdef.rdflags & RDF_HYPERSPACE ) )
 	{
@@ -458,6 +464,7 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	oldSort = ~0U;
 	shader = NULL;
 
+	backEnd.doneShadows = qfalse;
 	backEnd.pc.c_surfaces += numDrawSurfs;
 
 	for (i = 0, drawSurf = drawSurfs ; i < numDrawSurfs ; i++, drawSurf++) {
@@ -481,6 +488,11 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			|| ( entityNum != oldEntityNum && !shader->entityMergable ) ) ) {
 			if (oldShader != NULL) {
 				RB_EndSurface();
+			}
+			// composite shadow finish before blended surfaces so sprites draw on top
+			if ( backEnd.doneShadows && shader->sort >= SS_BLEND0 ) {
+				RB_ShadowFinish();
+				oldEntityNum = -1;
 			}
 			RB_BeginSurface( shader, fogNum, cubemapIndex );
 			backEnd.pc.c_surfBatches++;
@@ -539,6 +551,20 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			}
 
 			GL_SetModelviewMatrix( backEnd.or.modelMatrix );
+
+			// Mark RT_MODEL entity pixels with stencil bit 0x80 (self-shadow exclusion)
+			if ( r_shadows->integer == 2 && !backEnd.depthFill ) {
+				if ( entityNum != REFENTITYNUM_WORLD
+					&& backEnd.currentEntity->e.reType == RT_MODEL ) {
+					qglEnable( GL_STENCIL_TEST );
+					qglStencilFunc( GL_ALWAYS, 0x80, 0xFF );
+					qglStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+					qglStencilMask( 0x80 );
+				} else {
+					qglDisable( GL_STENCIL_TEST );
+					qglStencilMask( 0xFF );
+				}
+			}
 
 			//
 			// change depthrange. Also change projection matrix so first person weapon does not look like coming
