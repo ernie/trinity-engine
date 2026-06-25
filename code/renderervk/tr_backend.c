@@ -1126,6 +1126,10 @@ void RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int clien
 
 	if ( !tr.scratchImage[ client ] ) {
 		tr.scratchImage[ client ] = R_CreateImage( va( "*scratch%i", client ), NULL, data, cols, rows, IMGFLAG_CLAMPTOEDGE | IMGFLAG_RGB | IMGFLAG_NOSCALE );
+#ifdef USE_VULKAN
+		// bind the new scratch image so videoMap stages sample it this frame
+		GL_Bind( tr.scratchImage[ client ] );
+#endif
 		return;
 	}
 
@@ -1158,6 +1162,12 @@ void RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int clien
 		qglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, data );
 #endif
 	}
+
+#ifdef USE_VULKAN
+	// bind the scratch image (descriptor may have been recreated above) so
+	// videoMap stages sample the current cinematic frame
+	GL_Bind( image );
+#endif
 }
 
 
