@@ -73,6 +73,19 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define GL_TEXTURE_MAX_ANISOTROPY_EXT       0x84FE
 #define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT   0x84FF
 
+// wrapping stencil ops (GL 1.4) for z-fail stencil shadows
+#ifndef GL_INCR_WRAP
+#define GL_INCR_WRAP                        0x8507
+#endif
+#ifndef GL_DECR_WRAP
+#define GL_DECR_WRAP                        0x8508
+#endif
+
+// depth clamp (GL_ARB_depth_clamp / GL 3.2) for z-fail shadow volumes
+#ifndef GL_DEPTH_CLAMP
+#define GL_DEPTH_CLAMP                      0x864F
+#endif
+
 #ifndef GL_CLAMP_TO_BORDER
 #define GL_CLAMP_TO_BORDER                  0x812D
 #endif

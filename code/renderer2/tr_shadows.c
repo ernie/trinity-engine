@@ -367,6 +367,17 @@ void RB_ShadowTessEnd( void ) {
 		tess.numIndexes += 3;
 	}
 
+	// near cap: lit-facing tris at original positions, wound opposite the far
+	// cap, closing the volume on the light side as z-fail requires.
+	for ( i = 0; i < numLitTris; i++ ) {
+		if ( tess.numIndexes > ARRAY_LEN( tess.indexes ) - 3 )
+			break;
+		tess.indexes[ tess.numIndexes + 0 ] = litTriIndexes[ i*3 + 0 ];
+		tess.indexes[ tess.numIndexes + 1 ] = litTriIndexes[ i*3 + 1 ];
+		tess.indexes[ tess.numIndexes + 2 ] = litTriIndexes[ i*3 + 2 ];
+		tess.numIndexes += 3;
+	}
+
 	// double vertex count: projected vertices follow originals in tess.xyz
 	tess.numVertexes *= 2;
 
@@ -397,21 +408,33 @@ void RB_ShadowTessEnd( void ) {
 	qglStencilFunc( GL_EQUAL, 0, 0x80 );   // skip entity-marked pixels (bit 7 set)
 	qglStencilMask( 0x7F );                 // only write shadow count to bits 0-6
 
-	// mirrors reverse triangle winding, so swap cull modes
+	// clamp volume fragments to the depth range so the volume stays closed when
+	// the camera is inside or near it. Absent on WebGL, where the caps alone fix
+	// the common through-wall bleed.
+	if ( glRefConfig.depthClamp )
+		qglEnable( GL_DEPTH_CLAMP );
+
+	// z-fail (Carmack's reverse): count fragments behind scene geometry. WRAP
+	// keeps the count modular across draw order and camera-inside-volume;
+	// stencilMask 0x7F preserves the 0x80 entity-mark bit.
+	// mirrored views reverse winding, so swap cull modes
 	{
 		cullType_t backCull  = backEnd.viewParms.isMirror ? CT_FRONT_SIDED : CT_BACK_SIDED;
 		cullType_t frontCull = backEnd.viewParms.isMirror ? CT_BACK_SIDED  : CT_FRONT_SIDED;
 
-		// draw back-sided (stencil increment)
+		// draw back-sided (stencil decrement on depth-fail)
 		GL_Cull( backCull );
-		qglStencilOp( GL_KEEP, GL_KEEP, GL_INCR );
+		qglStencilOp( GL_KEEP, GL_DECR_WRAP, GL_KEEP );
 		R_DrawElements( tess.numIndexes, tess.firstIndex );
 
-		// draw front-sided (stencil decrement)
+		// draw front-sided (stencil increment on depth-fail)
 		GL_Cull( frontCull );
-		qglStencilOp( GL_KEEP, GL_KEEP, GL_DECR );
+		qglStencilOp( GL_KEEP, GL_INCR_WRAP, GL_KEEP );
 		R_DrawElements( tess.numIndexes, tess.firstIndex );
 	}
+
+	if ( glRefConfig.depthClamp )
+		qglDisable( GL_DEPTH_CLAMP );
 
 	qglStencilMask( 0xFF );
 

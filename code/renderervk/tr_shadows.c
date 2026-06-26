@@ -402,6 +402,25 @@ void RB_ShadowTessEnd( void ) {
 		}
 	}
 
+	// near cap: lit-facing tris at original positions, wound opposite the far
+	// cap, closing the volume on the light side as z-fail requires.
+	{
+		for ( i = 0; i < numLitTris; i++ ) {
+			if ( tess.numIndexes > ARRAY_LEN( tess.indexes ) - 3 )
+				break;
+#ifdef USE_VULKAN
+			tess.indexes[ tess.numIndexes + 0 ] = litTriIndexes[ i*3 + 0 ];
+			tess.indexes[ tess.numIndexes + 1 ] = litTriIndexes[ i*3 + 2 ];
+			tess.indexes[ tess.numIndexes + 2 ] = litTriIndexes[ i*3 + 1 ];
+#else
+			tess.indexes[ tess.numIndexes + 0 ] = litTriIndexes[ i*3 + 0 ];
+			tess.indexes[ tess.numIndexes + 1 ] = litTriIndexes[ i*3 + 1 ];
+			tess.indexes[ tess.numIndexes + 2 ] = litTriIndexes[ i*3 + 2 ];
+#endif
+			tess.numIndexes += 3;
+		}
+	}
+
 	// draw the silhouette edges
 #ifdef USE_VULKAN
 	GL_Bind( tr.whiteImage );

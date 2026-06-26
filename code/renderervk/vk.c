@@ -6325,7 +6325,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	rasterization_state.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
 	rasterization_state.pNext = NULL;
 	rasterization_state.flags = 0;
-	rasterization_state.depthClampEnable = (def->shadow_phase == SHADOW_FS_QUAD && vk.depthClamp) ? VK_TRUE : VK_FALSE;
+	rasterization_state.depthClampEnable = ((def->shadow_phase == SHADOW_FS_QUAD || def->shadow_phase == SHADOW_EDGES) && vk.depthClamp) ? VK_TRUE : VK_FALSE;
 	rasterization_state.rasterizerDiscardEnable = VK_FALSE;
 	if ( def->shader_type == TYPE_DOT ) {
 		rasterization_state.polygonMode = VK_POLYGON_MODE_POINT;
@@ -6413,9 +6413,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		depth_stencil_state.back = depth_stencil_state.front;
 
 	} else if (def->shadow_phase == SHADOW_EDGES) {
+		// z-fail (Carmack's reverse): count fragments behind scene geometry.
+		// WRAP keeps the count modular across nested volumes and draw order;
+		// writeMask 0x7F preserves the 0x80 entity-mark bit. Needs a closed
+		// volume (near + far caps) and depth clamp.
 		depth_stencil_state.front.failOp = VK_STENCIL_OP_KEEP;
-		depth_stencil_state.front.passOp = (def->face_culling == CT_FRONT_SIDED) ? VK_STENCIL_OP_INCREMENT_AND_CLAMP : VK_STENCIL_OP_DECREMENT_AND_CLAMP;
-		depth_stencil_state.front.depthFailOp = VK_STENCIL_OP_KEEP;
+		depth_stencil_state.front.passOp = VK_STENCIL_OP_KEEP;
+		depth_stencil_state.front.depthFailOp = (def->face_culling == CT_FRONT_SIDED) ? VK_STENCIL_OP_DECREMENT_AND_WRAP : VK_STENCIL_OP_INCREMENT_AND_WRAP;
 		depth_stencil_state.front.compareOp = VK_COMPARE_OP_EQUAL;
 		depth_stencil_state.front.compareMask = 0x80;  // skip entity-marked pixels
 		depth_stencil_state.front.writeMask = 0x7F;    // only write shadow count to bits 0-6

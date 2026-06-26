@@ -65,6 +65,7 @@ extern glconfig_t	glConfig;		// outside of TR since it shouldn't be cleared duri
 // to the glconfig_t struct.
 extern qboolean  nonPowerOfTwoTextures;
 extern qboolean  textureBorderClampAvailable;
+extern qboolean  depthClampAvailable;
 extern qboolean  textureFilterAnisotropic;
 extern int       maxAnisotropy;
 extern int       gl_version;

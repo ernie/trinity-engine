@@ -27,6 +27,7 @@ glconfig_t	glConfig;
 qboolean	nonPowerOfTwoTextures;
 qboolean	textureFilterAnisotropic;
 qboolean    textureBorderClampAvailable;
+qboolean    depthClampAvailable;
 int			maxAnisotropy;
 int			gl_version;
 int			gl_clamp_mode;	// GL_CLAMP or GL_CLAMP_TO_EGGE
@@ -337,6 +338,8 @@ static void R_InitExtensions( void )
 
 	textureBorderClampAvailable = qfalse;
 
+	depthClampAvailable = qfalse;
+
 	textureFilterAnisotropic = qfalse;
 	maxAnisotropy = 0;
 
@@ -426,6 +429,15 @@ static void R_InitExtensions( void )
 		ri.Printf( PRINT_ALL, "...using GL_ARB_texture_border_clamp\n" );
 	} else {
 		ri.Printf( PRINT_ALL, "...GL_ARB_texture_border_clamp not found\n" );
+	}
+
+	// GL_ARB_depth_clamp keeps z-fail shadow volumes closed when the camera is
+	// inside or near a volume.
+	if ( R_HaveExtension( "GL_ARB_depth_clamp" ) ) {
+		depthClampAvailable = qtrue;
+		ri.Printf( PRINT_ALL, "...using GL_ARB_depth_clamp\n" );
+	} else {
+		ri.Printf( PRINT_ALL, "...GL_ARB_depth_clamp not found\n" );
 	}
 
 	// GL_ARB_multitexture

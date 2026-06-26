@@ -372,6 +372,17 @@ void RB_ShadowTessEnd( void ) {
 		tess.numIndexes += 3;
 	}
 
+	// near cap: lit-facing tris at original positions, wound opposite the far
+	// cap, closing the volume on the light side as z-fail requires.
+	for ( i = 0; i < numLitTris; i++ ) {
+		if ( tess.numIndexes > ARRAY_LEN( tess.indexes ) - 3 )
+			break;
+		tess.indexes[ tess.numIndexes + 0 ] = litTriIndexes[ i*3 + 0 ];
+		tess.indexes[ tess.numIndexes + 1 ] = litTriIndexes[ i*3 + 1 ];
+		tess.indexes[ tess.numIndexes + 2 ] = litTriIndexes[ i*3 + 2 ];
+		tess.numIndexes += 3;
+	}
+
 
 	GL_ClientState( 1, CLS_NONE );
 	GL_ClientState( 0, CLS_NONE );
@@ -396,18 +407,29 @@ void RB_ShadowTessEnd( void ) {
 	qglStencilFunc( GL_EQUAL, 0, 0x80 );   // skip entity-marked pixels (bit 7 set)
 	qglStencilMask( 0x7F );                 // only write shadow count to bits 0-6
 
+	// clamp volume fragments to the depth range so the volume stays closed when
+	// the camera is inside or near it.
+	if ( depthClampAvailable )
+		qglEnable( GL_DEPTH_CLAMP );
+
+	// z-fail (Carmack's reverse): count fragments behind scene geometry. WRAP
+	// keeps the count modular across draw order and camera-inside-volume;
+	// stencilMask 0x7F preserves the 0x80 entity-mark bit.
 	GL_Cull( CT_BACK_SIDED );
-	qglStencilOp( GL_KEEP, GL_KEEP, GL_INCR );
+	qglStencilOp( GL_KEEP, GL_DECR_WRAP, GL_KEEP );
 
 	R_DrawElements( tess.numIndexes, tess.indexes );
 
 	GL_Cull( CT_FRONT_SIDED );
-	qglStencilOp( GL_KEEP, GL_KEEP, GL_DECR );
+	qglStencilOp( GL_KEEP, GL_INCR_WRAP, GL_KEEP );
 
 	R_DrawElements( tess.numIndexes, tess.indexes );
 
 	if ( qglUnlockArraysEXT )
 		qglUnlockArraysEXT();
+
+	if ( depthClampAvailable )
+		qglDisable( GL_DEPTH_CLAMP );
 
 	qglStencilMask( 0xFF );
 	qglDisable( GL_STENCIL_TEST );
