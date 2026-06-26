@@ -762,6 +762,12 @@ ifeq ($(USE_CCACHE),1)
   CC := ccache $(CC)
 endif
 
+# Compiler for build-time host tools (e.g. the renderer2 GLSL stringify tool).
+# These must run on the build machine, so when cross-compiling they cannot be
+# built with the target $(CC). Defaults to $(CC) for native builds; override on
+# the command line (e.g. HOST_CC=cc) when cross-compiling.
+HOST_CC ?= $(CC)
+
 ifneq ($(USE_RENDERER_DLOPEN),0)
     RENDCFLAGS=$(SHLIBCFLAGS)
 else
@@ -1416,8 +1422,8 @@ $(B)/$(TARGET_REND1): $(Q3REND1OBJ)
 	$(Q)$(CC) -o $@ $(Q3REND1OBJ) $(SHLIBCFLAGS) $(SHLIBLDFLAGS)
 
 $(STRINGIFY): $(MOUNT_DIR)/renderer2/stringify.c
-	$(echo_cmd) "LD $@"
-	$(Q)$(CC) -o $@ $(MOUNT_DIR)/renderer2/stringify.c $(LDFLAGS)
+	$(echo_cmd) "HOST_LD $@"
+	$(Q)$(HOST_CC) -o $@ $(MOUNT_DIR)/renderer2/stringify.c
 
 $(B)/$(TARGET_REND2): $(Q3REND2OBJ) $(Q3REND2STROBJ)
 	$(echo_cmd) "LD $@"

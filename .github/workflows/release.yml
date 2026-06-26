@@ -234,7 +234,7 @@ jobs:
           sudo apt-get -y install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libcurl4-openssl-dev:armhf mesa-common-dev:armhf libxxf86dga-dev:armhf libxrandr-dev:armhf libxxf86vm-dev:armhf libasound-dev:armhf
 
       - name: Build
-        run: make install -j$(nproc) ARCH=arm CC=arm-linux-gnueabihf-gcc STRIP=arm-linux-gnueabihf-strip DESTDIR=bin USE_SDL=0 USE_VOIP=0
+        run: make install -j$(nproc) ARCH=arm CC=arm-linux-gnueabihf-gcc HOST_CC=cc STRIP=arm-linux-gnueabihf-strip DESTDIR=bin USE_SDL=0 USE_VOIP=0
 
       - uses: actions/upload-artifact@v7
         with:
