@@ -1936,6 +1936,9 @@ static GLenum PixelDataFormatFromInternalFormat(GLenum internalFormat)
 		case GL_DEPTH_COMPONENT24_ARB:
 		case GL_DEPTH_COMPONENT32_ARB:
 			return GL_DEPTH_COMPONENT;
+		case GL_DEPTH24_STENCIL8:
+		case GL_DEPTH_STENCIL:
+			return GL_DEPTH_STENCIL;
 		case GL_R8:
 		case GL_R32F:
 			return GL_RED;
@@ -2354,6 +2357,34 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 				break;
 			default:
 				ri.Printf( PRINT_WARNING, "Missing OpenGL ES support for image '%s' with internal format 0x%X\n", name, internalFormat );
+				break;
+		}
+	}
+	else
+	{
+		// desktop core GL requires format/type to match internalFormat. Depth/
+		// stencil FBO attachments carry picFormat GL_RGBA8, so pick their format by
+		// internalFormat; color source is always RGBA, so upload it as RGBA and let
+		// the driver convert (GL_RGB would misread the 4-byte pixels and shear).
+		switch (internalFormat)
+		{
+			case GL_DEPTH_COMPONENT:
+			case GL_DEPTH_COMPONENT16_ARB:
+				dataFormat = GL_DEPTH_COMPONENT;
+				dataType = GL_UNSIGNED_SHORT;
+				break;
+			case GL_DEPTH_COMPONENT24_ARB:
+			case GL_DEPTH_COMPONENT32_ARB:
+				dataFormat = GL_DEPTH_COMPONENT;
+				dataType = GL_UNSIGNED_INT;
+				break;
+			case GL_DEPTH24_STENCIL8:
+				dataFormat = GL_DEPTH_STENCIL;
+				dataType = GL_UNSIGNED_INT_24_8;
+				break;
+			default:
+				if (rgba8 || picFormat == GL_RGBA16)
+					dataFormat = GL_RGBA;
 				break;
 		}
 	}

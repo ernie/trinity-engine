@@ -391,6 +391,16 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES );
 			SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
 			SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 0 );
+#else
+			// renderer2 needs an OpenGL 3.2 core context; it renders incorrectly on
+			// the default compatibility profile. The classic opengl renderer needs
+			// the legacy context, so request core only for opengl2.
+			if ( !Q_stricmp( Cvar_VariableString( "cl_renderer" ), "opengl2" ) )
+			{
+				SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
+				SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
+				SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 2 );
+			}
 #endif
 
 			SDL_GL_SetAttribute( SDL_GL_RED_SIZE, perChannelColorBits );

@@ -121,7 +121,24 @@ void GLimp_InitExtraExtensions( void )
 		glConfig.renderer_string[ len - 1 ] = '\0';
 	Q_strncpyz( glConfig.version_string, (char *)qglGetString( GL_VERSION ), sizeof( glConfig.version_string ) );
 
-	Q_strncpyz( gl_extensions, (char *)qglGetString( GL_EXTENSIONS ), sizeof( gl_extensions ) );
+	{
+		const char *extstr = (const char *)qglGetString( GL_EXTENSIONS );
+		if ( extstr ) {
+			Q_strncpyz( gl_extensions, extstr, sizeof( gl_extensions ) );
+		} else if ( qglGetStringi ) {
+			// core profile removed glGetString(GL_EXTENSIONS); rebuild the list
+			// from glGetStringi so R_HaveExtension still works.
+			GLint numExtensions = 0, i;
+			qglGetIntegerv( GL_NUM_EXTENSIONS, &numExtensions );
+			gl_extensions[0] = '\0';
+			for ( i = 0; i < numExtensions; i++ ) {
+				Q_strcat( gl_extensions, sizeof( gl_extensions ), (const char *)qglGetStringi( GL_EXTENSIONS, i ) );
+				Q_strcat( gl_extensions, sizeof( gl_extensions ), " " );
+			}
+		} else {
+			gl_extensions[0] = '\0';
+		}
+	}
 	Q_strncpyz( glConfig.extensions_string, gl_extensions, sizeof( glConfig.extensions_string ) );
 
 	if ( Q_stricmpn( "OpenGL ES", glConfig.version_string, 9 ) == 0 ) {

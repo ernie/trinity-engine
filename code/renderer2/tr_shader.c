@@ -4068,13 +4068,13 @@ static void ScanAndLoadShaderFiles( void )
 
 	textEnd = s_shaderText;
 
-	// free in reverse order, so the temp files are all dumped
+	// concatenate first, then free the temp buffers separately below: they must
+	// be released in reverse allocation order or the hunk temp stack can't unwind.
 	// legacy shaders
 	for ( i = numShaderFiles - 1; i >= 0 ; i-- ) {
 		if ( buffers[ i ] ) {
 			textEnd = Q_stradd( textEnd, buffers[ i ] );
 			textEnd = Q_stradd( textEnd, "\n" );
-			ri.FS_FreeFile( buffers[ i ] );
 		}
 	}
 
@@ -4087,15 +4087,27 @@ static void ScanAndLoadShaderFiles( void )
 		if ( xbuffers[ i ] ) {
 			textEnd = Q_stradd( textEnd, xbuffers[ i ] );
 			textEnd = Q_stradd( textEnd, "\n" );
-			ri.FS_FreeFile( xbuffers[ i ] );
 		}
 	}
 	for ( i = numShaderxFiles - 1; i >= 0 ; i-- ) {
 		if ( sxbuffers[ i ] ) {
 			textEnd = Q_stradd( textEnd, sxbuffers[ i ] );
 			textEnd = Q_stradd( textEnd, "\n" );
-			ri.FS_FreeFile( sxbuffers[ i ] );
 		}
+	}
+
+	// reverse of allocation order: sxbuffers, buffers, xbuffers
+	for ( i = numShaderxFiles - 1; i >= 0 ; i-- ) {
+		if ( sxbuffers[ i ] )
+			ri.FS_FreeFile( sxbuffers[ i ] );
+	}
+	for ( i = numShaderFiles - 1; i >= 0 ; i-- ) {
+		if ( buffers[ i ] )
+			ri.FS_FreeFile( buffers[ i ] );
+	}
+	for ( i = numMtrFiles - 1; i >= 0 ; i-- ) {
+		if ( xbuffers[ i ] )
+			ri.FS_FreeFile( xbuffers[ i ] );
 	}
 
 	// free up memory
