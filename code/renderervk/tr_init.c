@@ -1734,7 +1734,7 @@ static void R_Register( void )
 	r_shadowClipPenetration = ri.Cvar_Get( "r_shadowClipPenetration", "4", CVAR_ARCHIVE_ND );
 	ri.Cvar_SetDescription( r_shadowClipPenetration, "How far (in game units) shadow back faces extend past a wall surface. "
 		"Lower values reduce bleed-through on thin walls; too low may cause flickering at wall surfaces. Default: 4" );
-	r_shadowClipExtension = ri.Cvar_Get( "r_shadowClipExtension", "20", CVAR_ARCHIVE_ND );
+	r_shadowClipExtension = ri.Cvar_Get( "r_shadowClipExtension", "16", CVAR_ARCHIVE_ND );
 	ri.Cvar_SetDescription( r_shadowClipExtension, "Max distance (in game units) a shadow vertex can be extended to match its neighbors. "
 		"Higher values produce smoother long shadows but may bleed through thin walls near corners. Default: 20" );
 

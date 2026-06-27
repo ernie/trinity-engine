@@ -74,6 +74,7 @@ static	int			litTriIndexes[SHADER_MAX_INDEXES];
 static	float		clipDists[SHADER_MAX_VERTEXES];
 static	qboolean	needsTrace[SHADER_MAX_VERTEXES];
 static	int			weld[SHADER_MAX_VERTEXES];
+static	float		clipDistsPreB[SHADER_MAX_VERTEXES];	// per-vertex clip distances before Phase B
 
 // Accumulate an undirected edge with a signed count, oriented by lo<hi.
 // A manifold edge between two lit tris gets +1 and -1 (opposite windings) ->
@@ -271,7 +272,7 @@ void RB_ShadowTessEnd( void ) {
 			}
 		}
 
-		// save lit-facing triangle indices for back cap
+			// save lit-facing triangle indices for back cap
 		numLitTris = 0;
 		for ( i = 0; i < numTris; i++ ) {
 			if ( facing[i] ) {
@@ -322,57 +323,54 @@ void RB_ShadowTessEnd( void ) {
 			}
 		}
 
-		// Phase B: fix corner gaps by extending clip distances across triangles.
-		// Capped per-vertex to avoid bleeding through thin walls.
+		// snapshot the traced clip distances so Phase B extends from this fixed base
+		Com_Memcpy( clipDistsPreB, clipDists, tess.numVertexes * sizeof( clipDists[0] ) );
+
+		// Phase B: extend each vertex toward its triangle's max clip distance, capped
+		// at r_shadowClipExtension past its own traced distance. Reading the snapshot
+		// bounds the total extension across the triangles a vertex shares.
 		if ( r_shadowClip->integer && tr.world ) {
+			float ext = r_shadowClipExtension->value;
 			int t, numTrisLocal = tess.numIndexes / 3;
 			for ( t = 0; t < numTrisLocal; t++ ) {
-				int i1 = tess.indexes[ t*3 + 0 ];
-				int i2 = tess.indexes[ t*3 + 1 ];
-				int i3 = tess.indexes[ t*3 + 2 ];
-				float maxD = clipDists[i1];
-				float capD;
-				if ( clipDists[i2] > maxD ) maxD = clipDists[i2];
-				if ( clipDists[i3] > maxD ) maxD = clipDists[i3];
-				// skip if any vertex didn't hit solid
+				int e;
+				int idx[3];
+				float maxD;
+				idx[0] = tess.indexes[ t*3 + 0 ];
+				idx[1] = tess.indexes[ t*3 + 1 ];
+				idx[2] = tess.indexes[ t*3 + 2 ];
+				maxD = clipDistsPreB[ idx[0] ];
+				if ( clipDistsPreB[ idx[1] ] > maxD ) maxD = clipDistsPreB[ idx[1] ];
+				if ( clipDistsPreB[ idx[2] ] > maxD ) maxD = clipDistsPreB[ idx[2] ];
+				// skip if any vertex didn't hit solid (would pull the face to full distance)
 				if ( maxD >= extrusionDist )
 					continue;
-				// cap: max r_shadowClipExtension units extension per vertex
-				capD = maxD;
-				if ( capD > clipDists[i1] + r_shadowClipExtension->value ) {
-					if ( clipDists[i1] + r_shadowClipExtension->value > clipDists[i1] )
-						clipDists[i1] += r_shadowClipExtension->value;
-				} else {
-					clipDists[i1] = capD;
-				}
-				if ( capD > clipDists[i2] + r_shadowClipExtension->value ) {
-					if ( clipDists[i2] + r_shadowClipExtension->value > clipDists[i2] )
-						clipDists[i2] += r_shadowClipExtension->value;
-				} else {
-					clipDists[i2] = capD;
-				}
-				if ( capD > clipDists[i3] + r_shadowClipExtension->value ) {
-					if ( clipDists[i3] + r_shadowClipExtension->value > clipDists[i3] )
-						clipDists[i3] += r_shadowClipExtension->value;
-				} else {
-					clipDists[i3] = capD;
+				for ( e = 0; e < 3; e++ ) {
+					int v = idx[e];
+					float target = maxD;
+					if ( target > clipDistsPreB[v] + ext )
+						target = clipDistsPreB[v] + ext;
+					if ( target > clipDists[v] )
+						clipDists[v] = target;
 				}
 			}
 		}
 
-		// Unify clip distance across welded groups before extruding. Silhouette
-		// sides reference welded canonical indices while the caps reference original
-		// indices; a canonical vertex may never have been ray-traced (needsTrace
-		// marks only original lit-tri indices), so without this its side extrudes
-		// the full distance while the cap lands on the floor -> the volume tears
-		// open and stretches to a point. Give each group the nearest clip distance
-		// of its members so sides and caps extrude to the same place.
+		// Unify each weld group to one clip distance so the welded silhouette sides
+		// and the original-index caps extrude to the same place.
 		if ( r_shadowClip->integer && tr.world ) {
+			static float gmaxTraced[SHADER_MAX_VERTEXES];
 			for ( i = 0; i < tess.numVertexes; i++ )
-				if ( clipDists[i] < clipDists[ weld[i] ] )
-					clipDists[ weld[i] ] = clipDists[i];
+				gmaxTraced[i] = -1.0f;
+			// give each group the farthest clip distance among its hit members, so
+			// coincident seam copies extrude together. Members still at full distance
+			// (back-facing or missed) are excluded.
 			for ( i = 0; i < tess.numVertexes; i++ )
-				clipDists[i] = clipDists[ weld[i] ];
+				if ( clipDists[i] < extrusionDist && clipDists[i] > gmaxTraced[ weld[i] ] )
+					gmaxTraced[ weld[i] ] = clipDists[i];
+			for ( i = 0; i < tess.numVertexes; i++ )
+				if ( gmaxTraced[ weld[i] ] >= 0.0f )
+					clipDists[i] = gmaxTraced[ weld[i] ];
 		}
 
 		// Phase C: extrude vertices using final clip distances
