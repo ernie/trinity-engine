@@ -85,6 +85,10 @@ cvar_t	*r_vbo;
 #endif
 cvar_t	*r_fbo;
 cvar_t	*r_hdr;
+cvar_t	*r_hdrDisplay;
+cvar_t	*r_hdrPaperWhite;
+cvar_t	*r_hdrHighlight;
+cvar_t	*r_hdrPeak;
 cvar_t	*r_bloom;
 cvar_t	*r_bloom_threshold;
 cvar_t	*r_bloom_intensity;
@@ -1808,6 +1812,30 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary video size and screenshot/video capture.\n Required for bloom, HDR rendering, anti-aliasing and greyscale effects." );
 	r_hdr = ri.Cvar_Get( "r_hdr", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_SetDescription(r_hdr, "Enables high dynamic range frame buffer texture format. Requires \\r_fbo 1.\n -1: 4-bit, for testing purposes, heavy color banding, might not work on all systems\n  0: 8 bit, default, moderate color banding with multi-stage shaders\n  1: 16 bit, enhanced blending precision, no color banding, might decrease performance on AMD / Intel GPUs\n" );
+
+	r_hdrDisplay = ri.Cvar_Get( "r_hdrDisplay", "0", CVAR_ARCHIVE | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_hdrDisplay, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_hdrDisplay,
+		"Output true HDR for brighter highlights and more lifelike color. Requires the Vulkan renderer and an HDR-capable display with HDR turned on in your system display settings. Takes effect after a \\vid_restart. (Not the same as r_hdr, which only sets internal rendering precision.)" );
+
+	r_hdrPaperWhite = ri.Cvar_Get( "r_hdrPaperWhite", "0", CVAR_ARCHIVE );
+	ri.Cvar_CheckRange( r_hdrPaperWhite, "0", "1000", CV_FLOAT );
+	ri.Cvar_SetGroup( r_hdrPaperWhite, CVG_RENDERER );
+	ri.Cvar_SetDescription( r_hdrPaperWhite,
+		"How bright normal white looks in HDR, in nits (the brightness of menus, the HUD, and fully-lit surfaces). 0 = auto (recommended): picks a comfortable level from your display's peak brightness (r_hdrPeak). Or set a number yourself. Higher is brighter, lower is dimmer." );
+
+	r_hdrHighlight = ri.Cvar_Get( "r_hdrHighlight", "1.0", CVAR_ARCHIVE );
+	ri.Cvar_CheckRange( r_hdrHighlight, "0.5", "4.0", CV_FLOAT );
+	ri.Cvar_SetGroup( r_hdrHighlight, CVG_RENDERER );
+	ri.Cvar_SetDescription( r_hdrHighlight,
+		"How much extra pop the brightest highlights get in HDR, such as lights, explosions, and the sky. 1 = natural. Raise it for punchier highlights, lower it for a calmer look. Does not change overall brightness." );
+
+	r_hdrPeak = ri.Cvar_Get( "r_hdrPeak", "1000", CVAR_ARCHIVE );
+	ri.Cvar_CheckRange( r_hdrPeak, "250", "10000", CV_FLOAT );
+	ri.Cvar_SetGroup( r_hdrPeak, CVG_RENDERER );
+	ri.Cvar_SetDescription( r_hdrPeak,
+		"Your HDR display's peak brightness in nits. Use the panel's peak for small bright highlights, which is usually higher than its full-screen brightness and not the same as a DisplayHDR 400/600 rating. Highlights brighten up to this, and the auto white level is based on it. This is the main setting to match to your display." );
+
 	r_bloom = ri.Cvar_Get( "r_bloom", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");

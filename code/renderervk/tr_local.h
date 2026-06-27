@@ -1333,6 +1333,10 @@ extern cvar_t	*r_vbo;
 #endif
 extern cvar_t	*r_fbo;
 extern cvar_t	*r_hdr;
+extern cvar_t	*r_hdrDisplay;
+extern cvar_t	*r_hdrPaperWhite;
+extern cvar_t	*r_hdrHighlight;
+extern cvar_t	*r_hdrPeak;
 extern cvar_t	*r_bloom;
 extern cvar_t	*r_bloom_threshold;
 extern cvar_t	*r_bloom_intensity;

@@ -14,8 +14,19 @@ layout(constant_id = 7) const int ditherMode = 0; // 0 - disabled, 1 - ordered
 layout(constant_id = 8) const int depth_r = 255;
 layout(constant_id = 9) const int depth_g = 255;
 layout(constant_id = 10) const int depth_b = 255;
+layout(constant_id = 11) const int hdrMode = 0;          // 0 - SDR, 1 - scRGB linear HDR
+layout(constant_id = 12) const float paperWhite = 200.0; // nits SDR-white maps to
+layout(constant_id = 13) const float hdrHighlight = 1.0; // multiplier on the >1.0 headroom
+layout(constant_id = 14) const float hdrPeak = 1000.0;   // nits display peak; highlights roll off toward this
 
 const vec3 sRGB = { 0.2126, 0.7152, 0.0722 };
+
+vec3 sRGBtoLinear(vec3 c) {
+	bvec3 cutoff = lessThanEqual(c, vec3(0.04045));
+	vec3 lower = c / 12.92;
+	vec3 higher = pow((c + vec3(0.055)) / vec3(1.055), vec3(2.4));
+	return mix(higher, lower, cutoff);
+}
 
 const int bayerSize = 8;
 const float bayerMatrix[bayerSize * bayerSize] = {
@@ -57,6 +68,25 @@ void main() {
 	{
 		vec3 luma = vec3(dot(base, sRGB));
 		base = mix(base, luma, greyscale);
+	}
+
+	if ( hdrMode == 1 )
+	{
+		vec3 lin = sRGBtoLinear(pow(base, vec3(gamma)) * obScale); // 1.0 == paper-white
+
+		// Hue-preserving highlights: scale all channels by one factor from the
+		// brightest, rolling the headroom toward the panel peak.
+		float m = max(max(lin.r, lin.g), lin.b);
+		if ( m > 1.0 )
+		{
+			float peak = max(hdrPeak / paperWhite, 1.0);            // ceiling in paper-white units (>= paper-white)
+			float boosted = 1.0 + (m - 1.0) * hdrHighlight;         // highlight push
+			float rolled = peak * boosted / (peak - 1.0 + boosted); // soft asymptote at peak
+			lin *= rolled / m;
+		}
+
+		out_color = vec4(lin * (paperWhite / 80.0), 1.0);
+		return;
 	}
 
 	if ( gamma != 1.0 )

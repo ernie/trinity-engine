@@ -595,6 +595,9 @@ typedef struct {
 	qboolean clearAttachment;		// requires VK_IMAGE_USAGE_TRANSFER_DST_BIT for swapchains
 	qboolean fboActive;
 	qboolean blitEnabled;
+	qboolean hdrColorspaceExt;	// VK_EXT_swapchain_colorspace enabled at instance creation
+	qboolean hdrActive;		// scRGB FP16 HDR swapchain selected and in use
+	int hdrOsState;			// detected OS HDR switch state (osHdrState_t)
 	qboolean msaaActive;
 
 	qboolean offscreenRender;

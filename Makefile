@@ -736,6 +736,7 @@ TARGET_RENDV = $(RENDERER_PREFIX)_vulkan_$(SHLIBNAME)
 TARGET_SERVER = $(DNAME)$(ARCHEXT)$(BINEXT)
 
 STRINGIFY = $(B)/rend2/stringify$(BINEXT)
+BIN2HEX = $(B)/rendv/bin2hex$(BINEXT)
 
 TARGETS =
 
@@ -793,6 +794,11 @@ define DO_REF_STR
 $(echo_cmd) "REF_STR $<"
 $(Q)rm -f $@
 $(Q)$(STRINGIFY) $< $@
+endef
+
+define DO_SHADERS
+$(echo_cmd) "SHADERS $@"
+$(Q)$(SHADER_DIR)/compile.sh "$(GLSLANG)" "$(BIN2HEX)" "$(SHADER_DIR)"
 endef
 
 define DO_BOT_CC
@@ -1622,6 +1628,33 @@ $(B)/rend2/%.o: $(RCDIR)/%.c
 
 $(B)/rend2/%.o: $(CMDIR)/%.c
 	$(DO_REND_CC)
+
+# --- Vulkan SPIR-V shader generation ---------------------------------------
+SHADER_DIR  = $(RVDIR)/shaders
+SHADER_DATA = $(SHADER_DIR)/spirv/shader_data.c
+SHADER_SRC  = $(wildcard $(SHADER_DIR)/*.vert $(SHADER_DIR)/*.frag $(SHADER_DIR)/*.tmpl)
+
+# Detect the glslang front-end (modern "glslang", legacy "glslangValidator"),
+# on PATH first, then under the Vulkan SDK.
+GLSLANG := $(shell command -v glslangValidator 2>/dev/null || command -v glslang 2>/dev/null)
+ifeq ($(GLSLANG),)
+  GLSLANG := $(firstword $(wildcard \
+    $(VULKAN_SDK)/bin/glslangValidator $(VULKAN_SDK)/Bin/glslangValidator.exe \
+    $(VULKAN_SDK)/bin/glslang $(VULKAN_SDK)/Bin/glslang.exe))
+endif
+
+$(BIN2HEX): $(RVDIR)/shaders/bin2hex.c
+	$(echo_cmd) "HOST_CC $@"
+	$(Q)$(HOST_CC) -o $@ $(RVDIR)/shaders/bin2hex.c
+
+# When glslang is available, regenerate shader_data.c from the shader sources
+# and make vk.o (which #includes it) depend on it.
+ifneq ($(GLSLANG),)
+$(SHADER_DATA): $(SHADER_SRC) $(BIN2HEX) $(SHADER_DIR)/compile.sh
+	$(DO_SHADERS)
+
+$(B)/rendv/vk.o: $(SHADER_DATA)
+endif
 
 $(B)/rendv/%.o: $(RVDIR)/%.c
 	$(DO_REND_CC)

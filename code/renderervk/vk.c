@@ -1,6 +1,14 @@
 #include "tr_local.h"
 #include "vk.h"
 
+#ifdef _WIN32
+// Win7+ headers for the DisplayConfig API used to detect the OS HDR switch.
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601
+#endif
+#include <windows.h>
+#endif
+
 #if defined (_DEBUG)
 #if defined (_WIN32)
 #define USE_VK_VALIDATION
@@ -1272,6 +1280,9 @@ static qboolean used_instance_extension( const char *ext )
 	if ( Q_stricmp( ext, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME ) == 0 )
 		return qtrue;
 
+	if ( Q_stricmp( ext, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME ) == 0 )
+		return qtrue;
+
 	return qfalse;
 }
 
@@ -1320,6 +1331,10 @@ static void create_instance( void )
 
 		if ( Q_stricmp( ext, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME ) == 0 ) {
 			flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+		}
+
+		if ( Q_stricmp( ext, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME ) == 0 ) {
+			vk.hdrColorspaceExt = qtrue;
 		}
 
 		ri.Printf(PRINT_DEVELOPER, "instance extension: %s\n", ext);
@@ -1435,6 +1450,12 @@ static VkFormat get_hdr_format( VkFormat base_format )
 		return base_format;
 	}
 
+	if ( vk.hdrActive ) {
+		// UNORM keeps the framebuffer clamped to [0,1], which Q3's
+		// destination-dependent blends (e.g. GL_ONE_MINUS_DST_COLOR) require.
+		return VK_FORMAT_R16G16B16A16_UNORM;
+	}
+
 	switch ( r_hdr->integer ) {
 		case -1: return VK_FORMAT_B4G4R4A4_UNORM_PACK16;
 		case 1: return VK_FORMAT_R16G16B16A16_UNORM;
@@ -1476,6 +1497,113 @@ static void get_present_format( int present_bits, VkFormat *bgr, VkFormat *rgb )
 		*rgb = sel->rgb;
 	}
 }
+
+
+typedef enum {
+	OSHDR_UNKNOWN = 0,	// could not determine (non-Windows, old OS, or query failed)
+	OSHDR_ON,		// an HDR-capable output has the OS HDR switch on
+	OSHDR_OFF,		// HDR-capable output present but the OS HDR switch is off
+	OSHDR_UNSUPPORTED	// no HDR-capable output found
+} osHdrState_t;
+
+#ifdef _WIN32
+// These DisplayConfig info-types are enum values (not macros), so they can't be
+// probed with the preprocessor and are absent from some MinGW header sets. Use
+// private structs matching the documented layouts and info-type values.
+//
+// On current Windows the classic info (type 9) "advancedColorEnabled" bit tracks
+// Advanced Color, which is on for wide-gamut SDR as well, so it reports HDR even
+// when the HDR switch is off. The _2 info (type 13) adds activeColorMode, which
+// separates SDR (0) / WCG (1) / HDR (2); prefer it and fall back to the classic
+// query on systems that lack it.
+#define TR_DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO	9
+#define TR_DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2	15
+#define TR_ADVANCED_COLOR_MODE_HDR			2
+typedef struct {
+	DISPLAYCONFIG_DEVICE_INFO_HEADER	header;
+	UINT32					value;	// bit 0 supported, bit 1 enabled
+	UINT32					colorEncoding;
+	UINT32					bitsPerColorChannel;
+} trAdvancedColorInfo_t;
+
+typedef struct {
+	DISPLAYCONFIG_DEVICE_INFO_HEADER	header;
+	UINT32					value;	// bit 4 HDR supported, bit 5 HDR user-enabled
+	UINT32					colorEncoding;
+	UINT32					bitsPerColorChannel;
+	UINT32					activeColorMode;
+} trAdvancedColorInfo2_t;
+
+static osHdrState_t vk_query_os_hdr_state( void )
+{
+	UINT32 numPath = 0, numMode = 0;
+	DISPLAYCONFIG_PATH_INFO *paths;
+	DISPLAYCONFIG_MODE_INFO *modes;
+	osHdrState_t result = OSHDR_UNSUPPORTED;
+	UINT32 i;
+
+	if ( GetDisplayConfigBufferSizes( QDC_ONLY_ACTIVE_PATHS, &numPath, &numMode ) != ERROR_SUCCESS || numPath == 0 )
+		return OSHDR_UNKNOWN;
+
+	paths = (DISPLAYCONFIG_PATH_INFO*)ri.Malloc( numPath * sizeof( *paths ) );
+	modes = (DISPLAYCONFIG_MODE_INFO*)ri.Malloc( ( numMode ? numMode : 1 ) * sizeof( *modes ) );
+
+	if ( QueryDisplayConfig( QDC_ONLY_ACTIVE_PATHS, &numPath, paths, &numMode, modes, NULL ) != ERROR_SUCCESS ) {
+		ri.Free( paths );
+		ri.Free( modes );
+		return OSHDR_UNKNOWN;
+	}
+
+	for ( i = 0; i < numPath; i++ ) {
+		trAdvancedColorInfo2_t info2;
+		trAdvancedColorInfo_t info;
+
+		// Preferred: type 13 separates HDR from wide-gamut SDR.
+		Com_Memset( &info2, 0, sizeof( info2 ) );
+		info2.header.type = (DISPLAYCONFIG_DEVICE_INFO_TYPE)TR_DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO_2;
+		info2.header.size = sizeof( info2 );
+		info2.header.adapterId = paths[i].targetInfo.adapterId;
+		info2.header.id = paths[i].targetInfo.id;
+		if ( DisplayConfigGetDeviceInfo( &info2.header ) == ERROR_SUCCESS ) {
+			ri.Printf( PRINT_DEVELOPER, "...OS HDR query (path %u): type-13 value 0x%02x, activeColorMode %u\n",
+				(unsigned)i, (unsigned)info2.value, (unsigned)info2.activeColorMode );
+			if ( info2.value & 0x10 ) {	// HDR supported
+				if ( info2.activeColorMode == TR_ADVANCED_COLOR_MODE_HDR ) {
+					result = OSHDR_ON;
+					break;
+				}
+				result = OSHDR_OFF;
+			}
+			continue;
+		}
+
+		// Fallback for systems without type 13.
+		Com_Memset( &info, 0, sizeof( info ) );
+		info.header.type = (DISPLAYCONFIG_DEVICE_INFO_TYPE)TR_DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO;
+		info.header.size = sizeof( info );
+		info.header.adapterId = paths[i].targetInfo.adapterId;
+		info.header.id = paths[i].targetInfo.id;
+		if ( DisplayConfigGetDeviceInfo( &info.header ) == ERROR_SUCCESS && ( info.value & 0x1 ) ) {
+			ri.Printf( PRINT_DEVELOPER, "...OS HDR query (path %u): type-9 value 0x%02x\n",
+				(unsigned)i, (unsigned)info.value );
+			if ( info.value & 0x2 ) {
+				result = OSHDR_ON;
+				break;
+			}
+			result = OSHDR_OFF;
+		}
+	}
+
+	ri.Free( paths );
+	ri.Free( modes );
+	return result;
+}
+#else
+static osHdrState_t vk_query_os_hdr_state( void )
+{
+	return OSHDR_UNKNOWN;
+}
+#endif
 
 
 static qboolean vk_select_surface_format( VkPhysicalDevice physical_device, VkSurfaceKHR surface )
@@ -1539,6 +1667,27 @@ static qboolean vk_select_surface_format( VkPhysicalDevice physical_device, VkSu
 		}
 	}
 
+	vk.hdrActive = qfalse;
+	vk.hdrOsState = OSHDR_UNKNOWN;
+
+	if ( r_hdrDisplay->integer && r_fbo->integer && vk.hdrColorspaceExt ) {
+		uint32_t h;
+		for ( h = 0; h < format_count; h++ ) {
+			if ( candidates[h].format == VK_FORMAT_R16G16B16A16_SFLOAT &&
+				candidates[h].colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT ) {
+				// the scRGB colorspace is advertised even when the OS HDR switch is
+				// off, which only makes the image look oversaturated; commit to HDR
+				// output unless we positively detect HDR as off.
+				vk.hdrOsState = vk_query_os_hdr_state();
+				if ( vk.hdrOsState != OSHDR_OFF && vk.hdrOsState != OSHDR_UNSUPPORTED ) {
+					vk.present_format = candidates[h];
+					vk.hdrActive = qtrue;
+				}
+				break;
+			}
+		}
+	}
+
 	if ( !r_fbo->integer ) {
 		vk.present_format = vk.base_format;
 	}
@@ -1554,6 +1703,29 @@ static void setup_surface_formats( VkPhysicalDevice physical_device )
 	vk.depth_format = get_depth_format( physical_device );
 
 	vk.color_format = get_hdr_format( vk.base_format.format );
+
+	if ( vk.hdrActive ) {
+		ri.Printf( PRINT_ALL, "...HDR output: scRGB linear FP16 (EXTENDED_SRGB_LINEAR)\n" );
+		if ( vk.hdrOsState == OSHDR_UNKNOWN ) {
+#ifdef _WIN32
+			ri.Printf( PRINT_ALL, "...ensure HDR is enabled in Windows display settings; if the image looks oversaturated, HDR is likely off\n" );
+#else
+			ri.Printf( PRINT_ALL, "...ensure HDR is enabled in your display settings; if the image looks oversaturated, HDR is likely off\n" );
+#endif
+		}
+	} else if ( r_hdrDisplay->integer ) {
+		if ( vk.hdrOsState == OSHDR_OFF ) {
+#ifdef _WIN32
+			ri.Printf( PRINT_ALL, "...HDR requested but the Windows HDR switch is off; using SDR. Enable HDR in Windows display settings and run \\vid_restart\n" );
+#else
+			ri.Printf( PRINT_ALL, "...HDR requested but your display's HDR switch is off; using SDR. Enable HDR in your display settings and run \\vid_restart\n" );
+#endif
+		} else if ( vk.hdrOsState == OSHDR_UNSUPPORTED ) {
+			ri.Printf( PRINT_ALL, "...HDR requested but no HDR-capable display was found; using SDR\n" );
+		} else {
+			ri.Printf( PRINT_ALL, "...HDR output requested but unavailable (need VK_EXT_swapchain_colorspace + R16G16B16A16_SFLOAT/EXTENDED_SRGB_LINEAR + r_fbo); using SDR\n" );
+		}
+	}
 
 	vk.capture_format = VK_FORMAT_R8G8B8A8_UNORM;
 
@@ -5111,6 +5283,7 @@ static qboolean vk_surface_format_color_depth( VkFormat format, int *r, int *g, 
 			FORMAT_DEPTH(A8B8G8R8_SRGB_PACK32, 255, 255, 255)
 			FORMAT_DEPTH(R16G16B16A16_UNORM, 65535, 65535, 65535)
 			FORMAT_DEPTH(R16G16B16A16_SNORM, 65535, 65535, 65535)
+			FORMAT_DEPTH(R16G16B16A16_SFLOAT, 65535, 65535, 65535)
 			FORMAT_DEPTH(B5G6R5_UNORM_PACK16, 31, 63, 31)
 			FORMAT_DEPTH(B8G8R8A8_SNORM, 255, 255, 255)
 			FORMAT_DEPTH(R4G4B4A4_UNORM_PACK16, 15, 15, 15)
@@ -5138,7 +5311,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	VkGraphicsPipelineCreateInfo create_info;
 	VkViewport viewport;
 	VkRect2D scissor;
-	VkSpecializationMapEntry spec_entries[11];
+	VkSpecializationMapEntry spec_entries[15];
 	VkSpecializationInfo frag_spec_info;
 	VkPipeline *pipeline;
 	VkShaderModule fsmodule;
@@ -5160,6 +5333,10 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 		int depth_r;
 		int depth_g;
 		int depth_b;
+		int hdr_mode;
+		float paper_white;
+		float highlight;
+		float peak;
 	} frag_spec_data;
 
 	switch ( program_index ) {
@@ -5227,6 +5404,18 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	frag_spec_data.bloom_threshold_mode = r_bloom_threshold_mode->integer;
 	frag_spec_data.bloom_modulate = r_bloom_modulate->integer;
 	frag_spec_data.dither = r_dither->integer;
+	// program 3 is the screenshot/video capture pass; keep it SDR
+	frag_spec_data.hdr_mode = ( vk.hdrActive && program_index != 3 ) ? 1 : 0;
+	if ( r_hdrPaperWhite->value <= 0.0f ) {
+		// auto: BT.2408 HLG reference white for the panel peak. Luminance of a
+		// 75% HLG signal (scene-linear 0.264964) at the display system gamma.
+		double sysgamma = 1.2 + 0.42 * log10( r_hdrPeak->value / 1000.0 );
+		frag_spec_data.paper_white = (float)( r_hdrPeak->value * pow( 0.264964, sysgamma ) );
+	} else {
+		frag_spec_data.paper_white = r_hdrPaperWhite->value;
+	}
+	frag_spec_data.highlight = r_hdrHighlight->value;
+	frag_spec_data.peak = r_hdrPeak->value;
 
 	if ( !vk_surface_format_color_depth( vk.present_format.format, &frag_spec_data.depth_r, &frag_spec_data.depth_g, &frag_spec_data.depth_b ) )
 		ri.Printf( PRINT_ALL, "Format %s not recognized, dither to assume 8bpc\n", vk_format_string( vk.base_format.format ) );
@@ -5275,7 +5464,23 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	spec_entries[10].offset = offsetof(struct FragSpecData, depth_b);
 	spec_entries[10].size = sizeof(frag_spec_data.depth_b);
 
-	frag_spec_info.mapEntryCount = 11;
+	spec_entries[11].constantID = 11;
+	spec_entries[11].offset = offsetof( struct FragSpecData, hdr_mode );
+	spec_entries[11].size = sizeof( frag_spec_data.hdr_mode );
+
+	spec_entries[12].constantID = 12;
+	spec_entries[12].offset = offsetof( struct FragSpecData, paper_white );
+	spec_entries[12].size = sizeof( frag_spec_data.paper_white );
+
+	spec_entries[13].constantID = 13;
+	spec_entries[13].offset = offsetof( struct FragSpecData, highlight );
+	spec_entries[13].size = sizeof( frag_spec_data.highlight );
+
+	spec_entries[14].constantID = 14;
+	spec_entries[14].offset = offsetof( struct FragSpecData, peak );
+	spec_entries[14].size = sizeof( frag_spec_data.peak );
+
+	frag_spec_info.mapEntryCount = 15;
 	frag_spec_info.pMapEntries = spec_entries;
 	frag_spec_info.dataSize = sizeof( frag_spec_data );
 	frag_spec_info.pData = &frag_spec_data;
