@@ -662,9 +662,11 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 
 static void vk_create_render_passes( void )
 {
-	VkAttachmentDescription attachments[3]; // color | depth | msaa color
+	VkAttachmentDescription attachments[5]; // color | depth | msaa color | emissive resolve | emissive msaa
 	VkAttachmentReference colorResolveRef;
+	VkAttachmentReference colorResolveRefs[2];
 	VkAttachmentReference colorRef0;
+	VkAttachmentReference colorRefs[2];
 	VkAttachmentReference depthRef0;
 	VkSubpassDescription subpass;
 	VkSubpassDependency deps[3];
@@ -754,6 +756,29 @@ static void vk_create_render_passes( void )
 	desc.subpassCount = 1;
 	desc.attachmentCount = 2;
 
+	if ( vk.hdrActive && !vk.msaaActive )
+	{
+		// resolved emissive layer, rendered directly as a 2nd color attachment
+		attachments[2].flags = 0;
+		attachments[2].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+		attachments[2].samples = VK_SAMPLE_COUNT_1_BIT;
+		attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE; // sampled by the gamma pass
+		attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		// mirror the color attachment so the shared post-bloom pass can LOAD it
+		attachments[2].initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		attachments[2].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		colorRefs[0] = colorRef0;
+		colorRefs[1].attachment = 2;
+		colorRefs[1].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		subpass.colorAttachmentCount = 2;
+		subpass.pColorAttachments = colorRefs;
+
+		desc.attachmentCount = 3;
+	}
+
 	if ( vk.msaaActive )
 	{
 		attachments[2].flags = 0;
@@ -783,6 +808,49 @@ static void vk_create_render_passes( void )
 		colorResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
 		subpass.pResolveAttachments = &colorResolveRef;
+
+		if ( vk.hdrActive )
+		{
+			// resolved emissive layer (resolve target, sampled by the gamma pass)
+			attachments[3].flags = 0;
+			attachments[3].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+			attachments[3].samples = VK_SAMPLE_COUNT_1_BIT;
+			attachments[3].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+			attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+			attachments[3].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+			attachments[3].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			// mirror the color resolve attachment so the shared post-bloom pass can LOAD it
+			attachments[3].initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			attachments[3].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+			// msaa emissive render target
+			attachments[4].flags = 0;
+			attachments[4].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+			attachments[4].samples = vkSamples;
+			attachments[4].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+			if ( r_bloom->integer ) {
+				attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_STORE; // keep it for post-bloom pass
+			} else {
+				attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // Intermediate storage (not written)
+			}
+			attachments[4].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+			attachments[4].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			attachments[4].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			attachments[4].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+			colorRefs[0] = colorRef0;        // attachment 2 (msaa color)
+			colorRefs[1].attachment = 4;     // msaa emissive render target
+			colorRefs[1].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			subpass.colorAttachmentCount = 2;
+			subpass.pColorAttachments = colorRefs;
+
+			colorResolveRefs[0] = colorResolveRef; // attachment 0 (color resolve)
+			colorResolveRefs[1].attachment = 3;    // emissive resolve
+			colorResolveRefs[1].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			subpass.pResolveAttachments = colorResolveRefs;
+
+			desc.attachmentCount = 5;
+		}
 	}
 
 	// subpass dependencies
@@ -844,6 +912,18 @@ static void vk_create_render_passes( void )
 			// msaa render target
 			attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 			attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		}
+		if ( vk.hdrActive ) {
+			if ( vk.msaaActive ) {
+				// keep the emitter energy the main pass accumulated
+				attachments[3].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // emissive resolve
+				attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+				attachments[4].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // msaa emissive
+				attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+			} else {
+				attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // emissive resolve
+				attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+			}
 		}
 		VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.render_pass.post_bloom ) );
 		SET_OBJECT_NAME( vk.render_pass.post_bloom, "render pass - post_bloom", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
@@ -2620,6 +2700,12 @@ void vk_update_attachment_descriptors( void ) {
 
 		qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
 
+		// placeholder (color_image_view) when inactive; gamma_fs always declares texture1
+		info.imageView = vk.hdrActive ? vk.emissive_image_view : vk.color_image_view;
+		desc.dstSet = vk.emissive_descriptor;
+		desc.dstBinding = 0;
+		qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
+
 		// screenmap
 		sd.gl_mag_filter = sd.gl_min_filter = GL_LINEAR;
 		sd.max_lod_1_0 = qfalse;
@@ -2705,6 +2791,7 @@ void vk_init_descriptors( void )
 		alloc.pSetLayouts = &vk.set_layout_sampler;
 
 		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.color_descriptor ) );
+		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.emissive_descriptor ) );
 
 		if ( r_bloom->integer )
 		{
@@ -3693,6 +3780,18 @@ static void vk_create_attachments( void )
 		create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, VK_SAMPLE_COUNT_1_BIT, vk.color_format,
 			usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, &vk.color_image, &vk.color_image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, qfalse );
 
+		if ( vk.hdrActive ) {
+			// resolved single-sample emissive layer, sampled by the gamma pass
+			create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R16G16B16A16_SFLOAT,
+				usage, &vk.emissive_image, &vk.emissive_image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, qfalse );
+
+			if ( vk.msaaActive ) {
+				create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, vkSamples, VK_FORMAT_R16G16B16A16_SFLOAT,
+					VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, &vk.emissive_image_msaa, &vk.emissive_image_view_msaa,
+					VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, qtrue );
+			}
+		}
+
 		// screenmap-msaa
 		if ( vk.screenMapSamples > VK_SAMPLE_COUNT_1_BIT ) {
 			create_color_attachment( vk.screenMapWidth, vk.screenMapHeight, vk.screenMapSamples, vk.color_format,
@@ -3750,7 +3849,7 @@ static void vk_create_attachments( void )
 
 static void vk_create_framebuffers( void )
 {
-	VkImageView attachments[3];
+	VkImageView attachments[5];
 	VkFramebufferCreateInfo desc;
 	uint32_t n;
 
@@ -3787,6 +3886,21 @@ static void vk_create_framebuffers( void )
 				{
 					desc.attachmentCount = 3;
 					attachments[2] = vk.msaa_image_view;
+				}
+				if ( vk.hdrActive )
+				{
+					// same attachment order the main/post-bloom render passes declare
+					if ( vk.msaaActive )
+					{
+						attachments[3] = vk.emissive_image_view;      // resolve
+						attachments[4] = vk.emissive_image_view_msaa; // msaa render target
+						desc.attachmentCount = 5;
+					}
+					else
+					{
+						attachments[2] = vk.emissive_image_view;      // resolve
+						desc.attachmentCount = 3;
+					}
 				}
 				VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.framebuffers.main[n] ) );
 				SET_OBJECT_NAME( vk.framebuffers.main[n], "framebuffer - main", VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT );
@@ -4390,7 +4504,7 @@ void vk_initialize( void )
 		uint32_t i, maxSets;
 
 		pool_size[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		pool_size[0].descriptorCount = MAX_DRAWIMAGES + 1 + 1 + 1 + VK_NUM_BLOOM_PASSES * 2; // color, screenmap, bloom descriptors
+		pool_size[0].descriptorCount = MAX_DRAWIMAGES + 1 + 1 + 1 + 1 + VK_NUM_BLOOM_PASSES * 2; // color, emissive, screenmap, bloom descriptors
 
 		pool_size[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
 		pool_size[1].descriptorCount = NUM_COMMAND_BUFFERS;
@@ -4429,11 +4543,15 @@ void vk_initialize( void )
 	{
 		VkDescriptorSetLayout set_layouts[6];
 		VkPipelineLayoutCreateInfo desc;
-		VkPushConstantRange push_range;
+		VkPushConstantRange push_ranges[2];
 
-		push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-		push_range.offset = 0;
-		push_range.size = 64; // 16 floats
+		push_ranges[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		push_ranges[0].offset = 0;
+		push_ranges[0].size = 64; // 16 floats (mvp)
+
+		push_ranges[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		push_ranges[1].offset = 64;
+		push_ranges[1].size = 4;  // float emissiveFactor
 
 		// standard pipelines
 		set_layouts[0] = vk.set_layout_uniform; // fog/dlight parameters
@@ -4446,8 +4564,8 @@ void vk_initialize( void )
 		desc.flags = 0;
 		desc.setLayoutCount = (vk.maxBoundDescriptorSets >= VK_DESC_COUNT) ? VK_DESC_COUNT : 4;
 		desc.pSetLayouts = set_layouts;
-		desc.pushConstantRangeCount = 1;
-		desc.pPushConstantRanges = &push_range;
+		desc.pushConstantRangeCount = 2;
+		desc.pPushConstantRanges = push_ranges;
 
 		VK_CHECK(qvkCreatePipelineLayout(vk.device, &desc, NULL, &vk.pipeline_layout));
 
@@ -4459,21 +4577,21 @@ void vk_initialize( void )
 		desc.flags = 0;
 		desc.setLayoutCount = 1;
 		desc.pSetLayouts = set_layouts;
-		desc.pushConstantRangeCount = 1;
-		desc.pPushConstantRanges = &push_range;
+		desc.pushConstantRangeCount = 2;
+		desc.pPushConstantRanges = push_ranges;
 
 		VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_storage ) );
 
 		// post-processing pipeline
-		set_layouts[0] = vk.set_layout_sampler; // sampler
-		set_layouts[1] = vk.set_layout_sampler; // sampler
+		set_layouts[0] = vk.set_layout_sampler; // sampler - set 0: scene colour
+		set_layouts[1] = vk.set_layout_sampler; // sampler - set 1: emissive highlight layer
 		set_layouts[2] = vk.set_layout_sampler; // sampler
 		set_layouts[3] = vk.set_layout_sampler; // sampler
 
 		desc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		desc.pNext = NULL;
 		desc.flags = 0;
-		desc.setLayoutCount = 1;
+		desc.setLayoutCount = 2;
 		desc.pSetLayouts = set_layouts;
 		desc.pushConstantRangeCount = 0;
 		desc.pPushConstantRanges = NULL;
@@ -4555,6 +4673,20 @@ static void vk_destroy_attachments( void )
 		qvkDestroyImageView( vk.device, vk.color_image_view, NULL );
 		vk.color_image = VK_NULL_HANDLE;
 		vk.color_image_view = VK_NULL_HANDLE;
+	}
+
+	if ( vk.emissive_image ) {
+		qvkDestroyImage( vk.device, vk.emissive_image, NULL );
+		qvkDestroyImageView( vk.device, vk.emissive_image_view, NULL );
+		vk.emissive_image = VK_NULL_HANDLE;
+		vk.emissive_image_view = VK_NULL_HANDLE;
+	}
+
+	if ( vk.emissive_image_msaa ) {
+		qvkDestroyImage( vk.device, vk.emissive_image_msaa, NULL );
+		qvkDestroyImageView( vk.device, vk.emissive_image_view_msaa, NULL );
+		vk.emissive_image_msaa = VK_NULL_HANDLE;
+		vk.emissive_image_view_msaa = VK_NULL_HANDLE;
 	}
 
 	if ( vk.msaa_image ) {
@@ -5308,10 +5440,11 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	VkPipelineMultisampleStateCreateInfo multisample_state;
 	VkPipelineColorBlendStateCreateInfo blend_state;
 	VkPipelineColorBlendAttachmentState attachment_blend_state;
+	VkPipelineColorBlendAttachmentState blend_attachments[2];
 	VkGraphicsPipelineCreateInfo create_info;
 	VkViewport viewport;
 	VkRect2D scissor;
-	VkSpecializationMapEntry spec_entries[15];
+	VkSpecializationMapEntry spec_entries[16];
 	VkSpecializationInfo frag_spec_info;
 	VkPipeline *pipeline;
 	VkShaderModule fsmodule;
@@ -5337,6 +5470,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 		float paper_white;
 		float highlight;
 		float peak;
+		int hdr_emissive;
 	} frag_spec_data;
 
 	switch ( program_index ) {
@@ -5416,6 +5550,8 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	}
 	frag_spec_data.highlight = r_hdrHighlight->value;
 	frag_spec_data.peak = r_hdrPeak->value;
+	// capture pass has no emissive attachment, so disable reconstruction
+	frag_spec_data.hdr_emissive = ( vk.hdrActive && program_index != 3 ) ? 1 : 0;
 
 	if ( !vk_surface_format_color_depth( vk.present_format.format, &frag_spec_data.depth_r, &frag_spec_data.depth_g, &frag_spec_data.depth_b ) )
 		ri.Printf( PRINT_ALL, "Format %s not recognized, dither to assume 8bpc\n", vk_format_string( vk.base_format.format ) );
@@ -5480,7 +5616,11 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	spec_entries[14].offset = offsetof( struct FragSpecData, peak );
 	spec_entries[14].size = sizeof( frag_spec_data.peak );
 
-	frag_spec_info.mapEntryCount = 15;
+	spec_entries[15].constantID = 15;
+	spec_entries[15].offset = offsetof( struct FragSpecData, hdr_emissive );
+	spec_entries[15].size = sizeof( frag_spec_data.hdr_emissive );
+
+	frag_spec_info.mapEntryCount = 16;
 	frag_spec_info.pMapEntries = spec_entries;
 	frag_spec_info.dataSize = sizeof( frag_spec_data );
 	frag_spec_info.pData = &frag_spec_data;
@@ -5572,8 +5712,19 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	blend_state.flags = 0;
 	blend_state.logicOpEnable = VK_FALSE;
 	blend_state.logicOp = VK_LOGIC_OP_COPY;
-	blend_state.attachmentCount = 1;
-	blend_state.pAttachments = &attachment_blend_state;
+
+	blend_attachments[0] = attachment_blend_state;
+
+	if ( program_index == 2 && vk.hdrActive ) {
+		// post_bloom carries the emissive attachment; blend.frag must not write it
+		Com_Memset( &blend_attachments[1], 0, sizeof( blend_attachments[1] ) );
+		blend_attachments[1].blendEnable = VK_FALSE;
+		blend_attachments[1].colorWriteMask = 0;
+		blend_state.attachmentCount = 2;
+	} else {
+		blend_state.attachmentCount = 1;
+	}
+	blend_state.pAttachments = blend_attachments;
 	blend_state.blendConstants[0] = 0.0f;
 	blend_state.blendConstants[1] = 0.0f;
 	blend_state.blendConstants[2] = 0.0f;
@@ -5827,6 +5978,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	VkPipelineDepthStencilStateCreateInfo depth_stencil_state;
 	VkPipelineColorBlendStateCreateInfo blend_state;
 	VkPipelineColorBlendAttachmentState attachment_blend_state;
+	VkPipelineColorBlendAttachmentState blend_attachments[2];
 	VkPipelineDynamicStateCreateInfo dynamic_state;
 	VkDynamicState dynamic_state_array[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 	VkGraphicsPipelineCreateInfo create_info;
@@ -6738,8 +6890,31 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	blend_state.flags = 0;
 	blend_state.logicOpEnable = VK_FALSE;
 	blend_state.logicOp = VK_LOGIC_OP_COPY;
-	blend_state.attachmentCount = 1;
-	blend_state.pAttachments = &attachment_blend_state;
+
+	blend_attachments[0] = attachment_blend_state;
+
+	if ( ( renderPassIndex == RENDER_PASS_MAIN || renderPassIndex == RENDER_PASS_POST_BLOOM ) && vk.hdrActive ) {
+		VkPipelineColorBlendAttachmentState em;
+		Com_Memset( &em, 0, sizeof( em ) );
+		// emissive layer is always additive accumulation
+		em.blendEnable = VK_TRUE;
+		em.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+		em.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+		em.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		em.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		em.colorBlendOp = VK_BLEND_OP_ADD;
+		em.alphaBlendOp = VK_BLEND_OP_ADD;
+		// only generic surface shaders declare out_emissive; everything else must not write it
+		if ( def->shader_type >= TYPE_GENERIC_BEGIN )
+			em.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+		else
+			em.colorWriteMask = 0;
+		blend_attachments[1] = em;
+		blend_state.attachmentCount = 2;
+	} else {
+		blend_state.attachmentCount = 1;
+	}
+	blend_state.pAttachments = blend_attachments;
 	blend_state.blendConstants[0] = 0.0f;
 	blend_state.blendConstants[1] = 0.0f;
 	blend_state.blendConstants[2] = 0.0f;
@@ -7372,6 +7547,9 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 	// configure pipeline's dynamic state
 	vk_update_depth_range( depth_range );
 
+	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT,
+		64, sizeof( float ), &vk.cmd->emissive_factor );
+
 	// issue draw call(s)
 #ifdef USE_VBO
 	if ( tess.vboIndex )
@@ -7405,7 +7583,7 @@ void vk_draw_dot( uint32_t storage_offset )
 static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBuffer, qboolean clearValues, uint32_t width, uint32_t height )
 {
 	VkRenderPassBeginInfo render_pass_begin_info;
-	VkClearValue clear_values[3];
+	VkClearValue clear_values[5];
 
 	// Begin render pass.
 
@@ -7423,11 +7601,16 @@ static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBu
 		// [0] - resolve/color/presentation
 		// [1] - depth/stencil
 		// [2] - multisampled color, optional
+		// [2|3] - resolved emissive, optional (non-msaa: 2, msaa: 3)
+		// [4] - multisampled emissive, optional (msaa only)
 		Com_Memset( clear_values, 0, sizeof( clear_values ) );
 #ifndef USE_REVERSED_DEPTH
 		clear_values[1].depthStencil.depth = 1.0;
 #endif
-		render_pass_begin_info.clearValueCount = vk.msaaActive ? 3 : 2;
+		if ( vk.hdrActive )
+			render_pass_begin_info.clearValueCount = vk.msaaActive ? 5 : 3;
+		else
+			render_pass_begin_info.clearValueCount = vk.msaaActive ? 3 : 2;
 		render_pass_begin_info.pClearValues = clear_values;
 
 		vk_world.dirty_depth_attachment = 0;
@@ -7657,6 +7840,7 @@ _retry:
 	vk.cmd->curr_index_buffer = VK_NULL_HANDLE;
 	vk.cmd->curr_index_offset = 0;
 	vk.cmd->num_indexes = 0;
+	vk.cmd->emissive_factor = 0.0f;
 
 	Com_Memset( &vk.cmd->descriptor_set, 0, sizeof( vk.cmd->descriptor_set ) );
 	vk.cmd->descriptor_set.start = ~0U;
@@ -7733,6 +7917,8 @@ void vk_end_frame( void )
 			vk_begin_render_pass( vk.render_pass.capture, vk.framebuffers.capture, qfalse, gls.captureWidth, gls.captureHeight );
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.capture_pipeline );
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
+			// gamma_fs always declares texture1 (set 1); bind it even when hdrEmissive=0
+			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 1, 1, &vk.emissive_descriptor, 0, NULL );
 
 			qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 		}
@@ -7750,6 +7936,7 @@ void vk_end_frame( void )
 			vk_begin_render_pass( vk.render_pass.gamma, vk.framebuffers.gamma[ vk.cmd->swapchain_image_index ], qfalse, vk.renderWidth, vk.renderHeight );
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.gamma_pipeline );
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
+			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 1, 1, &vk.emissive_descriptor, 0, NULL );
 
 			qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 		}

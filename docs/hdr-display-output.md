@@ -12,7 +12,7 @@ with HDR turned on in the OS.
 | `r_hdrDisplay` | `0` | 0-1 | Master on/off. Latched; needs `vid_restart`. |
 | `r_hdrPeak` | `1000` | 250-10000 | Display peak brightness in nits. The setting to match to your panel. |
 | `r_hdrPaperWhite` | `0` | 0-1000 | Nits that "SDR white" maps to. `0` = auto (derived from peak). |
-| `r_hdrHighlight` | `1.0` | 0.5-4.0 | Extra push for the brightest highlights. `1` = natural. |
+| `r_hdrHighlight` | `1.0` | 0.5-4.0 | Extra push for the brightest true highlights. `1` = natural. |
 
 `r_hdrPeak`, `r_hdrPaperWhite`, and `r_hdrHighlight` apply live (no restart).
 
@@ -52,6 +52,50 @@ balance constant as panels get brighter.
 On Windows the engine queries the OS HDR switch (DisplayConfig advanced color);
 if HDR output is requested while the switch is off, it stays SDR and logs a
 warning rather than emitting an oversaturated image.
+
+## Emissive highlight layer
+
+When `r_hdrDisplay 1` is active, the renderer adds a second MRT attachment
+alongside the scene color buffer. The attachment is `R16G16B16A16_SFLOAT`
+(FP16), so it can record values above 1.0 without clamping.
+
+Only additive 3D scene draws write to this layer. The push constant
+`emissiveFactor` is set to the draw's overbright value for additive blends in the
+3D pass (`TYPE_GENERIC_BEGIN` program class and above); it is zero for opaque
+draws, sky, decals, and all 2D draws. HUD, menus, and the crosshair never write
+the emissive layer.
+
+At the end of the frame the gamma pass reconstructs highlights via a per-channel
+saturation gate:
+
+```glsl
+vec3 recon = mix(base, max(base, emissive), step(0.999, base));
+```
+
+`step(0.999, base)` fires only for channels that have saturated to the top of the
+UNORM range. When it fires, `max(base, emissive)` replaces the saturated channel
+with its FP16 value, recovering the true emitter brightness above 1.0. Unsaturated
+channels pass through unchanged. The recovered value feeds the HDR tone-mapping
+curve and can push toward `r_hdrPeak`.
+
+**Why 2D occludes correctly:** 2D draws happen after the 3D pass and write
+directly into the UNORM scene buffer. They overwrite any saturated 3D pixel with
+their own value (below 1.0), so `step(0.999, base)` returns 0 and the emissive
+layer is ignored at that pixel. No special compositing is needed.
+
+**HDR bloom is out of scope.** The dominant gain is source brightness recovery:
+emitters that were flat-clipped at SDR white now resolve to their true brightness,
+which the display renders as a visibly brighter point. The halo around that source
+is necessarily dimmer. Furthermore, the `max()` in the reconstruction can only
+raise a saturated channel, never cancel or darken it, so a bloom kernel applied
+to the emissive values cannot undo an emitter's contribution. Bloom is not
+planned for this layer.
+
+**Known upgrade path:** the saturation gate relies on 2D being drawn after 3D. If
+a confirmed edge case shows a 2D draw failing to occlude a highlight, the correct
+fix is to split emissive capture into a separate 2D layer or to formalize the
+3D-to-2D pass boundary so the two paths cannot alias the emissive output. This is
+tracked but not built until the edge case is confirmed in testing.
 
 ## Setup
 

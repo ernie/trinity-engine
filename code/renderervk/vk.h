@@ -33,7 +33,7 @@
 #define USE_DEDICATED_ALLOCATION
 #endif
 //#define MIN_IMAGE_ALIGN (128*1024)
-#define MAX_ATTACHMENTS_IN_POOL (8+VK_NUM_BLOOM_PASSES*2) // depth + msaa + msaa-resolve + depth-resolve + screenmap.msaa + screenmap.resolve + screenmap.depth + bloom_extract + blur pairs
+#define MAX_ATTACHMENTS_IN_POOL (10+VK_NUM_BLOOM_PASSES*2) // depth + msaa + msaa-resolve + depth-resolve + screenmap.msaa + screenmap.resolve + screenmap.depth + bloom_extract + emissive-resolve + emissive-msaa + blur pairs
 
 #define VK_DESC_STORAGE      0
 #define VK_DESC_UNIFORM      0
@@ -346,6 +346,8 @@ typedef struct vk_tess_s {
 
 	uint32_t num_indexes; // value from most recent vk_bind_index() call
 
+	float		emissive_factor;	// fragment push constant: 1.0 for additive 3D stages, else 0.0
+
 	VkRect2D scissor_rect;
 } vk_tess_t;
 
@@ -397,9 +399,15 @@ typedef struct {
 	VkPipelineLayout pipeline_layout_blend;		// post-processing
 
 	VkDescriptorSet color_descriptor;
+	VkDescriptorSet emissive_descriptor;
 
 	VkImage color_image;
 	VkImageView color_image_view;
+
+	VkImage emissive_image;
+	VkImageView emissive_image_view;
+	VkImage emissive_image_msaa;
+	VkImageView emissive_image_view_msaa;
 
 	VkImage bloom_image[1+VK_NUM_BLOOM_PASSES*2];
 	VkImageView bloom_image_view[1+VK_NUM_BLOOM_PASSES*2];

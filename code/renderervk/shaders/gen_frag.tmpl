@@ -74,6 +74,8 @@ layout(location = 4) in vec2 fog_tex_coord;
 layout(depth_less) out float gl_FragDepth;
 #else
 layout(location = 0) out vec4 out_color;
+layout(location = 1) out vec4 out_emissive;
+layout(push_constant) uniform FragPush { layout(offset = 64) float emissiveFactor; } pc;
 #endif
 
 #ifdef USE_ATEST
@@ -511,5 +513,6 @@ void main() {
 	gl_FragDepth = gl_FragCoord.z;
 #else
 	out_color = base;
+	out_emissive = base * pc.emissiveFactor;
 #endif
 }

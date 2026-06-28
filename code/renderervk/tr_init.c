@@ -1828,7 +1828,7 @@ static void R_Register( void )
 	ri.Cvar_CheckRange( r_hdrHighlight, "0.5", "4.0", CV_FLOAT );
 	ri.Cvar_SetGroup( r_hdrHighlight, CVG_RENDERER );
 	ri.Cvar_SetDescription( r_hdrHighlight,
-		"How much extra pop the brightest highlights get in HDR, such as lights, explosions, and the sky. 1 = natural. Raise it for punchier highlights, lower it for a calmer look. Does not change overall brightness." );
+		"How much extra pop the brightest true highlights get in HDR (lights, explosions, plasma, sky). 1 = natural. Raise for punchier highlights, lower for a calmer look. Does not change overall brightness." );
 
 	r_hdrPeak = ri.Cvar_Get( "r_hdrPeak", "1000", CVAR_ARCHIVE );
 	ri.Cvar_CheckRange( r_hdrPeak, "250", "10000", CV_FLOAT );

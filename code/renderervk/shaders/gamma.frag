@@ -1,6 +1,7 @@
 #version 450
 
 layout(set = 0, binding = 0) uniform sampler2D texture0;
+layout(set = 1, binding = 0) uniform sampler2D texture1; // emissive highlight layer
 
 layout(location = 0) in vec2 frag_tex_coord;
 
@@ -18,6 +19,7 @@ layout(constant_id = 11) const int hdrMode = 0;          // 0 - SDR, 1 - scRGB l
 layout(constant_id = 12) const float paperWhite = 200.0; // nits SDR-white maps to
 layout(constant_id = 13) const float hdrHighlight = 1.0; // multiplier on the >1.0 headroom
 layout(constant_id = 14) const float hdrPeak = 1000.0;   // nits display peak; highlights roll off toward this
+layout(constant_id = 15) const int hdrEmissive = 0;      // 1 - reconstruct highlights from the emissive layer
 
 const vec3 sRGB = { 0.2126, 0.7152, 0.0722 };
 
@@ -72,7 +74,15 @@ void main() {
 
 	if ( hdrMode == 1 )
 	{
-		vec3 lin = sRGBtoLinear(pow(base, vec3(gamma)) * obScale); // 1.0 == paper-white
+		vec3 src = base;
+		if ( hdrEmissive == 1 ) {
+			vec3 emissive = texture(texture1, frag_tex_coord).rgb;
+			// Restore a channel only where base is still clipped to the ceiling,
+			// so 2D (drawn on top, below the ceiling) occludes the emitter.
+			vec3 saturated = step( vec3( 0.999 ), base );
+			src = mix( base, max( base, emissive ), saturated );
+		}
+		vec3 lin = sRGBtoLinear(pow(src, vec3(gamma)) * obScale); // 1.0 == paper-white
 
 		// Hue-preserving highlights: scale all channels by one factor from the
 		// brightest, rolling the headroom toward the panel peak.

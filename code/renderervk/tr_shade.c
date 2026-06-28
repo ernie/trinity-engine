@@ -1038,6 +1038,12 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
 		}
 
+		if ( vk.hdrActive ) {
+			const uint32_t blend = pStage->stateBits & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS );
+			const qboolean additive = ( blend == ( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE ) );
+			vk.cmd->emissive_factor = ( additive && !backEnd.projection2D ) ? 1.0f : 0.0f;
+		}
+
 		vk_bind_pipeline( pipeline );
 		vk_bind_geometry( tess_flags );
 		vk_draw_geometry( tess.depthRange, qtrue );
@@ -1055,6 +1061,9 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 				def.stencil_mark = 1;
 				pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
 			}
+
+			if ( vk.hdrActive )
+				vk.cmd->emissive_factor = 0.0f;
 
 			vk_bind_pipeline( pipeline );
 			vk_draw_geometry( tess.depthRange, qtrue );
@@ -1112,6 +1121,8 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 	}
 	if ( tess_flags ) // fog-only shaders?
 		vk_bind_geometry( tess_flags );
+	if ( vk.hdrActive )
+		vk.cmd->emissive_factor = 0.0f;
 #endif
 }
 
