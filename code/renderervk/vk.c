@@ -4598,7 +4598,7 @@ void vk_initialize( void )
 		VkPushConstantRange pp_push_range;
 		pp_push_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		pp_push_range.offset = 0;
-		pp_push_range.size = sizeof( int32_t );
+		pp_push_range.size = sizeof( int32_t ) + 3 * sizeof( float ); // hdrCalibrate + paperWhite, hdrPeak, hdrHighlight
 		desc.pushConstantRangeCount = 1;
 		desc.pPushConstantRanges = &pp_push_range;
 
@@ -5450,7 +5450,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	VkGraphicsPipelineCreateInfo create_info;
 	VkViewport viewport;
 	VkRect2D scissor;
-	VkSpecializationMapEntry spec_entries[16];
+	VkSpecializationMapEntry spec_entries[12];
 	VkSpecializationInfo frag_spec_info;
 	VkPipeline *pipeline;
 	VkShaderModule fsmodule;
@@ -5473,10 +5473,6 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 		int depth_g;
 		int depth_b;
 		int hdr_mode;
-		float paper_white;
-		float highlight;
-		float peak;
-		int hdr_emissive;
 	} frag_spec_data;
 
 	switch ( program_index ) {
@@ -5546,18 +5542,6 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	frag_spec_data.dither = r_dither->integer;
 	// program 3 is the screenshot/video capture pass; keep it SDR
 	frag_spec_data.hdr_mode = ( vk.hdrActive && program_index != 3 ) ? 1 : 0;
-	if ( r_hdrPaperWhite->value <= 0.0f ) {
-		// auto: BT.2408 HLG reference white for the panel peak. Luminance of a
-		// 75% HLG signal (scene-linear 0.264964) at the display system gamma.
-		double sysgamma = 1.2 + 0.42 * log10( r_hdrPeak->value / 1000.0 );
-		frag_spec_data.paper_white = (float)( r_hdrPeak->value * pow( 0.264964, sysgamma ) );
-	} else {
-		frag_spec_data.paper_white = r_hdrPaperWhite->value;
-	}
-	frag_spec_data.highlight = r_hdrHighlight->value;
-	frag_spec_data.peak = r_hdrPeak->value;
-	// capture pass has no emissive attachment, so disable reconstruction
-	frag_spec_data.hdr_emissive = ( vk.hdrActive && program_index != 3 ) ? 1 : 0;
 
 	if ( !vk_surface_format_color_depth( vk.present_format.format, &frag_spec_data.depth_r, &frag_spec_data.depth_g, &frag_spec_data.depth_b ) )
 		ri.Printf( PRINT_ALL, "Format %s not recognized, dither to assume 8bpc\n", vk_format_string( vk.base_format.format ) );
@@ -5610,23 +5594,7 @@ void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_
 	spec_entries[11].offset = offsetof( struct FragSpecData, hdr_mode );
 	spec_entries[11].size = sizeof( frag_spec_data.hdr_mode );
 
-	spec_entries[12].constantID = 12;
-	spec_entries[12].offset = offsetof( struct FragSpecData, paper_white );
-	spec_entries[12].size = sizeof( frag_spec_data.paper_white );
-
-	spec_entries[13].constantID = 13;
-	spec_entries[13].offset = offsetof( struct FragSpecData, highlight );
-	spec_entries[13].size = sizeof( frag_spec_data.highlight );
-
-	spec_entries[14].constantID = 14;
-	spec_entries[14].offset = offsetof( struct FragSpecData, peak );
-	spec_entries[14].size = sizeof( frag_spec_data.peak );
-
-	spec_entries[15].constantID = 15;
-	spec_entries[15].offset = offsetof( struct FragSpecData, hdr_emissive );
-	spec_entries[15].size = sizeof( frag_spec_data.hdr_emissive );
-
-	frag_spec_info.mapEntryCount = 16;
+	frag_spec_info.mapEntryCount = 12;
 	frag_spec_info.pMapEntries = spec_entries;
 	frag_spec_info.dataSize = sizeof( frag_spec_data );
 	frag_spec_info.pData = &frag_spec_data;
@@ -7883,6 +7851,18 @@ static void vk_resize_geometry_buffer( void )
 }
 
 
+// Paper-white level (nits) the gamma pass maps SDR-white to, pushed to the HDR shader.
+static float vk_hdr_paper_white( void )
+{
+	if ( r_hdrPaperWhite->value > 0.0f )
+		return r_hdrPaperWhite->value;
+	// auto: BT.2408 HLG reference white for the panel peak. Luminance of a
+	// 75% HLG signal (scene-linear 0.264964) at the display system gamma.
+	double sysgamma = 1.2 + 0.42 * log10( r_hdrPeak->value / 1000.0 );
+	return (float)( r_hdrPeak->value * pow( 0.264964, sysgamma ) );
+}
+
+
 void vk_end_frame( void )
 {
 #ifdef USE_UPLOAD_QUEUE
@@ -7923,7 +7903,8 @@ void vk_end_frame( void )
 			vk_begin_render_pass( vk.render_pass.capture, vk.framebuffers.capture, qfalse, gls.captureWidth, gls.captureHeight );
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.capture_pipeline );
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
-			// gamma_fs always declares texture1 (set 1); bind it even when hdrEmissive=0
+			// gamma_fs always declares texture1 (set 1); bind it even though the
+			// capture pass runs SDR (hdrMode 0) and never samples it
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 1, 1, &vk.emissive_descriptor, 0, NULL );
 
 			qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
@@ -7945,9 +7926,18 @@ void vk_end_frame( void )
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 1, 1, &vk.emissive_descriptor, 0, NULL );
 
 			{
-				int32_t hdrCalibrate = ( vk.hdrActive && r_hdrCalibrate->integer ) ? 1 : 0;
+				struct {
+					int32_t hdrCalibrate;
+					float paperWhite;
+					float hdrPeak;
+					float hdrHighlight;
+				} pp_push;
+				pp_push.hdrCalibrate = ( vk.hdrActive && r_hdrCalibrate->integer ) ? 1 : 0;
+				pp_push.paperWhite = vk_hdr_paper_white();
+				pp_push.hdrPeak = r_hdrPeak->value;
+				pp_push.hdrHighlight = r_hdrHighlight->value;
 				qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_post_process,
-					VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( hdrCalibrate ), &hdrCalibrate );
+					VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( pp_push ), &pp_push );
 			}
 
 			qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );

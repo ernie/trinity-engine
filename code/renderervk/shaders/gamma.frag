@@ -16,13 +16,12 @@ layout(constant_id = 8) const int depth_r = 255;
 layout(constant_id = 9) const int depth_g = 255;
 layout(constant_id = 10) const int depth_b = 255;
 layout(constant_id = 11) const int hdrMode = 0;          // 0 - SDR, 1 - scRGB linear HDR
-layout(constant_id = 12) const float paperWhite = 200.0; // nits SDR-white maps to
-layout(constant_id = 13) const float hdrHighlight = 1.0; // multiplier on the >1.0 headroom
-layout(constant_id = 14) const float hdrPeak = 1000.0;   // nits display peak; highlights roll off toward this
-layout(constant_id = 15) const int hdrEmissive = 0;      // 1 - reconstruct highlights from the emissive layer
 
 layout(push_constant) uniform Push {
-	int hdrCalibrate; // 1 = draw the peak-match calibration window
+	int hdrCalibrate;   // 1 = draw the peak-match calibration window
+	float paperWhite;   // nits SDR-white maps to
+	float hdrPeak;      // nits display peak; highlights roll off toward this
+	float hdrHighlight; // multiplier on the >1.0 headroom
 } push;
 
 const vec3 sRGB = { 0.2126, 0.7152, 0.0722 };
@@ -33,6 +32,41 @@ vec3 sRGBtoLinear(vec3 c) {
 	vec3 higher = pow((c + vec3(0.055)) / vec3(1.055), vec3(2.4));
 	return mix(higher, lower, cutoff);
 }
+
+// === BEGIN shared HDR core — keep byte-identical with
+// trinity-vr code/renderervk/shaders/desktopmirror.frag (this is the canonical copy) ===
+// Reconstructs scRGB-linear HDR output from the SDR colour buffer and the emissive
+// highlight layer. 1.0 == paper-white; result is scaled to scRGB (paper-white / 80).
+vec3 hdrReconstruct( vec3 base, vec3 emissive,
+                     float gamma, float obScale,
+                     float paperWhite, float hdrPeak, float hdrHighlight )
+{
+	// Restore only where an additive emitter exceeded SDR white AND the colour
+	// buffer is still clipped there. The emissive term excludes bloom, which
+	// inflates base in halos but never writes the emissive layer (no fringing);
+	// the base term restores 2D occlusion, since 2D composited on top darkens
+	// base below the ceiling even where the emissive layer kept the emitter.
+	float em = max( max( emissive.r, emissive.g ), emissive.b );
+	float clip = smoothstep( 1.0, 1.1, em )
+	           * smoothstep( 0.990, 1.0, max( max( base.r, base.g ), base.b ) );
+	vec3 src = mix( base, max( base, emissive ), clip );
+
+	vec3 lin = sRGBtoLinear( pow( src, vec3( gamma ) ) * obScale );
+
+	// Hue-preserving highlights: scale all channels by one factor from the
+	// brightest, rolling the headroom toward the panel peak.
+	float m = max( max( lin.r, lin.g ), lin.b );
+	if ( m > 1.0 )
+	{
+		float peak = max( hdrPeak / paperWhite, 1.0 );          // ceiling in paper-white units (>= paper-white)
+		float boosted = 1.0 + (m - 1.0) * hdrHighlight;         // highlight push
+		float rolled = peak * boosted / (peak - 1.0 + boosted); // soft asymptote at peak
+		lin *= rolled / m;
+	}
+
+	return lin * (paperWhite / 80.0);
+}
+// === END shared HDR core ===
 
 const int bayerSize = 8;
 const float bayerMatrix[bayerSize * bayerSize] = {
@@ -76,7 +110,7 @@ void main() {
 		if ( d.x < wx && d.y < wy ) {
 			float nits = 10000.0;                 // outer: clips to panel peak
 			if ( d.x < wx * 0.5 && d.y < wy * 0.5 ) {
-				nits = hdrPeak;                   // inner: value being calibrated
+				nits = push.hdrPeak;              // inner: value being calibrated
 			}
 			out_color = vec4(vec3(nits / 80.0), 1.0);
 			return;
@@ -97,33 +131,9 @@ void main() {
 
 	if ( hdrMode == 1 )
 	{
-		vec3 src = base;
-		if ( hdrEmissive == 1 ) {
-			vec3 emissive = texture(texture1, frag_tex_coord).rgb;
-			// Restore only where an additive emitter exceeded SDR white AND the colour
-			// buffer is still clipped there. The emissive term excludes bloom, which
-			// inflates base in halos but never writes the emissive layer (no fringing);
-			// the base term restores 2D occlusion, since 2D composited on top darkens
-			// base below the ceiling even where the emissive layer kept the emitter.
-			float em = max( max( emissive.r, emissive.g ), emissive.b );
-			float clip = smoothstep( 1.0, 1.1, em )
-			           * smoothstep( 0.990, 1.0, max( max( base.r, base.g ), base.b ) );
-			src = mix( base, max( base, emissive ), clip );
-		}
-		vec3 lin = sRGBtoLinear(pow(src, vec3(gamma)) * obScale); // 1.0 == paper-white
-
-		// Hue-preserving highlights: scale all channels by one factor from the
-		// brightest, rolling the headroom toward the panel peak.
-		float m = max(max(lin.r, lin.g), lin.b);
-		if ( m > 1.0 )
-		{
-			float peak = max(hdrPeak / paperWhite, 1.0);            // ceiling in paper-white units (>= paper-white)
-			float boosted = 1.0 + (m - 1.0) * hdrHighlight;         // highlight push
-			float rolled = peak * boosted / (peak - 1.0 + boosted); // soft asymptote at peak
-			lin *= rolled / m;
-		}
-
-		out_color = vec4(lin * (paperWhite / 80.0), 1.0);
+		vec3 emissive = texture(texture1, frag_tex_coord).rgb;
+		out_color = vec4( hdrReconstruct( base, emissive, gamma, obScale,
+			push.paperWhite, push.hdrPeak, push.hdrHighlight ), 1.0 );
 		return;
 	}
 
