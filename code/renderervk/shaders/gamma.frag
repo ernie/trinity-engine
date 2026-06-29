@@ -100,10 +100,15 @@ void main() {
 		vec3 src = base;
 		if ( hdrEmissive == 1 ) {
 			vec3 emissive = texture(texture1, frag_tex_coord).rgb;
-			// Restore a channel only where base is still clipped to the ceiling,
-			// so 2D (drawn on top, below the ceiling) occludes the emitter.
-			vec3 saturated = step( vec3( 0.999 ), base );
-			src = mix( base, max( base, emissive ), saturated );
+			// Restore only where an additive emitter exceeded SDR white AND the colour
+			// buffer is still clipped there. The emissive term excludes bloom, which
+			// inflates base in halos but never writes the emissive layer (no fringing);
+			// the base term restores 2D occlusion, since 2D composited on top darkens
+			// base below the ceiling even where the emissive layer kept the emitter.
+			float em = max( max( emissive.r, emissive.g ), emissive.b );
+			float clip = smoothstep( 1.0, 1.1, em )
+			           * smoothstep( 0.990, 1.0, max( max( base.r, base.g ), base.b ) );
+			src = mix( base, max( base, emissive ), clip );
 		}
 		vec3 lin = sRGBtoLinear(pow(src, vec3(gamma)) * obScale); // 1.0 == paper-white
 
