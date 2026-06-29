@@ -2046,6 +2046,12 @@ static qboolean vk_create_device( VkPhysicalDevice physical_device, int device_i
 			vk.depthClamp = qtrue;
 		}
 
+		if ( device_features.independentBlend ) {
+			// the HDR emissive MRT gives the emissive attachment a different blend
+			// state than the color attachment
+			features.independentBlend = VK_TRUE;
+		}
+
 		device_desc.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		device_desc.pNext = NULL;
 		device_desc.flags = 0;
