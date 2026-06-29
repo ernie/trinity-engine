@@ -1768,6 +1768,8 @@ static qboolean vk_select_surface_format( VkPhysicalDevice physical_device, VkSu
 		}
 	}
 
+	ri.Cvar_Set( "r_hdrActive", vk.hdrActive ? "1" : "0" );
+
 	if ( !r_fbo->integer ) {
 		vk.present_format = vk.base_format;
 	}
@@ -4593,8 +4595,12 @@ void vk_initialize( void )
 		desc.flags = 0;
 		desc.setLayoutCount = 2;
 		desc.pSetLayouts = set_layouts;
-		desc.pushConstantRangeCount = 0;
-		desc.pPushConstantRanges = NULL;
+		VkPushConstantRange pp_push_range;
+		pp_push_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		pp_push_range.offset = 0;
+		pp_push_range.size = sizeof( int32_t );
+		desc.pushConstantRangeCount = 1;
+		desc.pPushConstantRanges = &pp_push_range;
 
 		VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_post_process ) );
 
@@ -7937,6 +7943,12 @@ void vk_end_frame( void )
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.gamma_pipeline );
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 1, 1, &vk.emissive_descriptor, 0, NULL );
+
+			{
+				int32_t hdrCalibrate = ( vk.hdrActive && r_hdrCalibrate->integer ) ? 1 : 0;
+				qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_post_process,
+					VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( hdrCalibrate ), &hdrCalibrate );
+			}
 
 			qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 		}

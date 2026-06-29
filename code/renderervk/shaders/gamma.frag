@@ -21,6 +21,10 @@ layout(constant_id = 13) const float hdrHighlight = 1.0; // multiplier on the >1
 layout(constant_id = 14) const float hdrPeak = 1000.0;   // nits display peak; highlights roll off toward this
 layout(constant_id = 15) const int hdrEmissive = 0;      // 1 - reconstruct highlights from the emissive layer
 
+layout(push_constant) uniform Push {
+	int hdrCalibrate; // 1 = draw the peak-match calibration window
+} push;
+
 const vec3 sRGB = { 0.2126, 0.7152, 0.0722 };
 
 vec3 sRGBtoLinear(vec3 c) {
@@ -60,6 +64,25 @@ vec3 dither(vec3 color) {
 }
 
 void main() {
+	if ( hdrMode == 1 && push.hdrCalibrate == 1 ) {
+		// Peak-match test: a fixed outer rectangle that clips to the panel's true
+		// peak, and an inner rectangle at r_hdrPeak. Raise r_hdrPeak until the inner
+		// edge vanishes = panel peak. Window ~5% of pixels, 2.4:1:
+		//   area 4*wx*wy = 0.05, wx = 2.4*wy -> wy = sqrt(0.05/9.6) = 0.0722
+		// Centered at 0.38 to leave room below for the menu controls.
+		vec2 d = abs(frag_tex_coord - vec2(0.5, 0.38));
+		const float wy = 0.0722;
+		const float wx = 0.1733; // wy * 2.4
+		if ( d.x < wx && d.y < wy ) {
+			float nits = 10000.0;                 // outer: clips to panel peak
+			if ( d.x < wx * 0.5 && d.y < wy * 0.5 ) {
+				nits = hdrPeak;                   // inner: value being calibrated
+			}
+			out_color = vec4(vec3(nits / 80.0), 1.0);
+			return;
+		}
+	}
+
 	vec3 base = texture(texture0, frag_tex_coord).rgb;
 
 	if ( greyscale == 1 )
