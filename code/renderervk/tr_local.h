@@ -1336,6 +1336,8 @@ extern cvar_t	*r_hdr;
 extern cvar_t	*r_hdrDisplay;
 extern cvar_t	*r_hdrPaperWhite;
 extern cvar_t	*r_hdrHighlight;
+extern cvar_t	*r_hdrSaturation;
+extern cvar_t	*r_hdrSaturationFull;
 extern cvar_t	*r_hdrPeak;
 extern cvar_t	*r_hdrCalibrate;
 extern cvar_t	*r_hdrActive;

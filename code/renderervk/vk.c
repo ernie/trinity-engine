@@ -4591,7 +4591,7 @@ void vk_initialize( void )
 		VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_storage ) );
 
 		// post-processing pipeline
-		set_layouts[0] = vk.set_layout_sampler; // sampler - set 0: scene colour
+		set_layouts[0] = vk.set_layout_sampler; // sampler - set 0: scene color
 		set_layouts[1] = vk.set_layout_sampler; // sampler - set 1: emissive highlight layer
 		set_layouts[2] = vk.set_layout_sampler; // sampler
 		set_layouts[3] = vk.set_layout_sampler; // sampler
@@ -4604,7 +4604,7 @@ void vk_initialize( void )
 		VkPushConstantRange pp_push_range;
 		pp_push_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		pp_push_range.offset = 0;
-		pp_push_range.size = sizeof( int32_t ) + 3 * sizeof( float ); // hdrCalibrate + paperWhite, hdrPeak, hdrHighlight
+		pp_push_range.size = sizeof( int32_t ) + 5 * sizeof( float ); // hdrCalibrate + paperWhite, hdrPeak, hdrHighlight, hdrSaturation, hdrSaturationFull
 		desc.pushConstantRangeCount = 1;
 		desc.pPushConstantRanges = &pp_push_range;
 
@@ -6884,8 +6884,11 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		em.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
 		em.colorBlendOp = VK_BLEND_OP_ADD;
 		em.alphaBlendOp = VK_BLEND_OP_ADD;
-		// only generic surface shaders declare out_emissive; everything else must not write it
-		if ( def->shader_type >= TYPE_GENERIC_BEGIN )
+		// generic surface shaders and the dynamic-light shaders declare out_emissive;
+		// everything else must not write it
+		if ( def->shader_type >= TYPE_GENERIC_BEGIN
+			|| def->shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING
+			|| def->shader_type == TYPE_SIGNLE_TEXTURE_LIGHTING_LINEAR )
 			em.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 		else
 			em.colorWriteMask = 0;
@@ -7937,11 +7940,15 @@ void vk_end_frame( void )
 					float paperWhite;
 					float hdrPeak;
 					float hdrHighlight;
+					float hdrSaturation;
+					float hdrSaturationFull;
 				} pp_push;
 				pp_push.hdrCalibrate = ( vk.hdrActive && r_hdrCalibrate->integer ) ? 1 : 0;
 				pp_push.paperWhite = vk_hdr_paper_white();
 				pp_push.hdrPeak = r_hdrPeak->value;
 				pp_push.hdrHighlight = r_hdrHighlight->value;
+				pp_push.hdrSaturation = r_hdrSaturation->value;
+				pp_push.hdrSaturationFull = r_hdrSaturationFull->value;
 				qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_post_process,
 					VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( pp_push ), &pp_push );
 			}

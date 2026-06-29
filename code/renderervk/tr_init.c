@@ -88,6 +88,8 @@ cvar_t	*r_hdr;
 cvar_t	*r_hdrDisplay;
 cvar_t	*r_hdrPaperWhite;
 cvar_t	*r_hdrHighlight;
+cvar_t	*r_hdrSaturation;
+cvar_t	*r_hdrSaturationFull;
 cvar_t	*r_hdrPeak;
 cvar_t	*r_hdrCalibrate;
 cvar_t	*r_hdrActive;
@@ -1831,6 +1833,18 @@ static void R_Register( void )
 	ri.Cvar_SetGroup( r_hdrHighlight, CVG_RENDERER );
 	ri.Cvar_SetDescription( r_hdrHighlight,
 		"How much extra pop the brightest true highlights get in HDR (lights, explosions, plasma, sky). 1 = natural. Raise for punchier highlights, lower for a calmer look. Does not change overall brightness." );
+
+	r_hdrSaturation = ri.Cvar_Get( "r_hdrSaturation", "0.0", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_hdrSaturation, "0.0", "1.0", CV_FLOAT );
+	ri.Cvar_SetGroup( r_hdrSaturation, CVG_RENDERER );
+	ri.Cvar_SetDescription( r_hdrSaturation,
+		"How far bright highlights can bleed toward white in HDR -- the maximum desaturation, reached at the r_hdrSaturationFull intensity. 1 = keep full color (effect off); 0.5 = the brightest emitters lose up to half their saturation; 0 = the brightest go fully white. Mainly helps intense emitters (especially blues) read as bright instead of dim and saturated." );
+
+	r_hdrSaturationFull = ri.Cvar_Get( "r_hdrSaturationFull", "1.5", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_hdrSaturationFull, "0.5", "3.0", CV_FLOAT );
+	ri.Cvar_SetGroup( r_hdrSaturationFull, CVG_RENDERER );
+	ri.Cvar_SetDescription( r_hdrSaturationFull,
+		"Emitter intensity (emissive layer) at which a highlight reaches its maximum bleed toward white in HDR -- how white that actually is depends on r_hdrSaturation (only 0 is fully white). Most emitters peak near 1.5, so this is the main position knob; lower makes bright cores reach max bleed sooner. 1.5 = balanced." );
 
 	r_hdrPeak = ri.Cvar_Get( "r_hdrPeak", "1000", CVAR_ARCHIVE_ND );
 	ri.Cvar_CheckRange( r_hdrPeak, "250", "10000", CV_FLOAT );

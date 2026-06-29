@@ -1039,9 +1039,21 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		}
 
 		if ( vk.hdrActive ) {
-			const uint32_t blend = pStage->stateBits & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS );
-			const qboolean additive = ( blend == ( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE ) );
-			vk.cmd->emissive_factor = ( additive && !backEnd.projection2D ) ? 1.0f : 0.0f;
+			// Additive stages (dst ONE) feed the HDR emissive layer: src ONE writes
+			// color directly; src SRC_ALPHA is flagged negative so the shader
+			// alpha-weights it to match the color attachment.
+			const uint32_t src = pStage->stateBits & GLS_SRCBLEND_BITS;
+			const uint32_t dst = pStage->stateBits & GLS_DSTBLEND_BITS;
+			if ( dst == GLS_DSTBLEND_ONE && !backEnd.projection2D ) {
+				if ( src == GLS_SRCBLEND_SRC_ALPHA )
+					vk.cmd->emissive_factor = -1.0f;
+				else if ( src == GLS_SRCBLEND_ONE )
+					vk.cmd->emissive_factor = 1.0f;
+				else
+					vk.cmd->emissive_factor = 0.0f;
+			} else {
+				vk.cmd->emissive_factor = 0.0f;
+			}
 		}
 
 		vk_bind_pipeline( pipeline );

@@ -22,6 +22,8 @@ layout(push_constant) uniform Push {
 	float paperWhite;   // nits SDR-white maps to
 	float hdrPeak;      // nits display peak; highlights roll off toward this
 	float hdrHighlight; // multiplier on the >1.0 headroom
+	float hdrSaturation; // 0 = brightest emitters go white; 1 = keep full color
+	float hdrSaturationFull; // emitter intensity at which the bleed reaches its max
 } push;
 
 const vec3 sRGB = { 0.2126, 0.7152, 0.0722 };
@@ -35,13 +37,14 @@ vec3 sRGBtoLinear(vec3 c) {
 
 // === BEGIN shared HDR core — keep byte-identical with
 // trinity-vr code/renderervk/shaders/desktopmirror.frag (this is the canonical copy) ===
-// Reconstructs scRGB-linear HDR output from the SDR colour buffer and the emissive
+// Reconstructs scRGB-linear HDR output from the SDR color buffer and the emissive
 // highlight layer. 1.0 == paper-white; result is scaled to scRGB (paper-white / 80).
 vec3 hdrReconstruct( vec3 base, vec3 emissive,
                      float gamma, float obScale,
-                     float paperWhite, float hdrPeak, float hdrHighlight )
+                     float paperWhite, float hdrPeak, float hdrHighlight,
+                     float hdrSaturation, float hdrSaturationFull )
 {
-	// Restore only where an additive emitter exceeded SDR white AND the colour
+	// Restore only where an additive emitter exceeded SDR white AND the color
 	// buffer is still clipped there. The emissive term excludes bloom, which
 	// inflates base in halos but never writes the emissive layer (no fringing);
 	// the base term restores 2D occlusion, since 2D composited on top darkens
@@ -53,13 +56,22 @@ vec3 hdrReconstruct( vec3 base, vec3 emissive,
 
 	vec3 lin = sRGBtoLinear( pow( src, vec3( gamma ) ) * obScale );
 
-	// Hue-preserving highlights: scale all channels by one factor from the
-	// brightest, rolling the headroom toward the panel peak.
+	// Highlights (m>1.0): bleed over-white emitters toward white, then roll the
+	// headroom off toward the panel peak.
 	float m = max( max( lin.r, lin.g ), lin.b );
 	if ( m > 1.0 )
 	{
-		float peak = max( hdrPeak / paperWhite, 1.0 );          // ceiling in paper-white units (>= paper-white)
-		float boosted = 1.0 + (m - 1.0) * hdrHighlight;         // highlight push
+		float peak = max( hdrPeak / paperWhite, 1.0 );
+		float luma = dot( lin, vec3( 0.2126, 0.7152, 0.0722 ) );
+		float deficit = ( m - luma ) / m;
+		// Gate on em (float emissive intensity) so only real emitters bleed, not
+		// clipped saturated surfaces (em ~ 0, same m). Bleed = stronger of deficit
+		// (blue crosses early) and intensity t (any hot core whitens), capped by
+		// hdrSaturation.
+		float t = smoothstep( 0.0, hdrSaturationFull, em );
+		float toWhite = ( 1.0 - hdrSaturation ) * t * max( deficit, t );
+		lin = mix( lin, vec3( m ), toWhite );
+		float boosted = 1.0 + (m - 1.0) * hdrHighlight;
 		float rolled = peak * boosted / (peak - 1.0 + boosted); // soft asymptote at peak
 		lin *= rolled / m;
 	}
@@ -133,7 +145,8 @@ void main() {
 	{
 		vec3 emissive = texture(texture1, frag_tex_coord).rgb;
 		out_color = vec4( hdrReconstruct( base, emissive, gamma, obScale,
-			push.paperWhite, push.hdrPeak, push.hdrHighlight ), 1.0 );
+			push.paperWhite, push.hdrPeak, push.hdrHighlight, push.hdrSaturation,
+			push.hdrSaturationFull ), 1.0 );
 		return;
 	}
 
