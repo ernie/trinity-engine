@@ -4608,7 +4608,7 @@ void vk_initialize( void )
 		VkPushConstantRange pp_push_range;
 		pp_push_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		pp_push_range.offset = 0;
-		pp_push_range.size = sizeof( int32_t ) + 5 * sizeof( float ); // hdrCalibrate + paperWhite, hdrPeak, hdrHighlight, hdrSaturation, hdrSaturationFull
+		pp_push_range.size = sizeof( int32_t ) + 6 * sizeof( float ); // hdrCalibrate + paperWhite, hdrPeak, hdrHighlight, hdrSaturation, hdrSaturationFull, hdrSoftKnee
 		desc.pushConstantRangeCount = 1;
 		desc.pPushConstantRanges = &pp_push_range;
 
@@ -7965,6 +7965,7 @@ void vk_end_frame( void )
 					float hdrHighlight;
 					float hdrSaturation;
 					float hdrSaturationFull;
+					float hdrSoftKnee;
 				} pp_push;
 				pp_push.hdrCalibrate = ( vk.hdrActive && r_hdrCalibrate->integer ) ? 1 : 0;
 				pp_push.paperWhite = vk_hdr_paper_white();
@@ -7972,6 +7973,7 @@ void vk_end_frame( void )
 				pp_push.hdrHighlight = r_hdrHighlight->value;
 				pp_push.hdrSaturation = r_hdrSaturation->value;
 				pp_push.hdrSaturationFull = r_hdrSaturationFull->value;
+				pp_push.hdrSoftKnee = r_hdrSoftKnee->value;
 				qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout_post_process,
 					VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( pp_push ), &pp_push );
 			}
