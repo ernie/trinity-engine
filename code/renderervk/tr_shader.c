@@ -3542,18 +3542,18 @@ static shader_t *FinishShader( void ) {
 
 				default:
 					pStage->tessFlags = TESS_RGBA0 | TESS_ST0;
-					def.shader_type = TYPE_SIGNLE_TEXTURE;
+					def.shader_type = TYPE_SINGLE_TEXTURE;
 					if ( pStage->bundle[0].adjustColorsForFog == ACFF_NONE || fogCollapse ) {
 						if ( pStage->bundle[0].rgbGen == CGEN_IDENTITY ) {
 							if ( pStage->bundle[0].alphaGen == AGEN_SKIP ) {
 								pStage->tessFlags = TESS_ST0;
-								def.shader_type = TYPE_SIGNLE_TEXTURE_IDENTITY;
+								def.shader_type = TYPE_SINGLE_TEXTURE_IDENTITY;
 							}
 						}
 						else if ( pStage->bundle[0].rgbGen == CGEN_IDENTITY_LIGHTING ) {
 							if ( pStage->bundle[0].alphaGen == AGEN_SKIP || pStage->bundle[0].alphaGen == AGEN_IDENTITY ) {
 								pStage->tessFlags = TESS_ST0;
-								def.shader_type = TYPE_SIGNLE_TEXTURE_FIXED_COLOR;
+								def.shader_type = TYPE_SINGLE_TEXTURE_FIXED_COLOR;
 								def.color.rgb = tr.identityLightByte;
 								def.color.alpha = pStage->bundle[0].alphaGen == AGEN_IDENTITY ? 255 : tr.identityLightByte;
 							}
@@ -3561,7 +3561,7 @@ static shader_t *FinishShader( void ) {
 						else if ( pStage->bundle[0].rgbGen == CGEN_ENTITY ) {
 							if ( pStage->bundle[0].alphaGen == AGEN_ENTITY || pStage->bundle[0].alphaGen == AGEN_SKIP || pStage->bundle[0].alphaGen == AGEN_IDENTITY ) {
 								pStage->tessFlags = TESS_ST0 | TESS_ENT0;
-								def.shader_type = TYPE_SIGNLE_TEXTURE_ENT_COLOR;
+								def.shader_type = TYPE_SINGLE_TEXTURE_ENT_COLOR;
 							}
 						}
 					}
@@ -3595,10 +3595,10 @@ static shader_t *FinishShader( void ) {
 
 			if ( pStage->depthFragment ) {
 				def.mirror = qfalse;
-				def.shader_type = TYPE_SIGNLE_TEXTURE_DF;
+				def.shader_type = TYPE_SINGLE_TEXTURE_DF;
 				pStage->vk_pipeline_df = vk_find_pipeline_ext( 0, &def, qtrue );
 				def.mirror = qtrue;
-				def.shader_type = TYPE_SIGNLE_TEXTURE_DF;
+				def.shader_type = TYPE_SINGLE_TEXTURE_DF;
 				pStage->vk_mirror_pipeline_df = vk_find_pipeline_ext( 0, &def, qfalse );
 			}
 
