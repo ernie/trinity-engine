@@ -16,7 +16,7 @@ know they can send extended data.
 
 **Client engine** — Reads `vr_support` from serverinfo on connect. Flatscreen clients use
 this to display VR player status (e.g., scoreboard icons via configstrings). The VR client
-engines (Q3VR, Quake 3 Quest) use it to decide whether to pack head orientation into usercmds
+engines (Trinity VR, Trinity Quest) use it to decide whether to pack head orientation into usercmds
 and write 32-bit buttons.
 
 The actual head tracking encoding, game logic, and rendering are handled by the
@@ -26,27 +26,56 @@ full protocol specification.
 
 ### Improved Stencil Shadows
 
-Stencil shadow volumes (`cg_shadows 2`) have been substantially reworked in both the OpenGL
-and Vulkan renderers:
+Stencil shadow volumes (`cg_shadows 2`) are reworked across all three renderers — OpenGL,
+Vulkan, and OpenGL2 (the renderer the WebAssembly demo player uses) — built on a z-fail
+("Carmack's reverse") approach so shadows stay correct even when the camera is inside a
+shadow volume:
 
-- **Shadow volume capping** — Back caps are generated for shadow volumes, fixing the "ghost
-  shadow" artifacts that appeared as floating model silhouettes when players jumped
-- **Configurable distance** — `r_shadowDistance` (default 128) replaces the hardcoded 512-unit
-  extrusion, greatly reducing wall bleed
-- **Raw light direction** — Shadow extrusion follows the actual light direction instead of
-  clamping to downward travel, producing correct shadows from all light angles
-- **Draw order** — Shadow compositing happens before blended surfaces, so sprites and
-  transparent effects draw on top of shadows as expected
-- **Entity stencil masking** — Entity pixels are marked in the stencil buffer so shadows
-  don't darken the casting model itself
-- **Expanded entity culling** — Prevents shadows disappearing the moment the entity casting
-  them goes offscreen.
-- **BSP clipping** — Avoids most cases of wall/floor bleed, when a shadow is fully "caught"
-  by a surface, via per-vertex clipping to the BSP. You'll still see some bleeding and
-  artifacts if the shadow spills over a staircase or through a gap.
+- **Sealed silhouettes** — Model edges are welded by position so the silhouette forms
+  closed loops, sealing the light leaks and cracks that plain edge-matching left on
+  Quake III's models.
+- **Capped volumes** — Volumes are closed at both ends, eliminating the "ghost shadow"
+  silhouettes that floated in mid-air when players jumped.
+- **Configurable distance** — `r_shadowDistance` (default `256`) sets the extrusion and cull
+  distance, replacing the old hardcoded 512-unit extrusion and greatly reducing wall bleed.
+- **Raw light direction** — Extrusion follows the actual light direction instead of clamping
+  to straight down, producing correct shadows from all light angles.
+- **Expanded entity culling** — Shadows don't disappear the moment their caster leaves the
+  screen.
+- **BSP clipping** — `r_shadowClip 1` clips shadow volumes against world geometry to curb
+  floor/wall bleed; `r_shadowClipPenetration` (default `4`) and `r_shadowClipExtension`
+  (default `16`) tune how far a clipped volume may pass through and extend past a surface.
+  Some bleed can still occur where a shadow spills across stairs or through a gap.
 
-To use: `cg_shadows 2`, `r_shadowDistance 512`, `r_shadowClip 1`. The latter two values
-are the defaults.
+The defaults are tuned for normal play; just set `cg_shadows 2`.
+
+### HDR Display Output
+
+On the Vulkan renderer, Trinity Engine can output true HDR (scRGB linear FP16) to an
+HDR display, for brighter highlights and more lifelike color than standard dynamic range.
+It requires the Vulkan renderer, `r_fbo 1`, and an HDR-capable display with HDR enabled in
+the OS. This is separate from `r_hdr`, which only sets internal framebuffer precision.
+Toggle it in-game under **Setup → Graphics → HDR Display** and tune it under
+**Setup → Display → HDR Calibration**, or set the cvars directly:
+
+- `r_hdrDisplay` (default `0`) — master toggle; `1` enables true HDR output. Latched
+  (takes effect after `vid_restart`).
+- `r_hdrPeak` (default `400`) — your display's usable peak brightness in nits, the main
+  value to match to your panel. Best found with the calibration screen, which reflects the
+  brightness the panel actually reaches (often well below its rated peak). Range `250`–`10000`;
+  the in-game calibration slider covers `250`–`2000`.
+- `r_hdrPaperWhite` (default `0`) — nits that normal (SDR) white maps to; `0` = auto from the
+  peak.
+- `r_hdrHighlight` (default `1.0`, range `0.5`–`4.0`) — extra emphasis on the brightest
+  highlights; does not change overall brightness.
+- `r_hdrSaturation` (default `0.0`, range `0`–`1`) — how far the brightest highlights bleed
+  toward white (`1` keeps full color, `0` lets them go fully white).
+- `r_hdrSaturationFull` (default `1.5`, range `0.5`–`3.0`) — emitter intensity at which that
+  bleed reaches its maximum.
+- `r_hdrSoftKnee` (default `1.0`, range `0`–`2`) — how gradually the highlight treatment eases
+  in above paper-white.
+- `r_hdrActive` (read-only) — `1` when HDR output is genuinely live (HDR swapchain up and the
+  display's HDR switch on).
 
 ### TV (TrinityVision, of course :wink:) Demo System
 
@@ -124,17 +153,17 @@ xattr -cr Trinity.app
 
 ## The Trinity Ecosystem
 
-**[Trinity](https://github.com/ernie/trinity)** — A unified Quake III Arena / Team Arena game mod featuring unlagged weapons, VR head and torso tracking, an orbital follow camera for spectating and demo playback, Quake Live-style damage indicators, and visual enhancements. This mod provides server-side support for VR clients (Q3VR or Quake 3 Quest) and attempts to replicate what features it can for flatscreen players.
+**[Trinity](https://github.com/ernie/trinity)** — A unified Quake III Arena / Team Arena game mod featuring unlagged weapons, VR head and torso tracking, an orbital follow camera for spectating and demo playback, Quake Live-style damage indicators, and visual enhancements. This mod provides server-side support for VR clients (Trinity VR or Trinity Quest) and attempts to replicate what features it can for flatscreen players.
 
 **[Trinity Engine](https://github.com/ernie/trinity-engine)** — This project. The flatscreen engine, forked from Quake3e. Needed to run dedicated servers with Trinity, or to play back or auto-download TrinityVision demos. Loads the Trinity mod's game modules (cgame, game, ui) as QVM files at runtime.
 
-**[Q3VR](https://github.com/ernie/q3vr)** — PCVR client for Windows (OpenXR/SteamVR). Based on ioquake3 + ioq3quest VR with Trinity features compiled in. Supports full 6DoF single-player and multiplayer with crossplay between PC and Quest, a virtual screen for 2D content, haptic feedback, a weapon wheel, and configurable comfort options.
+**[Trinity VR](https://github.com/ernie/trinity-vr)** — PCVR client for Windows (OpenXR/SteamVR). Based on ioquake3 + ioq3quest VR with Trinity features compiled in. Supports full 6DoF single-player and multiplayer with crossplay between PC and Quest, a virtual screen for 2D content, haptic feedback, a weapon wheel, and configurable comfort options.
 
-**[Quake 3 Quest](https://github.com/nicomigu/ioq3quest)** — Meta Quest standalone VR client. Based on ioq3quest with Trinity features compiled in. Runs natively on Meta Quest headsets with full VR support and crossplay with Q3VR and flatscreen players.
+**[Trinity Quest](https://github.com/ernie/trinity-quest)** — Meta Quest standalone VR client. Based on ioq3quest with Trinity features compiled in. Runs natively on Meta Quest headsets with full VR support and crossplay with Trinity VR and flatscreen players.
 
 **[Trinity Tracker](https://github.com/ernie/trinity-tracker)** — A real-time statistics tracking and server administration platform. Monitors multiple Quake 3 servers, tracks player performance and match history, provides leaderboards, and serves a web interface with live updates via WebSocket. Includes CLI tools for server management and game asset extraction.
 
-> **Note:** The VR clients (Q3VR and Quake 3 Quest) compile Trinity mod code directly into their binaries because VR-specific function implementations would be replaced by flatscreen QVMs. The flatscreen engine loads QVMs at runtime instead.
+> **Note:** The VR clients (Trinity VR and Trinity Quest) compile Trinity mod code directly into their binaries because VR-specific function implementations would be replaced by flatscreen QVMs. The flatscreen engine loads QVMs at runtime instead.
 
 ---
 
