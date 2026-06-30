@@ -1,11 +1,16 @@
+#ifdef _WIN32
+// DisplayConfig OS-HDR query needs Win7 headers; set before tr_local.h, which pins
+// _WIN32_WINNT to 0x0501 via q_platform.h and would hide these types on MSVC/old MinGW.
+#undef _WIN32_WINNT
+#undef WINVER
+#define _WIN32_WINNT 0x0601
+#define WINVER 0x0601
+#endif
+
 #include "tr_local.h"
 #include "vk.h"
 
 #ifdef _WIN32
-// Win7+ headers for the DisplayConfig API used to detect the OS HDR switch.
-#ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0601
-#endif
 #include <windows.h>
 #endif
 
