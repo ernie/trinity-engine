@@ -1853,7 +1853,7 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_hdrSoftKnee,
 		"How gradually the HDR highlight treatment (path-to-white plus roll-off) eases in above paper-white. The value is a width in paper-white units: the effect ramps from nothing at 1x to full at (1 + this)x paper-white. 0 = a hard kick at paper-white (a slope discontinuity that reads as a band); 1.0 = full effect by twice paper-white (default)." );
 
-	r_hdrPeak = ri.Cvar_Get( "r_hdrPeak", "1000", CVAR_ARCHIVE_ND );
+	r_hdrPeak = ri.Cvar_Get( "r_hdrPeak", "400", CVAR_ARCHIVE_ND );
 	ri.Cvar_CheckRange( r_hdrPeak, "250", "10000", CV_FLOAT );
 	ri.Cvar_SetGroup( r_hdrPeak, CVG_RENDERER );
 	ri.Cvar_SetDescription( r_hdrPeak,
