@@ -3564,6 +3564,10 @@ static shader_t *FinishShader( void ) {
 								def.shader_type = TYPE_SINGLE_TEXTURE_ENT_COLOR;
 							}
 						}
+						else if ( vk.hdrActive && pStage->bundle[0].rgbGen == CGEN_LIGHTING_DIFFUSE ) {
+							def.shader_type = TYPE_SINGLE_TEXTURE_LIGHTING_OVERBRIGHT;
+							pStage->tessFlags |= TESS_OVERBRIGHT;
+						}
 					}
 					break;
 				}

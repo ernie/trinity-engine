@@ -49,6 +49,9 @@ layout(set = 4, binding = 0) uniform sampler2D fog_texture;
 // use fixed color from spec.constant.8 or entColor[0..2]
 #else
 layout(location = 0) in vec4 frag_color0;
+#ifdef USE_OVERBRIGHT
+layout(location = 7) in float frag_overbright;
+#endif
 #endif
 
 #ifdef USE_CL1
@@ -513,8 +516,13 @@ void main() {
 	gl_FragDepth = gl_FragCoord.z;
 #else
 	out_color = base;
+#ifdef USE_OVERBRIGHT
+	// light-grid HDR: recover the over-white lit color the byte clamp threw away
+	out_emissive = vec4( base.rgb * frag_overbright, 1.0 );
+#else
 	// emissiveFactor: 0 = off, +1 = additive, -1 = alpha-additive (weight by alpha).
 	float ef = pc.emissiveFactor;
 	out_emissive = vec4( base.rgb * abs( ef ) * ( ef < 0.0 ? base.a : 1.0 ), 1.0 );
+#endif
 #endif
 }

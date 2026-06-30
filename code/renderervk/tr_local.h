@@ -1591,6 +1591,7 @@ TESSELATOR/SHADER DECLARATIONS
 typedef struct stageVars
 {
 	color4ub_t	colors[NUM_TEXTURE_BUNDLES][SHADER_MAX_VERTEXES]; // we need at least 2xSHADER_MAX_VERTEXES for shadows and normals
+	float		overbright[SHADER_MAX_VERTEXES];	// per-vertex light-grid over-white ratio (>=1)
 	vec2_t		texcoords[NUM_TEXTURE_BUNDLES][SHADER_MAX_VERTEXES];
 	vec2_t		*texcoordPtr[NUM_TEXTURE_BUNDLES];
 } stageVars_t;

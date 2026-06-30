@@ -65,6 +65,10 @@ layout(location = 7) in vec4 in_color2;
 #endif
 
 layout(location = 0) out vec4 frag_color0;
+#ifdef USE_OVERBRIGHT
+layout(location = 8) in float in_overbright;
+layout(location = 7) out float frag_overbright;
+#endif
 #ifdef USE_CL1
 layout(location = 5) out vec4 frag_color1;
 #endif
@@ -97,6 +101,9 @@ void main() {
 	// use either 1.0 or fixed (rgb+a) color from spec.constants
 #else
 	frag_color0 = in_color0;
+#ifdef USE_OVERBRIGHT
+	frag_overbright = in_overbright;
+#endif
 #ifdef USE_CL1
 	frag_color1 = in_color1;
 #endif

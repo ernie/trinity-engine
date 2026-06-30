@@ -57,6 +57,7 @@ typedef enum {
 
 	TYPE_SINGLE_TEXTURE_LIGHTING,
 	TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR,
+	TYPE_SINGLE_TEXTURE_LIGHTING_OVERBRIGHT,
 
 	TYPE_SINGLE_TEXTURE_DF,
 
@@ -230,6 +231,7 @@ typedef struct vkUniform_s {
 #define TESS_ENT0  (1024) // uniform with ent.color[0]
 #define TESS_ENT1  (2048) // uniform with ent.color[1]
 #define TESS_ENT2  (4096) // uniform with ent.color[2]
+#define TESS_OVERBRIGHT (8192) // upload tess.svars.overbright to binding 5 (lightingDiffuse HDR)
 //
 // Initialization.
 //
@@ -494,6 +496,7 @@ typedef struct {
 			VkShaderModule ident1[2][2][2]; // tx[0,1], env0[0,1] fog[0,1]
 			VkShaderModule fixed[2][2][2];  // tx[0,1], env0[0,1] fog[0,1]
 			VkShaderModule light[2];        // fog[0,1]
+			VkShaderModule overbright_vert;
 		} vert;
 		struct {
 			VkShaderModule gen0_df;
@@ -502,6 +505,7 @@ typedef struct {
 			VkShaderModule fixed[2][2];  // tx[0,1], fog[0,1]
 			VkShaderModule ent[1][2];    // tx[0], fog[0,1]
 			VkShaderModule light[2][2];  // linear[0,1] fog[0,1]
+			VkShaderModule overbright_frag;
 		} frag;
 
 		VkShaderModule color_fs;

@@ -1251,30 +1251,24 @@ static void RB_CalcDiffuseColor_scalar( unsigned char *colors )
 
 	numVertexes = tess.numVertexes;
 	for (i = 0 ; i < numVertexes ; i++, normal += 4) {
+		float r, g, b, peak;
 		incoming = DotProduct (normal, lightDir);
 		if ( incoming <= 0 ) {
 			*(int *)&colors[i*4] = ambientLightInt;
+			tess.svars.overbright[i] = 1.0f;
 			continue;
-		} 
-		j = myftol( ambientLight[0] + incoming * directedLight[0] );
-		if ( j > 255 ) {
-			j = 255;
 		}
-		colors[i*4+0] = j;
+		r = ambientLight[0] + incoming * directedLight[0];
+		g = ambientLight[1] + incoming * directedLight[1];
+		b = ambientLight[2] + incoming * directedLight[2];
 
-		j = myftol( ambientLight[1] + incoming * directedLight[1] );
-		if ( j > 255 ) {
-			j = 255;
-		}
-		colors[i*4+1] = j;
-
-		j = myftol( ambientLight[2] + incoming * directedLight[2] );
-		if ( j > 255 ) {
-			j = 255;
-		}
-		colors[i*4+2] = j;
-
+		j = myftol( r ); if ( j > 255 ) j = 255; colors[i*4+0] = j;
+		j = myftol( g ); if ( j > 255 ) j = 255; colors[i*4+1] = j;
+		j = myftol( b ); if ( j > 255 ) j = 255; colors[i*4+2] = j;
 		colors[i*4+3] = 255;
+
+		peak = r; if ( g > peak ) peak = g; if ( b > peak ) peak = b;
+		tess.svars.overbright[i] = peak > 255.0f ? peak / 255.0f : 1.0f;
 	}
 }
 

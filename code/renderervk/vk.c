@@ -3182,6 +3182,10 @@ static void vk_create_shader_modules( void )
 	vk.modules.frag.light[0][1] = SHADER_MODULE( frag_light_fog );
 	vk.modules.frag.light[1][0] = SHADER_MODULE( frag_light_line );
 	vk.modules.frag.light[1][1] = SHADER_MODULE( frag_light_line_fog );
+
+	vk.modules.vert.overbright_vert = SHADER_MODULE( vert_tx0_overbright );
+	vk.modules.frag.overbright_frag = SHADER_MODULE( frag_tx0_overbright );
+
 	SET_OBJECT_NAME( vk.modules.frag.light[0][0], "light fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.frag.light[0][1], "light fog fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.frag.light[1][0], "linear light fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
@@ -5980,6 +5984,11 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 			fs_module = &vk.modules.frag.light[1][0];
 			break;
 
+		case TYPE_SINGLE_TEXTURE_LIGHTING_OVERBRIGHT:
+			vs_module = &vk.modules.vert.overbright_vert;
+			fs_module = &vk.modules.frag.overbright_frag;
+			break;
+
 		case TYPE_SINGLE_TEXTURE_DF:
 			state_bits |= GLS_DEPTHMASK_TRUE;
 			vs_module = &vk.modules.vert.ident1[0][0][0];
@@ -6413,6 +6422,17 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 			push_attr( 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT );
 			push_attr( 1, 1, VK_FORMAT_R8G8B8A8_UNORM );
 			push_attr( 2, 2, VK_FORMAT_R32G32_SFLOAT );
+			break;
+
+		case TYPE_SINGLE_TEXTURE_LIGHTING_OVERBRIGHT:
+			push_bind( 0, sizeof( vec4_t ) );					// xyz array
+			push_bind( 1, sizeof( color4ub_t ) );				// color array
+			push_bind( 2, sizeof( vec2_t ) );					// st0 array
+			push_bind( 5, sizeof( float ) );					// overbright array
+			push_attr( 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT );
+			push_attr( 1, 1, VK_FORMAT_R8G8B8A8_UNORM );
+			push_attr( 2, 2, VK_FORMAT_R32G32_SFLOAT );
+			push_attr( 8, 5, VK_FORMAT_R32_SFLOAT );			// GLSL location 8, binding 5
 			break;
 
 		case TYPE_SINGLE_TEXTURE_ENV:
@@ -6874,21 +6894,18 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	blend_attachments[0] = attachment_blend_state;
 
 	if ( ( renderPassIndex == RENDER_PASS_MAIN || renderPassIndex == RENDER_PASS_POST_BLOOM ) && vk.hdrActive ) {
-		VkPipelineColorBlendAttachmentState em;
-		Com_Memset( &em, 0, sizeof( em ) );
-		// emissive layer is always additive accumulation
-		em.blendEnable = VK_TRUE;
-		em.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-		em.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-		em.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-		em.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-		em.colorBlendOp = VK_BLEND_OP_ADD;
-		em.alphaBlendOp = VK_BLEND_OP_ADD;
-		// generic surface shaders and the dynamic-light shaders declare out_emissive;
-		// everything else must not write it
+		// the emissive layer mirrors the color blend so it composites with the same
+		// occlusion the color attachment does: opaque surfaces replace (a nearer
+		// fragment hides the emissive behind it -- fixes lit polygons showing through
+		// the model), additive emitters accumulate, and alpha-blended surfaces --
+		// including 2D drawn over the scene -- attenuate the emissive they cover
+		VkPipelineColorBlendAttachmentState em = attachment_blend_state;
+		// generic surface shaders, the lighting shaders and the dynamic-light shaders
+		// declare out_emissive; everything else must not write it
 		if ( def->shader_type >= TYPE_GENERIC_BEGIN
 			|| def->shader_type == TYPE_SINGLE_TEXTURE_LIGHTING
-			|| def->shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR )
+			|| def->shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR
+			|| def->shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_OVERBRIGHT )
 			em.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 		else
 			em.colorWriteMask = 0;
@@ -7380,6 +7397,12 @@ void vk_bind_geometry( uint32_t flags )
 
 		if ( flags & TESS_ST2 ) {
 			vk_bind_attr(4, sizeof( vec2_t ), tess.svars.texcoordPtr[2]);
+		}
+
+		// binding 5; must follow the lower-numbered binds because vk_bind_attr sets
+		// bind_count from the last (highest) index it sees, not the max of all of them
+		if ( flags & TESS_OVERBRIGHT ) {
+			vk_bind_attr( 5, sizeof( float ), tess.svars.overbright );
 		}
 
 		if ( flags & TESS_NNN ) {
