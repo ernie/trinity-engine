@@ -152,6 +152,16 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // renderer2 extensions
 #include "glext.h"
 
+// The system <OpenGL/glext.h> claims the glext include guard, so the bundled glext.h
+// above is skipped and newer macOS SDKs don't define these GL 3.3 swizzle tokens.
+#ifndef GL_TEXTURE_SWIZZLE_R
+#define GL_TEXTURE_SWIZZLE_R    0x8E42
+#define GL_TEXTURE_SWIZZLE_G    0x8E43
+#define GL_TEXTURE_SWIZZLE_B    0x8E44
+#define GL_TEXTURE_SWIZZLE_A    0x8E45
+#define GL_TEXTURE_SWIZZLE_RGBA 0x8E46
+#endif
+
 // GL function loader, based on https://gist.github.com/rygorous/16796a0c876cf8a5f542caddb55bce8a
 // get missing functions from code/SDL2/include/SDL_opengl.h
 
