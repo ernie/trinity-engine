@@ -234,6 +234,9 @@ typedef struct {
 	void	(*VKimp_Shutdown)( qboolean unloadDLL );
 	void*	(*VK_GetInstanceProcAddr)( VkInstance instance, const char *name );
 	qboolean (*VK_CreateSurface)( VkInstance instance, VkSurfaceKHR *pSurface );
+	// Enable EDR output on the presentation layer; returns the display's EDR
+	// headroom (>1 = HDR-capable). macOS-only effect, 1.0 elsewhere.
+	float	(*VK_ConfigureHDR)( qboolean enable );
 
 } refimport_t;
 

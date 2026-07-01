@@ -3716,6 +3716,7 @@ static void CL_InitRef( void ) {
 	rimp.VKimp_Shutdown = VKimp_Shutdown;
 	rimp.VK_GetInstanceProcAddr = VK_GetInstanceProcAddr;
 	rimp.VK_CreateSurface = VK_CreateSurface;
+	rimp.VK_ConfigureHDR = VK_ConfigureHDR;
 #endif
 
 	ret = GetRefAPI( REF_API_VERSION, &rimp );

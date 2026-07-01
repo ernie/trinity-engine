@@ -613,6 +613,9 @@ ifeq ($(COMPILE_PLATFORM),darwin)
   endif
   endif
 
+  # Frameworks for the macOS HDR (EDR) layer shim (sdl_macos_hdr.m).
+  CLIENT_LDFLAGS += -framework QuartzCore -framework AppKit -framework CoreGraphics
+
   ifeq ($(USE_SYSTEM_JPEG),1)
     CLIENT_LDFLAGS += -ljpeg
   endif
@@ -1396,6 +1399,9 @@ ifeq ($(USE_SDL),1)
         $(B)/client/sdl_gamma.o \
         $(B)/client/sdl_input.o \
         $(B)/client/sdl_snd.o
+ifeq ($(COMPILE_PLATFORM),darwin)
+    Q3OBJ += $(B)/client/sdl_macos_hdr.o
+endif
 else # !USE_SDL
     Q3OBJ += \
         $(B)/client/linux_glimp.o \
@@ -1603,6 +1609,9 @@ $(B)/ded/zstd/%.o: $(ZSTDDIR)/%.c
 	$(DO_DED_CC)
 
 $(B)/client/%.o: $(SDLDIR)/%.c
+	$(DO_CC)
+
+$(B)/client/%.o: $(SDLDIR)/%.m
 	$(DO_CC)
 
 $(B)/rend1/%.o: $(R1DIR)/%.c

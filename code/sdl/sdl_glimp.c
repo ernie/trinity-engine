@@ -803,6 +803,28 @@ qboolean VK_CreateSurface( VkInstance instance, VkSurfaceKHR *surface )
 }
 
 
+#ifdef __APPLE__
+// Implemented in sdl_macos_hdr.m — sets wantsExtendedDynamicRangeContent on the
+// presentation CAMetalLayer and reports the screen's EDR headroom.
+extern float Sys_MacOS_ConfigureHDRLayer( int enable );
+#endif
+
+/*
+===============
+VK_ConfigureHDR
+===============
+*/
+float VK_ConfigureHDR( qboolean enable )
+{
+#ifdef __APPLE__
+	return Sys_MacOS_ConfigureHDRLayer( enable ? 1 : 0 );
+#else
+	(void)enable;
+	return 1.0f;
+#endif
+}
+
+
 /*
 ===============
 VKimp_Shutdown

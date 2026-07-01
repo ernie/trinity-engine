@@ -94,6 +94,15 @@ qboolean VK_CreateSurface( VkInstance instance, VkSurfaceKHR *pSurface )
 }
 
 
+// HDR on Windows is detected via DisplayConfig in the renderer, not the surface
+// layer; nothing to configure here.
+float VK_ConfigureHDR( qboolean enable )
+{
+	(void)enable;
+	return 1.0f;
+}
+
+
 static HINSTANCE load_vulkan_library( const char *dllname )
 {
 	HINSTANCE lib;

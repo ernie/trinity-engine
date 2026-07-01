@@ -838,4 +838,5 @@ void	VKimp_Init( glconfig_t *config );
 void	VKimp_Shutdown( qboolean unloadDLL );
 void	*VK_GetInstanceProcAddr( VkInstance instance, const char *name );
 qboolean VK_CreateSurface( VkInstance instance, VkSurfaceKHR* pSurface );
+float VK_ConfigureHDR( qboolean enable );
 #endif

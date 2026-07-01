@@ -14,6 +14,10 @@
 #include <windows.h>
 #endif
 
+#ifdef __APPLE__
+extern float Sys_MacOS_CurrentEDRHeadroom( void ); // sdl_macos_hdr.m
+#endif
+
 #if defined (_DEBUG)
 #if defined (_WIN32)
 #define USE_VK_VALIDATION
@@ -614,6 +618,13 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 	desc.oldSwapchain = VK_NULL_HANDLE;
 
 	VK_CHECK( qvkCreateSwapchainKHR( device, &desc, NULL, swapchain ) );
+
+#ifdef __APPLE__
+	// The EDR flag only takes on the FP16 layer MoltenVK sets up here, not on the
+	// 8-bit layer that exists during format selection.
+	if ( vk.hdrActive )
+		ri.VK_ConfigureHDR( qtrue );
+#endif
 
 	VK_CHECK( qvkGetSwapchainImagesKHR( vk.device, vk.swapchain, &vk.swapchain_image_count, NULL ) );
 	vk.swapchain_image_count = MIN( vk.swapchain_image_count, MAX_SWAPCHAIN_IMAGES );
@@ -1760,6 +1771,17 @@ static qboolean vk_select_surface_format( VkPhysicalDevice physical_device, VkSu
 		for ( h = 0; h < format_count; h++ ) {
 			if ( candidates[h].format == VK_FORMAT_R16G16B16A16_SFLOAT &&
 				candidates[h].colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT ) {
+#ifdef __APPLE__
+				// macOS reports HDR via the layer's EDR headroom, not DisplayConfig:
+				// enable extended-dynamic-range on the presentation layer and commit
+				// only if the display actually has headroom (else scRGB > 1 clamps).
+				if ( ri.VK_ConfigureHDR( qtrue ) > 1.0f ) {
+					vk.present_format = candidates[h];
+					vk.hdrActive = qtrue;
+				} else {
+					ri.VK_ConfigureHDR( qfalse );
+				}
+#else
 				// the scRGB colorspace is advertised even when the OS HDR switch is
 				// off, which only makes the image look oversaturated; commit to HDR
 				// output unless we positively detect HDR as off.
@@ -1768,6 +1790,7 @@ static qboolean vk_select_surface_format( VkPhysicalDevice physical_device, VkSu
 					vk.present_format = candidates[h];
 					vk.hdrActive = qtrue;
 				}
+#endif
 				break;
 			}
 		}
@@ -7973,8 +7996,20 @@ void vk_end_frame( void )
 					float hdrSoftKnee;
 				} pp_push;
 				pp_push.hdrCalibrate = ( vk.hdrActive && r_hdrCalibrate->integer ) ? 1 : 0;
+#ifdef __APPLE__
+				// macOS EDR is SDR-white-relative with an OS-reported headroom, not
+				// nits: anchor white at 1.0 (paperWhite=80 cancels the shader's /80)
+				// and roll highlights off toward the live headroom.
+				{
+					float edr = Sys_MacOS_CurrentEDRHeadroom();
+					if ( edr < 1.0f ) edr = 1.0f;
+					pp_push.paperWhite = 80.0f;
+					pp_push.hdrPeak = 80.0f * edr;
+				}
+#else
 				pp_push.paperWhite = vk_hdr_paper_white();
 				pp_push.hdrPeak = r_hdrPeak->value;
+#endif
 				pp_push.hdrHighlight = r_hdrHighlight->value;
 				pp_push.hdrSaturation = r_hdrSaturation->value;
 				pp_push.hdrSaturationFull = r_hdrSaturationFull->value;
