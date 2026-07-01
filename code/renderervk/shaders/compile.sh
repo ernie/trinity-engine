@@ -59,6 +59,7 @@ c frag frag_light_line_fog light_frag.tmpl -DUSE_LINE -DUSE_FOG
 # --- generic vertex: single texture ----------------------------------------
 c vert vert_tx0                gen_vert.tmpl
 c vert vert_tx0_overbright     gen_vert.tmpl -DUSE_OVERBRIGHT
+c vert vert_tx0_overbright_fog gen_vert.tmpl -DUSE_OVERBRIGHT -DUSE_FOG
 c vert vert_tx0_fog            gen_vert.tmpl -DUSE_FOG
 c vert vert_tx0_env            gen_vert.tmpl -DUSE_ENV
 c vert vert_tx0_env_fog        gen_vert.tmpl -DUSE_FOG -DUSE_ENV
@@ -102,6 +103,7 @@ c vert vert_tx2_cl_env_fog     gen_vert.tmpl -DUSE_CL2 -DUSE_TX2 -DUSE_ENV -DUSE
 # --- generic fragment: single texture --------------------------------------
 c frag frag_tx0                gen_frag.tmpl -DUSE_ATEST
 c frag frag_tx0_overbright     gen_frag.tmpl -DUSE_ATEST -DUSE_OVERBRIGHT
+c frag frag_tx0_overbright_fog gen_frag.tmpl -DUSE_ATEST -DUSE_OVERBRIGHT -DUSE_FOG
 c frag frag_tx0_fog            gen_frag.tmpl -DUSE_ATEST -DUSE_FOG
 c frag frag_tx0_ident1         gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_ATEST
 c frag frag_tx0_ident1_fog     gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_FOG

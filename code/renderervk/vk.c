@@ -3211,8 +3211,10 @@ static void vk_create_shader_modules( void )
 	vk.modules.frag.light[1][0] = SHADER_MODULE( frag_light_line );
 	vk.modules.frag.light[1][1] = SHADER_MODULE( frag_light_line_fog );
 
-	vk.modules.vert.overbright_vert = SHADER_MODULE( vert_tx0_overbright );
-	vk.modules.frag.overbright_frag = SHADER_MODULE( frag_tx0_overbright );
+	vk.modules.vert.overbright_vert[0] = SHADER_MODULE( vert_tx0_overbright );
+	vk.modules.vert.overbright_vert[1] = SHADER_MODULE( vert_tx0_overbright_fog );
+	vk.modules.frag.overbright_frag[0] = SHADER_MODULE( frag_tx0_overbright );
+	vk.modules.frag.overbright_frag[1] = SHADER_MODULE( frag_tx0_overbright_fog );
 
 	SET_OBJECT_NAME( vk.modules.frag.light[0][0], "light fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.frag.light[0][1], "light fog fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
@@ -4959,6 +4961,17 @@ void vk_shutdown( refShutdownCode_t code )
 	}
 
 	for ( i = 0; i < 2; i++ ) {
+		if ( vk.modules.vert.overbright_vert[i] != VK_NULL_HANDLE ) {
+			qvkDestroyShaderModule( vk.device, vk.modules.vert.overbright_vert[i], NULL );
+			vk.modules.vert.overbright_vert[i] = VK_NULL_HANDLE;
+		}
+		if ( vk.modules.frag.overbright_frag[i] != VK_NULL_HANDLE ) {
+			qvkDestroyShaderModule( vk.device, vk.modules.frag.overbright_frag[i], NULL );
+			vk.modules.frag.overbright_frag[i] = VK_NULL_HANDLE;
+		}
+	}
+
+	for ( i = 0; i < 2; i++ ) {
 		for ( j = 0; j < 2; j++ ) {
 			for ( k = 0; k < 2; k++ ) {
 				qvkDestroyShaderModule( vk.device, vk.modules.vert.ident1[i][j][k], NULL );
@@ -6013,8 +6026,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 			break;
 
 		case TYPE_SINGLE_TEXTURE_LIGHTING_OVERBRIGHT:
-			vs_module = &vk.modules.vert.overbright_vert;
-			fs_module = &vk.modules.frag.overbright_frag;
+			vs_module = &vk.modules.vert.overbright_vert[0];
+			fs_module = &vk.modules.frag.overbright_frag[0];
 			break;
 
 		case TYPE_SINGLE_TEXTURE_DF:
@@ -6983,7 +6996,22 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	create_info.basePipelineHandle = VK_NULL_HANDLE;
 	create_info.basePipelineIndex = -1;
 
-	VK_CHECK( qvkCreateGraphicsPipelines( vk.device, vk.pipelineCache, 1, &create_info, NULL, &pipeline ) );
+	{
+		VkResult res = qvkCreateGraphicsPipelines( vk.device, vk.pipelineCache, 1, &create_info, NULL, &pipeline );
+		if ( res < 0 ) {
+			// deviceWaitIdle tells a bad create apart from an earlier device loss
+			const VkResult idle = qvkDeviceWaitIdle( vk.device );
+			ri.Error( ERR_FATAL, "Vulkan: vkCreateGraphicsPipelines returned %s for def#%i "
+				"(type=%i state=0x%08X pass=%i fog=%i mirror=%i shadow=%i cull=%i "
+				"pofs=%i prim=%i acff=%i stencil=%i color=%02X/%02X), deviceWaitIdle=%s",
+				vk_result_string( res ), def_index,
+				def->shader_type, def->state_bits, renderPassIndex,
+				def->fog_stage, def->mirror, def->shadow_phase, def->face_culling,
+				def->polygon_offset, def->primitives, def->acff, def->stencil_mark,
+				def->color.rgb, def->color.alpha,
+				vk_result_string( idle ) );
+		}
+	}
 
 	SET_OBJECT_NAME( pipeline, va( "pipeline def#%i, pass#%i", def_index, renderPassIndex ), VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT );
 

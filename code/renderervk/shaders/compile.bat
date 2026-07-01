@@ -56,6 +56,9 @@ for %%f in (*.frag) do (
 "%cl%" -S vert -V -o "%tmpf%" gen_vert.tmpl -DUSE_OVERBRIGHT
 "%bh%" "%tmpf%" %outf% vert_tx0_overbright
 
+"%cl%" -S vert -V -o "%tmpf%" gen_vert.tmpl -DUSE_OVERBRIGHT -DUSE_FOG
+"%bh%" "%tmpf%" %outf% vert_tx0_overbright_fog
+
 "%cl%" -S vert -V -o "%tmpf%" gen_vert.tmpl -DUSE_FOG
 "%bh%" "%tmpf%" %outf% vert_tx0_fog
 
@@ -184,6 +187,9 @@ for %%f in (*.frag) do (
 
 "%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_ATEST -DUSE_OVERBRIGHT
 "%bh%" "%tmpf%" %outf% frag_tx0_overbright
+
+"%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_ATEST -DUSE_OVERBRIGHT -DUSE_FOG
+"%bh%" "%tmpf%" %outf% frag_tx0_overbright_fog
 
 "%cl%" -S frag -V -o "%tmpf%" gen_frag.tmpl -DUSE_ATEST -DUSE_FOG
 "%bh%" "%tmpf%" %outf% frag_tx0_fog
