@@ -98,6 +98,14 @@ qboolean VK_CreateSurface( VkInstance instance, VkSurfaceKHR *surface )
 }
 
 
+// EDR layer configuration is macOS-only; nothing to configure here.
+float VK_ConfigureHDR( qboolean enable )
+{
+	(void)enable;
+	return 1.0f;
+}
+
+
 static void *load_vulkan_library( const char *dllname )
 {
 	void *lib;
