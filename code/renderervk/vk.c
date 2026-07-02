@@ -6935,15 +6935,18 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	blend_attachments[0] = attachment_blend_state;
 
 	if ( ( renderPassIndex == RENDER_PASS_MAIN || renderPassIndex == RENDER_PASS_POST_BLOOM ) && vk.hdrActive ) {
-		// the emissive layer mirrors the color blend so it composites with the same
-		// occlusion the color attachment does: opaque surfaces replace (a nearer
-		// fragment hides the emissive behind it -- fixes lit polygons showing through
-		// the model), additive emitters accumulate, and alpha-blended surfaces --
-		// including 2D drawn over the scene -- attenuate the emissive they cover
+		// the emissive layer mirrors the color blend, so it only needs writes from
+		// stages that can add light or that cover an emitter without depth
+		// occlusion. Gen stages emit only when blended (emissive_factor is nonzero
+		// only for dstblend ONE); depth-test-disabled 2D replaces what it covers.
+		// Opaque depth-tested gen geometry is masked off: the layer clears each
+		// frame and depth already excludes hidden emitters. The lighting and
+		// dynamic-light shaders always write out_emissive (dlight glow) and keep
+		// the mask unconditionally.
 		VkPipelineColorBlendAttachmentState em = attachment_blend_state;
-		// generic surface shaders, the lighting shaders and the dynamic-light shaders
-		// declare out_emissive; everything else must not write it
-		if ( def->shader_type >= TYPE_GENERIC_BEGIN
+		if ( ( def->shader_type >= TYPE_GENERIC_BEGIN
+				&& ( ( def->state_bits & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) )
+					|| ( def->state_bits & GLS_DEPTHTEST_DISABLE ) ) )
 			|| def->shader_type == TYPE_SINGLE_TEXTURE_LIGHTING
 			|| def->shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_LINEAR
 			|| def->shader_type == TYPE_SINGLE_TEXTURE_LIGHTING_OVERBRIGHT )
