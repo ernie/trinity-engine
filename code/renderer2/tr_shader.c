@@ -3307,11 +3307,13 @@ static shader_t *FinishShader( void ) {
 			// fog color adjustment only works for blend modes that have a contribution
 			// that aproaches 0 as the modulate values aproach 0 --
 			// GL_ONE, GL_ONE
+			// GL_ONE, GL_ONE_MINUS_SRC_COLOR
 			// GL_ZERO, GL_ONE_MINUS_SRC_COLOR
 			// GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA
 
-			// modulate, additive
+			// modulate, additive, screen
 			if ( ( ( blendSrcBits == GLS_SRCBLEND_ONE ) && ( blendDstBits == GLS_DSTBLEND_ONE ) ) ||
+				( ( blendSrcBits == GLS_SRCBLEND_ONE ) && ( blendDstBits == GLS_DSTBLEND_ONE_MINUS_SRC_COLOR ) ) ||
 				( ( blendSrcBits == GLS_SRCBLEND_ZERO ) && ( blendDstBits == GLS_DSTBLEND_ONE_MINUS_SRC_COLOR ) ) ) {
 				pStage->adjustColorsForFog = ACFF_MODULATE_RGB;
 			}
