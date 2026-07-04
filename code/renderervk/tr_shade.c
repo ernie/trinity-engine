@@ -1046,7 +1046,10 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			// alpha-weights it to match the color attachment.
 			const uint32_t src = pStage->stateBits & GLS_SRCBLEND_BITS;
 			const uint32_t dst = pStage->stateBits & GLS_DSTBLEND_BITS;
-			if ( dst == GLS_DSTBLEND_ONE && !backEnd.projection2D ) {
+			// Flare corona simulates ocular glare; routing it to HDR emissive would
+			// double-count that glare. The light fixture's own surface still feeds emissive.
+			if ( dst == GLS_DSTBLEND_ONE && !backEnd.projection2D
+					&& tess.shader != tr.flareShader ) {
 				if ( src == GLS_SRCBLEND_SRC_ALPHA )
 					vk.cmd->emissive_factor = -1.0f;
 				else if ( src == GLS_SRCBLEND_ONE )
