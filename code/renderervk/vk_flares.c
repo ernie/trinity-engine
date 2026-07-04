@@ -72,8 +72,10 @@ typedef struct flare_s {
 
 	qboolean	visible;			// state of last test
 	float		drawIntensity;		// may be non 0 even if !visible due to fading
+	float		deferredIntensity;	// drawIntensity captured at own-view test; later PV_NONE views zero drawIntensity before the deferred draw
 
 	int			windowX, windowY;
+	int			viewportWidth;		// owning view's viewport width, for corona sizing at deferred draw time
 	float		eyeZ;
 	float		drawZ;
 
@@ -201,6 +203,8 @@ void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, vec3_t 
 	// save info needed to test
 	f->windowX = backEnd.viewParms.viewportX + window[0];
 	f->windowY = backEnd.viewParms.viewportY + window[1];
+	// captured now (own view) so the deferred draw doesn't size off whatever view is last at the 2D boundary
+	f->viewportWidth = backEnd.viewParms.viewportWidth;
 
 	f->eyeZ = eye[2];
 
@@ -403,14 +407,14 @@ static void RB_RenderFlare( flare_t *f ) {
 	else
 		distance = -f->eyeZ;
 
-	// calculate the flare size..
-	size = backEnd.viewParms.viewportWidth * ( r_flareSize->value/640.0f + 8 / distance );
+	// use the flare's own captured viewport width so a deferred draw isn't mis-sized by the last 3D view's viewParms
+	size = f->viewportWidth * ( r_flareSize->value/640.0f + 8 / distance );
 
 /*
  * This is an alternative to intensity scaling. It changes the size of the flare on screen instead
  * with growing distance. See in the description at the top why this is not the way to go.
 	// size will change ~ 1/r.
-	size = backEnd.viewParms.viewportWidth * (r_flareSize->value / (distance * -2.0f));
+	size = f->viewportWidth * (r_flareSize->value / (distance * -2.0f));
 */
 
 /*
@@ -517,6 +521,8 @@ void RB_RenderFlares( void ) {
 		f->drawIntensity = 0;
 		if ( f->frameSceneNum == backEnd.viewParms.frameSceneNum && f->portalView == backEnd.viewParms.portalView ) {
 			RB_TestFlare( f );
+			// deferred draw runs after later PV_NONE views (3D HUD icons) zero drawIntensity; preserve it here
+			f->deferredIntensity = f->drawIntensity;
 			if ( f->testCount == 0 ) {
 				// recently added, wait 1 frame for test result
 			} else if ( f->drawIntensity ) {
@@ -537,6 +543,12 @@ void RB_RenderFlares( void ) {
 		return;		// none visible
 	}
 
+	// Main-view coronas draw later via RB_RenderDeferredFlares (after bloom's bright-pass, so
+	// they aren't re-bloomed); portal/mirror keep classic timing or a deferred draw would leak past the portal edge.
+	if ( backEnd.viewParms.portalView == PV_NONE ) {
+		return;
+	}
+
 #ifdef USE_REVERSED_DEPTH
 	m = vk_ortho( backEnd.viewParms.viewportX, backEnd.viewParms.viewportX + backEnd.viewParms.viewportWidth,
 		backEnd.viewParms.viewportY, backEnd.viewParms.viewportY + backEnd.viewParms.viewportHeight, 1.0, 0.0 );
@@ -555,4 +567,59 @@ void RB_RenderFlares( void ) {
 
 	//Com_Memcpy( vk_world.modelview_transform, modelMatrix_original, sizeof( modelMatrix_original ) );
 	//vk_update_mvp( NULL );
+}
+
+
+/*
+==================
+RB_RenderDeferredFlares
+
+Draws main-view (PV_NONE) coronas once per frame at the 3D->2D boundary, after
+vk_bloom()'s bright-pass, so coronas aren't re-bloomed. doneFlares guards the once-per-frame.
+==================
+*/
+void RB_RenderDeferredFlares( void ) {
+	flare_t				*f;
+	float				*m;
+	const trRefEntity_t	*savedEntity;
+
+	if ( !r_flares->integer || backEnd.doneFlares )
+		return;
+
+	// Skip pure-2D frames (menu/disconnect): frameCount is frozen on the last 3D
+	// frame there, so stale flares would still match and paint coronas over the UI.
+	if ( !backEnd.doneSurfaces )
+		return;
+
+	// checked before marking done, so a screenmap pass can't suppress the real deferred draw
+	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP )
+		return;
+
+	backEnd.doneFlares = qtrue;
+
+	// save/restore currentEntity so the following 2D batch flushes with the entity the caller expects
+	savedEntity = backEnd.currentEntity;
+	backEnd.currentEntity = &tr.worldEntity;
+
+	// full-window ortho; stored windowX/Y already include viewport offsets
+#ifdef USE_REVERSED_DEPTH
+	m = vk_ortho( 0, glConfig.vidWidth, 0, glConfig.vidHeight, 1.0, 0.0 );
+#else
+	m = vk_ortho( 0, glConfig.vidWidth, 0, glConfig.vidHeight, 0.0, 1.0 );
+#endif
+	vk_update_mvp( m );
+
+	for ( f = r_activeFlares ; f ; f = f->next ) {
+		if ( f->portalView == PV_NONE && f->addedFrame == backEnd.viewParms.frameCount ) {
+			// restore intensity zeroed by later PV_NONE (3D HUD icon) views since this flare's own test
+			f->drawIntensity = f->deferredIntensity;
+			if ( f->drawIntensity )
+				RB_RenderFlare( f );
+		}
+	}
+
+	// Restore 2D MVP: the second RB_SetGL2D() early-returns (projection2D already true) and won't
+	// re-push it, so without this the flipped-Y flare ortho leaks into subsequent 2D rendering.
+	vk_update_mvp( NULL );
+	backEnd.currentEntity = savedEntity;
 }

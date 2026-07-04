@@ -1192,6 +1192,22 @@ static const void *RB_SetColor( const void *data ) {
 
 /*
 =============
+RB_Begin2D
+
+Shared 3D->2D boundary idiom so bloom-on/off paths agree on when coronas draw.
+=============
+*/
+static void RB_Begin2D( void ) {
+#ifdef USE_VULKAN
+	if ( r_bloom->integer )
+		vk_bloom();
+	RB_RenderDeferredFlares();
+#endif
+}
+
+
+/*
+=============
 RB_StretchPic
 =============
 */
@@ -1206,6 +1222,8 @@ static const void *RB_StretchPic( const void *data ) {
 		RB_EndSurface();
 		backEnd.currentEntity = &backEnd.entity2D;
 		RB_SetGL2D(); // set correct shader time before RB_BeginSurface() on 3D->2D transition
+		// No 2D surface pending here, so the deferred draw's own Begin/EndSurface can't corrupt the 2D batch.
+		RB_Begin2D();
 		RB_BeginSurface( shader, 0 );
 	}
 
@@ -1214,12 +1232,6 @@ static const void *RB_StretchPic( const void *data ) {
 #endif
 
 	RB_SetGL2D();
-
-#ifdef USE_VULKAN
-	if ( r_bloom->integer ) {
-		vk_bloom();
-	}
-#endif
 
 	RB_AddQuadStamp2( cmd->x, cmd->y, cmd->w, cmd->h, cmd->s1, cmd->t1, cmd->s2, cmd->t2, backEnd.color2D );
 	return (const void *)(cmd + 1);
@@ -1702,11 +1714,7 @@ static const void *RB_FinishBloom( const void *data )
 
 	RB_EndSurface();
 
-#ifdef USE_VULKAN
-	if ( r_bloom->integer ) {
-		vk_bloom();
-	}
-#endif
+	RB_Begin2D();
 
 	// texture swapping test
 	if ( r_showImages->integer ) {
@@ -1791,6 +1799,7 @@ static const void *RB_SwapBuffers( const void *data ) {
 	backEnd.drawConsole = qfalse;
 #ifdef USE_VULKAN
 	backEnd.doneBloom = qfalse;
+	backEnd.doneFlares = qfalse;
 #endif
 
 	return (const void *)(cmd + 1);

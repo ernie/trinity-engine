@@ -1151,6 +1151,7 @@ typedef struct {
 
 	qboolean screenMapDone;
 	qboolean doneBloom;
+	qboolean doneFlares; // deferred main-view flare draw done this frame
 
 } backEndState_t;
 
@@ -1697,6 +1698,7 @@ void R_ClearFlares( void );
 void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, vec3_t normal );
 void RB_AddDlightFlares( void );
 void RB_RenderFlares( void );
+void RB_RenderDeferredFlares( void );
 
 /*
 ============================================================

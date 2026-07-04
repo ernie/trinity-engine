@@ -7986,6 +7986,8 @@ void vk_end_frame( void )
 			vk_bloom();
 		}
 
+		RB_RenderDeferredFlares(); // catch: draw coronas even if no 2D pass ran
+
 		if ( backEnd.screenshotMask && vk.capture.image )
 		{
 			vk_end_render_pass();
