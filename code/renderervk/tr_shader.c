@@ -4469,8 +4469,34 @@ static void CreateExternalShaders( void ) {
 
 		for(index = 0; index < tr.flareShader->numUnfoggedPasses; index++)
 		{
-			tr.flareShader->stages[index]->bundle[0].adjustColorsForFog = ACFF_NONE;
-			tr.flareShader->stages[index]->stateBits |= GLS_DEPTHTEST_DISABLE;
+			shaderStage_t *st = tr.flareShader->stages[index];
+			Vk_Pipeline_Def def;
+
+			st->bundle[0].adjustColorsForFog = ACFF_NONE;
+			st->stateBits |= GLS_DEPTHTEST_DISABLE;
+
+			// stateBits above lands after FinishShader already baked these pipelines,
+			// so it's inert in Vulkan (baked at pipeline creation, unlike GL's per-draw state); rebake them.
+			if ( st->vk_pipeline[0] ) {
+				vk_get_pipeline_def( st->vk_pipeline[0], &def );
+				def.state_bits |= GLS_DEPTHTEST_DISABLE;
+				st->vk_pipeline[0] = vk_find_pipeline_ext( 0, &def, qfalse );
+			}
+			if ( st->vk_mirror_pipeline[0] ) {
+				vk_get_pipeline_def( st->vk_mirror_pipeline[0], &def );
+				def.state_bits |= GLS_DEPTHTEST_DISABLE;
+				st->vk_mirror_pipeline[0] = vk_find_pipeline_ext( 0, &def, qfalse );
+			}
+			if ( st->vk_pipeline[1] ) {
+				vk_get_pipeline_def( st->vk_pipeline[1], &def );
+				def.state_bits |= GLS_DEPTHTEST_DISABLE;
+				st->vk_pipeline[1] = vk_find_pipeline_ext( 0, &def, qfalse );
+			}
+			if ( st->vk_mirror_pipeline[1] ) {
+				vk_get_pipeline_def( st->vk_mirror_pipeline[1], &def );
+				def.state_bits |= GLS_DEPTHTEST_DISABLE;
+				st->vk_mirror_pipeline[1] = vk_find_pipeline_ext( 0, &def, qfalse );
+			}
 		}
 	}
 
