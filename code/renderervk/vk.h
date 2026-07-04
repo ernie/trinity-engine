@@ -499,13 +499,16 @@ typedef struct {
 			VkShaderModule overbright_vert[2]; // fog[0,1]
 		} vert;
 		struct {
+			// em index: [0] writes the location-1 emissive output, [1] omits it
+			// (passes without the emissive attachment). fog stays the last
+			// dimension: create_pipeline selects fog variants by fs_module++.
 			VkShaderModule gen0_df;
-			VkShaderModule gen[3][2][2]; // tx[0,1,2] cl[0,1] fog[0,1]
-			VkShaderModule ident1[2][2]; // tx[0,1], fog[0,1]
-			VkShaderModule fixed[2][2];  // tx[0,1], fog[0,1]
-			VkShaderModule ent[1][2];    // tx[0], fog[0,1]
-			VkShaderModule light[2][2];  // linear[0,1] fog[0,1]
-			VkShaderModule overbright_frag[2]; // fog[0,1]
+			VkShaderModule gen[3][2][2][2]; // tx[0,1,2] cl[0,1] em[0,1] fog[0,1]
+			VkShaderModule ident1[2][2][2]; // tx[0,1], em[0,1] fog[0,1]
+			VkShaderModule fixed[2][2][2];  // tx[0,1], em[0,1] fog[0,1]
+			VkShaderModule ent[1][2][2];    // tx[0], em[0,1] fog[0,1]
+			VkShaderModule light[2][2][2];  // linear[0,1] em[0,1] fog[0,1]
+			VkShaderModule overbright_frag[2][2]; // em[0,1] fog[0,1]
 		} frag;
 
 		VkShaderModule color_fs;

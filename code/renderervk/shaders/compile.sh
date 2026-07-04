@@ -51,10 +51,10 @@ c frag gamma_frag_spv  gamma.frag
 # --- lighting templates -----------------------------------------------------
 c vert vert_light          light_vert.tmpl
 c vert vert_light_fog      light_vert.tmpl -DUSE_FOG
-c frag frag_light          light_frag.tmpl
-c frag frag_light_fog      light_frag.tmpl -DUSE_FOG
-c frag frag_light_line     light_frag.tmpl -DUSE_LINE
-c frag frag_light_line_fog light_frag.tmpl -DUSE_LINE -DUSE_FOG
+c frag frag_light          light_frag.tmpl -DUSE_EMISSIVE
+c frag frag_light_fog      light_frag.tmpl -DUSE_FOG -DUSE_EMISSIVE
+c frag frag_light_line     light_frag.tmpl -DUSE_LINE -DUSE_EMISSIVE
+c frag frag_light_line_fog light_frag.tmpl -DUSE_LINE -DUSE_FOG -DUSE_EMISSIVE
 
 # --- generic vertex: single texture ----------------------------------------
 c vert vert_tx0                gen_vert.tmpl
@@ -101,32 +101,64 @@ c vert vert_tx2_cl_env         gen_vert.tmpl -DUSE_CL2 -DUSE_TX2 -DUSE_ENV
 c vert vert_tx2_cl_env_fog     gen_vert.tmpl -DUSE_CL2 -DUSE_TX2 -DUSE_ENV -DUSE_FOG
 
 # --- generic fragment: single texture --------------------------------------
-c frag frag_tx0                gen_frag.tmpl -DUSE_ATEST
-c frag frag_tx0_overbright     gen_frag.tmpl -DUSE_ATEST -DUSE_OVERBRIGHT
-c frag frag_tx0_overbright_fog gen_frag.tmpl -DUSE_ATEST -DUSE_OVERBRIGHT -DUSE_FOG
-c frag frag_tx0_fog            gen_frag.tmpl -DUSE_ATEST -DUSE_FOG
-c frag frag_tx0_ident1         gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_ATEST
-c frag frag_tx0_ident1_fog     gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_FOG
-c frag frag_tx0_fixed          gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_ATEST
-c frag frag_tx0_fixed_fog      gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_ATEST -DUSE_FOG
-c frag frag_tx0_ent            gen_frag.tmpl -DUSE_ENT_COLOR -DUSE_ATEST
-c frag frag_tx0_ent_fog        gen_frag.tmpl -DUSE_ENT_COLOR -DUSE_ATEST -DUSE_FOG
+c frag frag_tx0                gen_frag.tmpl -DUSE_ATEST -DUSE_EMISSIVE
+c frag frag_tx0_overbright     gen_frag.tmpl -DUSE_ATEST -DUSE_OVERBRIGHT -DUSE_EMISSIVE
+c frag frag_tx0_overbright_fog gen_frag.tmpl -DUSE_ATEST -DUSE_OVERBRIGHT -DUSE_FOG -DUSE_EMISSIVE
+c frag frag_tx0_fog            gen_frag.tmpl -DUSE_ATEST -DUSE_FOG -DUSE_EMISSIVE
+c frag frag_tx0_ident1         gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_EMISSIVE
+c frag frag_tx0_ident1_fog     gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_FOG -DUSE_EMISSIVE
+c frag frag_tx0_fixed          gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_ATEST -DUSE_EMISSIVE
+c frag frag_tx0_fixed_fog      gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_ATEST -DUSE_FOG -DUSE_EMISSIVE
+c frag frag_tx0_ent            gen_frag.tmpl -DUSE_ENT_COLOR -DUSE_ATEST -DUSE_EMISSIVE
+c frag frag_tx0_ent_fog        gen_frag.tmpl -DUSE_ENT_COLOR -DUSE_ATEST -DUSE_FOG -DUSE_EMISSIVE
 c frag frag_tx0_df             gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_DF
 
 # --- generic fragment: double texture --------------------------------------
-c frag frag_tx1                gen_frag.tmpl -DUSE_TX1
-c frag frag_tx1_fog            gen_frag.tmpl -DUSE_TX1 -DUSE_FOG
-c frag frag_tx1_ident1         gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_TX1
-c frag frag_tx1_ident1_fog     gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_TX1 -DUSE_FOG
-c frag frag_tx1_fixed          gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_TX1
-c frag frag_tx1_fixed_fog      gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_TX1 -DUSE_FOG
-c frag frag_tx1_cl             gen_frag.tmpl -DUSE_CL1 -DUSE_TX1
-c frag frag_tx1_cl_fog         gen_frag.tmpl -DUSE_CL1 -DUSE_TX1 -DUSE_FOG
+c frag frag_tx1                gen_frag.tmpl -DUSE_TX1 -DUSE_EMISSIVE
+c frag frag_tx1_fog            gen_frag.tmpl -DUSE_TX1 -DUSE_FOG -DUSE_EMISSIVE
+c frag frag_tx1_ident1         gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_TX1 -DUSE_EMISSIVE
+c frag frag_tx1_ident1_fog     gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_TX1 -DUSE_FOG -DUSE_EMISSIVE
+c frag frag_tx1_fixed          gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_TX1 -DUSE_EMISSIVE
+c frag frag_tx1_fixed_fog      gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_TX1 -DUSE_FOG -DUSE_EMISSIVE
+c frag frag_tx1_cl             gen_frag.tmpl -DUSE_CL1 -DUSE_TX1 -DUSE_EMISSIVE
+c frag frag_tx1_cl_fog         gen_frag.tmpl -DUSE_CL1 -DUSE_TX1 -DUSE_FOG -DUSE_EMISSIVE
 
 # --- generic fragment: triple texture --------------------------------------
-c frag frag_tx2                gen_frag.tmpl -DUSE_TX2
-c frag frag_tx2_fog            gen_frag.tmpl -DUSE_TX2 -DUSE_FOG
-c frag frag_tx2_cl             gen_frag.tmpl -DUSE_CL2 -DUSE_TX2
-c frag frag_tx2_cl_fog         gen_frag.tmpl -DUSE_CL2 -DUSE_TX2 -DUSE_FOG
+c frag frag_tx2                gen_frag.tmpl -DUSE_TX2 -DUSE_EMISSIVE
+c frag frag_tx2_fog            gen_frag.tmpl -DUSE_TX2 -DUSE_FOG -DUSE_EMISSIVE
+c frag frag_tx2_cl             gen_frag.tmpl -DUSE_CL2 -DUSE_TX2 -DUSE_EMISSIVE
+c frag frag_tx2_cl_fog         gen_frag.tmpl -DUSE_CL2 -DUSE_TX2 -DUSE_FOG -DUSE_EMISSIVE
+
+# --- no-emissive variants: same matrix minus USE_EMISSIVE, for passes without
+# --- the emissive attachment (screenmap, HUD, SDR) -------------------------
+c frag frag_light_ne              light_frag.tmpl
+c frag frag_light_fog_ne          light_frag.tmpl -DUSE_FOG
+c frag frag_light_line_ne         light_frag.tmpl -DUSE_LINE
+c frag frag_light_line_fog_ne     light_frag.tmpl -DUSE_LINE -DUSE_FOG
+
+c frag frag_tx0_ne                gen_frag.tmpl -DUSE_ATEST
+c frag frag_tx0_overbright_ne     gen_frag.tmpl -DUSE_ATEST -DUSE_OVERBRIGHT
+c frag frag_tx0_overbright_fog_ne gen_frag.tmpl -DUSE_ATEST -DUSE_OVERBRIGHT -DUSE_FOG
+c frag frag_tx0_fog_ne            gen_frag.tmpl -DUSE_ATEST -DUSE_FOG
+c frag frag_tx0_ident1_ne         gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_ATEST
+c frag frag_tx0_ident1_fog_ne     gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_FOG
+c frag frag_tx0_fixed_ne          gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_ATEST
+c frag frag_tx0_fixed_fog_ne      gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_ATEST -DUSE_FOG
+c frag frag_tx0_ent_ne            gen_frag.tmpl -DUSE_ENT_COLOR -DUSE_ATEST
+c frag frag_tx0_ent_fog_ne        gen_frag.tmpl -DUSE_ENT_COLOR -DUSE_ATEST -DUSE_FOG
+
+c frag frag_tx1_ne                gen_frag.tmpl -DUSE_TX1
+c frag frag_tx1_fog_ne            gen_frag.tmpl -DUSE_TX1 -DUSE_FOG
+c frag frag_tx1_ident1_ne         gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_TX1
+c frag frag_tx1_ident1_fog_ne     gen_frag.tmpl -DUSE_CLX_IDENT -DUSE_TX1 -DUSE_FOG
+c frag frag_tx1_fixed_ne          gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_TX1
+c frag frag_tx1_fixed_fog_ne      gen_frag.tmpl -DUSE_FIXED_COLOR -DUSE_TX1 -DUSE_FOG
+c frag frag_tx1_cl_ne             gen_frag.tmpl -DUSE_CL1 -DUSE_TX1
+c frag frag_tx1_cl_fog_ne         gen_frag.tmpl -DUSE_CL1 -DUSE_TX1 -DUSE_FOG
+
+c frag frag_tx2_ne                gen_frag.tmpl -DUSE_TX2
+c frag frag_tx2_fog_ne            gen_frag.tmpl -DUSE_TX2 -DUSE_FOG
+c frag frag_tx2_cl_ne             gen_frag.tmpl -DUSE_CL2 -DUSE_TX2
+c frag frag_tx2_cl_fog_ne         gen_frag.tmpl -DUSE_CL2 -DUSE_TX2 -DUSE_FOG
 
 echo "shader_data.c regenerated"
