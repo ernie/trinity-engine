@@ -4070,7 +4070,7 @@ static void CL_InitGLimp_Cvars( void )
 #ifdef RENDERER_DEFAULT
 	cl_renderer = Cvar_Get( "cl_renderer", XSTRING( RENDERER_DEFAULT ), CVAR_ARCHIVE | CVAR_LATCH );
 #else
-	cl_renderer = Cvar_Get( "cl_renderer", "opengl", CVAR_ARCHIVE | CVAR_LATCH );
+	cl_renderer = Cvar_Get( "cl_renderer", "vulkan", CVAR_ARCHIVE | CVAR_LATCH );
 #endif
 	Cvar_SetDescription( cl_renderer, "Sets your desired renderer, requires \\vid_restart." );
 

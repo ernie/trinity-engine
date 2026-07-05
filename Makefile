@@ -54,7 +54,7 @@ USE_VULKAN_API   = 1
 USE_RENDERER_DLOPEN = 1
 
 # valid options: opengl, vulkan, opengl2
-RENDERER_DEFAULT = opengl
+RENDERER_DEFAULT = vulkan
 
 CNAME            = trinity
 DNAME            = trinity.ded
@@ -83,16 +83,11 @@ endif
 ifeq ($(COMPILE_PLATFORM),darwin)
   USE_SDL=1
   USE_LOCAL_HEADERS=1
-  # Build and default to the Vulkan renderer on macOS. Apple deprecated
-  # OpenGL in 2018 and runs it through a slow GL-on-Metal shim; Vulkan via
-  # bundled MoltenVK is native and dramatically faster. USE_VULKAN=1 is
-  # required (the global default is 0) so trinity_vulkan_<arch>.dylib
-  # actually gets built — without it the cvar default points to a renderer
-  # that doesn't exist in the bundle.
+  # Vulkan (via bundled MoltenVK) is required on macOS: Apple deprecated
+  # OpenGL in 2018 and runs it through a slow GL-on-Metal shim. Force the
+  # renderer on so trinity_vulkan_<arch>.dylib is always in the bundle even
+  # if a Makefile.local disables it.
   USE_VULKAN = 1
-  ifeq ($(USE_VULKAN_API),1)
-    RENDERER_DEFAULT = vulkan
-  endif
 endif
 
 ifeq ($(COMPILE_PLATFORM),cygwin)

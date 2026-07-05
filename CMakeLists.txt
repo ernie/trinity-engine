@@ -6,7 +6,7 @@ SET(CNAME "trinity")
 SET(DNAME "trinity.ded")
 
 SET(RENDERER_PREFIX ${CNAME})
-SET(RENDERER_DEFAULT opengl) # valid options: opengl, vulkan, opengl2
+SET(RENDERER_DEFAULT vulkan) # valid options: opengl, vulkan, opengl2
 
 OPTION(USE_SDL "" ON)
 OPTION(USE_CURL "" ON)
