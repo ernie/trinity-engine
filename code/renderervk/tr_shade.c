@@ -1205,8 +1205,11 @@ static void VK_SetLightParams( vkUniform_t *uniform, const dlight_t *dl ) {
 uint32_t VK_PushUniform( const vkUniform_t *uniform ) {
 	const uint32_t offset = vk.cmd->uniform_read_offset = PAD( vk.cmd->vertex_buffer_offset, vk.uniform_alignment );
 
-	if ( offset + vk.uniform_item_size > vk.geometry_buffer_size )
+	if ( offset + vk.uniform_item_size > vk.geometry_buffer_size ) {
+		// schedule geometry buffer resize
+		vk.geometry_buffer_size_new = log2pad( offset + vk.uniform_item_size, 1 );
 		return ~0U;
+	}
 
 	// push uniform
 	Com_Memcpy( vk.cmd->vertex_buffer_ptr + offset, uniform, sizeof( *uniform ) );
