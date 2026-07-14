@@ -35,6 +35,9 @@ cvar_t *s_muteWhenUnfocused;
 
 static soundInterface_t si;
 
+// owned by the DMA backend; declared here so S_Init can register it too
+extern cvar_t *s_khz;
+
 #ifdef USE_OPENAL
 extern qboolean S_AL_Init( soundInterface_t *si );
 #endif
@@ -489,6 +492,12 @@ void S_Init( void )
 	Cvar_CheckRange( s_muteWhenMinimized, "0", "1", CV_INTEGER );
 	Cvar_SetDescription( s_muteWhenMinimized, "Mutes all audio while game is minimized." );
 	s_muted = Cvar_Get( "s_muted", "0", CVAR_ROM );
+
+	// register under any backend so the sound menu can bind it; the DMA
+	// backend re-fetches the same cvar and applies it
+	s_khz = Cvar_Get( "s_khz", "22", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	Cvar_CheckRange( s_khz, "0", "48", CV_INTEGER );
+	Cvar_SetDescription( s_khz, "Specifies the sound sampling rate, (8, 11, 22, 44, 48) in kHz. Default value is 22." );
 
 	cv = Cvar_Get( "s_initsound", "1", 0 );
 	Cvar_SetDescription( cv, "Whether or not to startup the sound system." );
