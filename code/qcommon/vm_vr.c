@@ -6,9 +6,6 @@ Module selection behind the shared [vm_vr] seam: stock Quake3e, relocated
 from the pre-seam VM_Create. No VR on flatscreen - the seam funcs are inert.
 */
 
-void VM_VRInit( void ) {
-}
-
 // the shared vm.c unloads native modules through this wrapper; map it onto Sys_UnloadLibrary
 void Sys_UnloadDll( void *dllHandle ) {
 	if ( !dllHandle ) {
@@ -105,7 +102,7 @@ void VM_VRCallEnter( vm_t *vm ) {
 void VM_VRCallLeave( vm_t *vm ) {
 }
 
-void VM_RegisterVRShared( vm_t *vm, int writer, intptr_t vmAddr, int structSize, int apiVersion ) {
+void VM_RegisterVRShared( vm_t *vm, int writer, intptr_t vmAddr, int structSize, int apiMajor, int apiMinor ) {
 	Com_Error( ERR_DROP, "VM_RegisterVRShared: not a VR engine" );
 }
 

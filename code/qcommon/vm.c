@@ -296,8 +296,6 @@ void VM_Init( void ) {
 	Cmd_AddCommand( "vmprofile", VM_VmProfile_f );
 	Cmd_AddCommand( "vminfo", VM_VmInfo_f );
 
-	VM_VRInit();	// [vm_vr]
-
 	Com_Memset( vmTable, 0, sizeof( vmTable ) );
 }
 
