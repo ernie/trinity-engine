@@ -1317,7 +1317,8 @@ endif
 
 Q3OBJ += \
   $(B)/client/qvm/vm.o \
-  $(B)/client/qvm/vm_interpreted.o
+  $(B)/client/qvm/vm_interpreted.o \
+  $(B)/client/qvm/vm_vr.o
 
 ifeq ($(HAVE_VM_COMPILED),true)
   ifeq ($(ARCH),x86)
@@ -1534,7 +1535,8 @@ endif
 
   Q3DOBJ += \
   $(B)/ded/qvm/vm.o \
-  $(B)/ded/qvm/vm_interpreted.o
+  $(B)/ded/qvm/vm_interpreted.o \
+  $(B)/ded/qvm/vm_vr.o
 
 ifeq ($(HAVE_VM_COMPILED),true)
   ifeq ($(ARCH),x86)

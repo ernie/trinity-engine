@@ -56,8 +56,10 @@ add_compile_definitions(TRINITY_ENGINE_VERSION="${TRINITY_ENGINE_VERSION}")
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
 
 AUX_SOURCE_DIRECTORY(code/qcommon QCOMMON_SRCS)
-# exclude platform-dependent QVM bytecode compilers
-list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alpx].*.c")
+# exclude platform-dependent QVM bytecode compilers and the VM policy file
+list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alpvx].*.c")
+# per-engine VM selection policy behind the [vm_vr] seam, always built
+list(APPEND QCOMMON_SRCS code/qcommon/vm_vr.c)
 # add platform-dependent QVM bytecode compilers
 IF(EMSCRIPTEN)
 	# Emscripten uses interpreted VM only - no native bytecode compiler

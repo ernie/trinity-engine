@@ -190,6 +190,9 @@
     <ClCompile Include="..\..\qcommon\vm_interpreted.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\qcommon\vm_vr.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\qcommon\vm_x86.c">
       <Filter>Source Files</Filter>
     </ClCompile>

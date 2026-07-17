@@ -222,10 +222,20 @@ struct vm_s {
 	qboolean	forceDataMask;
 
 	int			privateFlag;
+
+	// === [vm_vr] fields — all VR VM logic lives in vm_vr.c ===
+	struct vr_shared_s *vrShared;	// translated host pointer into module/VM memory
+	int			vrWriter;			// VR_WRITER_* sync-out scope
+	int			vrStructSize;		// module-declared struct size, sanitized to [0,sizeof]; bounds every sync
+	qboolean	vrSentinel;			// loaded QVM carried the VR API sentinel
+	void		*searchPath;		// VR ladder pins the pak that supplied this QVM
 };
 
 qboolean VM_Compile( vm_t *vm, vmHeader_t *header );
 int32_t VM_CallCompiled( vm_t *vm, int nargs, int32_t *args );
+
+// [vm_vr]: exported for the VR module ladder in vm_vr.c
+vmHeader_t *VM_LoadQVM( vm_t *vm, qboolean alloc );
 
 qboolean VM_PrepareInterpreter2( vm_t *vm, vmHeader_t *header );
 int32_t VM_CallInterpreted2( vm_t *vm, int nargs, int32_t *args );

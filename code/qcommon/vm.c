@@ -35,6 +35,7 @@ and one exported function: Perform
 */
 
 #include "vm_local.h"
+#include "vm_vr.h"	// [vm_vr]
 
 const opcode_info_t ops[ OP_MAX ] =
 {
@@ -294,6 +295,8 @@ void VM_Init( void ) {
 
 	Cmd_AddCommand( "vmprofile", VM_VmProfile_f );
 	Cmd_AddCommand( "vminfo", VM_VmInfo_f );
+
+	VM_VRInit();	// [vm_vr]
 
 	Com_Memset( vmTable, 0, sizeof( vmTable ) );
 }
@@ -781,7 +784,7 @@ else
 
 =================
 */
-static vmHeader_t *VM_LoadQVM( vm_t *vm, qboolean alloc ) {
+vmHeader_t *VM_LoadQVM( vm_t *vm, qboolean alloc ) {
 	int					length;
 	unsigned int		dataLength;
 	unsigned int		dataAlloc;
@@ -794,7 +797,7 @@ static vmHeader_t *VM_LoadQVM( vm_t *vm, qboolean alloc ) {
 	// load the image
 	Com_sprintf( filename, sizeof(filename), "vm/%s.qvm", vm->name );
 	Com_Printf( "Loading vm file %s...\n", filename );
-	length = FS_ReadFile( filename, (void **)&header );
+	length = VM_VRLoadQVMFile( vm, filename, (void **)&header );	// [vm_vr]
 	if ( !header ) {
 		Com_Printf( "Failed.\n" );
 		VM_Free( vm );
@@ -1740,7 +1743,7 @@ vm_t *VM_Restart( vm_t *vm ) {
 
 		VM_Free( vm );
 
-		vm = VM_Create( index, systemCall, dllSyscall, VMI_NATIVE );
+		vm = VM_Create( index, systemCall, dllSyscall, VMI_NATIVE, qfalse );
 		return vm;
 	}
 
@@ -1755,49 +1758,13 @@ vm_t *VM_Restart( vm_t *vm ) {
 	// free the original file
 	FS_FreeFile( header );
 
+	VM_VRModuleUnloaded( vm );	// [vm_vr]: module re-registers during INIT
+
 	return vm;
 }
 
 
-/*
-=================
-Sys_LoadDll
-
-Used to load a development dll instead of a virtual machine
-
-TTimo: added some verbosity in debug
-=================
-*/
-static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllSyscall_t systemcalls ) {
-
-	char		filename[ MAX_QPATH ];
-	void		*libHandle;
-	dllEntry_t	dllEntry;
-
-	Com_sprintf( filename, sizeof( filename ), "%s" ARCH_STRING DLL_EXT, name );
-
-	libHandle = FS_LoadLibrary( filename );
-
-	if ( !libHandle ) {
-		Com_Printf( "VM_LoadDLL '%s' failed\n", filename );
-		return NULL;
-	}
-
-	Com_Printf( "VM_LoadDLL '%s' ok\n", filename );
-
-	dllEntry = /* ( dllEntry_t ) */ Sys_LoadFunction( libHandle, "dllEntry" );
-	*entryPoint = /* ( dllSyscall_t ) */ Sys_LoadFunction( libHandle, "vmMain" );
-	if ( !*entryPoint || !dllEntry ) {
-		Sys_UnloadLibrary( libHandle );
-		return NULL;
-	}
-
-	Com_Printf( "VM_LoadDll(%s) found **vmMain** at %p\n", name, *entryPoint );
-	dllEntry( systemcalls );
-	Com_Printf( "VM_LoadDll(%s) succeeded!\n", name );
-
-	return libHandle;
-}
+// [vm_vr]: native DLL loading lives in the VR module ladder (vm_vr.c)
 
 
 /*
@@ -1808,7 +1775,8 @@ If image ends in .qvm it will be interpreted, otherwise
 it will attempt to load as a system dll
 ================
 */
-vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscalls, vmInterpret_t interpret ) {
+// [vm_vr]: qvmOnly = pure-server intent (bytecode or fail), read in vm_vr.c
+vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscalls, vmInterpret_t interpret, qboolean qvmOnly ) {
 	int			remaining;
 	const char	*name;
 	vmHeader_t	*header;
@@ -1843,32 +1811,13 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 	vm->dllSyscall = dllSyscalls;
 	vm->privateFlag = CVAR_PRIVATE;
 
-	// never allow dll loading with a demo
-	if ( interpret == VMI_NATIVE ) {
-		if ( Cvar_VariableIntegerValue( "fs_restrict" ) ) {
-			interpret = VMI_COMPILED;
-		}
-	}
-
-	if ( interpret == VMI_NATIVE ) {
-		// try to load as a system dll
-		Com_Printf( "Loading dll file %s.\n", name );
-		vm->dllHandle = VM_LoadDll( name, &vm->entryPoint, dllSyscalls );
-		if ( vm->dllHandle ) {
-			vm->privateFlag = 0; // allow reading private cvars
-			vm->dataAlloc = ~0U;
-			vm->dataMask = ~0U;
-			vm->dataBase = 0;
-			return vm;
-		}
-
-		Com_Printf( "Failed to load dll, looking for qvm.\n" );
-		interpret = VMI_COMPILED;
-	}
-
-	// load the image
-	if( ( header = VM_LoadQVM( vm, qtrue ) ) == NULL ) {
+	// [vm_vr]: selection policy lives in vm_vr.c, one per engine
+	if ( !VM_VRSelectModule( vm, &interpret, qvmOnly, &header ) ) {
+		VM_Free( vm );	// [vm_vr]: never leave a named-but-empty slot
 		return NULL;
+	}
+	if ( vm->dllHandle ) {
+		return vm;
 	}
 
 	// allocate space for the jump targets, which will be filled in by the compile/prep functions
@@ -1899,6 +1848,7 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 #endif
 	// VM_Compile may have reset vm->compiled if compilation failed
 	if ( !vm->compiled ) {
+		Com_Printf( S_COLOR_YELLOW "%s: QVM running interpreted\n", vm->name );	// [vm_vr]
 		if ( !VM_PrepareInterpreter2( vm, header ) ) {
 			FS_FreeFile( header );	// free the original file
 			VM_Free( vm );
@@ -1938,11 +1888,13 @@ void VM_Free( vm_t *vm ) {
 		}
 	}
 
+	VM_VRModuleUnloaded( vm );	// [vm_vr]
+
 	if ( vm->destroy )
 		vm->destroy( vm );
 
 	if ( vm->dllHandle )
-		Sys_UnloadLibrary( vm->dllHandle );
+		Sys_UnloadDll( vm->dllHandle );	// [vm_vr]: engine wrapper, not the raw macro
 
 #if 0	// now automatically freed by hunk
 	if ( vm->codeBase.ptr ) {
@@ -2028,11 +1980,15 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 
 	++vm->callLevel;
 
+	VM_VRCallEnter( vm );	// [vm_vr]: sync-in at the outermost call
+
 	// if we have a dll loaded, call it directly
 	if ( vm->entryPoint )
 	{
 		//rcg010207 -  see dissertation at top of VM_DllSyscall() in this file.
-		int32_t args[MAX_VMMAIN_CALL_ARGS-1];
+		// [vm_vr]: zero-init - args[0..2] are read below even when nargs < 3
+		// (UB; clang/aarch64 turns it into an unguarded va_arg loop)
+		int32_t args[MAX_VMMAIN_CALL_ARGS-1] = { 0 };
 		va_list ap;
 		va_start( ap, callnum );
 		for ( i = 0; i < nargs; i++ ) {
@@ -2068,6 +2024,9 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 			r = VM_CallInterpreted2( vm, nargs+1, &args[0] );
 #endif
 	}
+
+	VM_VRCallLeave( vm );	// [vm_vr]: sync-out at the outermost call
+
 	--vm->callLevel;
 
 	return r;

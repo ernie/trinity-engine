@@ -1303,7 +1303,7 @@ void CL_InitUI( void ) {
 			interpret = VMI_COMPILED;
 	}
 
-	uivm = VM_Create( VM_UI, CL_UISystemCalls, UI_DllSyscall, interpret );
+	uivm = VM_Create( VM_UI, CL_UISystemCalls, UI_DllSyscall, interpret, cl_connectedToPureServer ? qtrue : qfalse );
 	if ( !uivm ) {
 		if ( cl_connectedToPureServer && CL_GameSwitch() ) {
 			// server-side modification may require and reference only single custom ui.qvm
@@ -1312,7 +1312,7 @@ void CL_InitUI( void ) {
 			// which will correct filesystem permissions
 			fs_reordered = qfalse;
 			FS_PureServerSetLoadedPaks( "", "" );
-			uivm = VM_Create( VM_UI, CL_UISystemCalls, UI_DllSyscall, interpret );
+			uivm = VM_Create( VM_UI, CL_UISystemCalls, UI_DllSyscall, interpret, cl_connectedToPureServer ? qtrue : qfalse );
 			if ( !uivm ) {
 				Com_Error( ERR_DROP, "VM_Create on UI failed" );
 			}

@@ -367,6 +367,7 @@ VIRTUAL MACHINE
 
 ==============================================================
 */
+struct vr_shared_s;
 typedef struct vm_s vm_t;
 
 typedef enum {
@@ -383,7 +384,14 @@ typedef enum {
 	TRAP_COS,
 	TRAP_ATAN2,
 	TRAP_SQRT,
+
+	// [vm_vr]: same values as G_FLOOR/G_CEIL; the shared vm_x86.c inlines these by number
+	TRAP_FLOOR = 110,
+	TRAP_CEIL,
 } sharedTraps_t;
+
+// [vm_vr]: the shared vm_x86.c inlines floor/ceil by syscall number; three engines share these values
+typedef char vm_sharedTraps_assert[ ( TRAP_FLOOR == 110 && TRAP_CEIL == 111 ) ? 1 : -1 ];
 
 typedef enum {
 	VM_BAD = -1,
@@ -405,7 +413,8 @@ typedef intptr_t (QDECL *dllSyscall_t)( intptr_t callNum, ... );
 typedef void (QDECL *dllEntry_t)( dllSyscall_t syscallptr );
 
 void	VM_Init( void );
-vm_t	*VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscalls, vmInterpret_t interpret );
+// [vm_vr]: qvmOnly = pure-server intent (bytecode or fail), read in vm_vr.c
+vm_t	*VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscalls, vmInterpret_t interpret, qboolean qvmOnly );
 
 void	VM_Free( vm_t *vm );
 void	VM_Clear(void);
@@ -1355,6 +1364,7 @@ void *Sys_LoadLibrary( const char *name );
 void *Sys_LoadFunction( void *handle, const char *name );
 int   Sys_LoadFunctionErrors( void );
 void  Sys_UnloadLibrary( void *handle );
+void  Sys_UnloadDll( void *dllHandle );
 
 // adaptive huffman functions
 void Huff_Compress( msg_t *buf, int offset );

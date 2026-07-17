@@ -2234,7 +2234,7 @@ static qboolean IsFloorTrap( const vm_t *vm, const int trap )
 		return qtrue;
 #endif
 
-	if ( trap == ~G_FLOOR && vm->index == VM_GAME )
+	if ( trap == ~TRAP_FLOOR && vm->index == VM_GAME )
 		return qtrue;
 
 	return qfalse;
@@ -2251,7 +2251,7 @@ static qboolean IsCeilTrap( const vm_t *vm, const int trap )
 		return qtrue;
 #endif
 
-	if ( trap == ~G_CEIL && vm->index == VM_GAME )
+	if ( trap == ~TRAP_CEIL && vm->index == VM_GAME )
 		return qtrue;
 
 	return qfalse;
