@@ -571,6 +571,7 @@ typedef enum {
 typedef struct {
 	orientationr_t	or;
 	orientationr_t	world;
+	vec3_t		sprite_axis[3];		// horizon-locked basis ([0]=fwd,[1]=left,[2]=up) for RB_SpriteEyeAxis
 	vec3_t		pvsOrigin;			// may be different than or.origin for portals
 	portalView_t portalView;
 	int			frameSceneNum;		// copied from tr.frameSceneNum
@@ -1580,6 +1581,7 @@ void RB_CheckOverflow( int verts, int indexes );
 void RB_StageIteratorGeneric( void );
 void RB_StageIteratorSky( void );
 
+void RB_SpriteEyeAxis( const vec3_t origin, vec3_t left, vec3_t up );
 void RB_AddQuadStamp( const vec3_t origin, const vec3_t left, const vec3_t up, color4ub_t color );
 void RB_AddQuadStampExt( const vec3_t origin, const vec3_t left, const vec3_t up, color4ub_t color, float s1, float t1, float s2, float t2 );
 void RB_AddQuadStamp2( float x, float y, float w, float h, float s1, float t1, float s2, float t2, color4ub_t color );

@@ -50,7 +50,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 										// animation without needing to know the frame count
 										// 0x0400 is RF_WORLD_ORIENTED in the VR clients (q3vr, ioq3quest)
 #define	RF_ANIMFRAME		0x0800		// index animMap by refEntity->frame, not time (caller-driven)
-										// 0x1000 is RF_VIEW_ORIENTED in the VR clients
+#define	RF_VIEW_ORIENTED	0x1000		// sprite on the raw view axes, not the horizon-locked default
+										// (same bit as the VR clients)
 
 // refdef flags
 #define RDF_NOWORLDMODEL	0x0001		// used for player configuration screen

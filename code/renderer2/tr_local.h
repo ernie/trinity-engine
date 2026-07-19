@@ -822,6 +822,7 @@ typedef enum {
 typedef struct {
 	orientationr_t	or;
 	orientationr_t	world;
+	vec3_t		sprite_axis[3];		// horizon-locked basis ([0]=fwd,[1]=left,[2]=up) for RB_SpriteEyeAxis
 	vec3_t		pvsOrigin;			// may be different than or.origin for portals
 	qboolean	isPortal;			// true if this view is through a portal
 	qboolean	isMirror;			// the portal is a mirror, invert the face culling
@@ -2094,6 +2095,7 @@ void RB_StageIteratorSky( void );
 void RB_StageIteratorVertexLitTexture( void );
 void RB_StageIteratorLightmappedMultitexture( void );
 
+void RB_SpriteEyeAxis( const vec3_t origin, vec3_t left, vec3_t up );
 void RB_AddQuadStamp( const vec3_t origin, const vec3_t left, const vec3_t up, const float color[4] );
 void RB_AddQuadStampExt( const vec3_t origin, const vec3_t left, const vec3_t up, const float color[4], float s1, float t1, float s2, float t2 );
 void RB_InstantQuad( vec4_t quadVerts[4] );

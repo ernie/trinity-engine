@@ -1714,6 +1714,34 @@ static void R_GenerateDrawSurfs( void ) {
 
 /*
 ================
+R_SetupSpriteAxis
+
+Near-vertical ramp anchor for RB_SpriteEyeAxis: world up projected
+against view forward, so it is stable under camera roll. Falls back to
+the raw view axes within ~2.5 degrees of a vertical view.
+================
+*/
+static void R_SetupSpriteAxis( viewParms_t *view ) {
+	static const vec3_t worldUp = { 0.0f, 0.0f, 1.0f };
+	float d;
+
+	VectorCopy( view->or.axis[0], view->sprite_axis[0] );
+
+	d = DotProduct( view->or.axis[0], worldUp );
+	if ( fabsf( d ) > 0.999f ) {
+		VectorCopy( view->or.axis[1], view->sprite_axis[1] );
+		VectorCopy( view->or.axis[2], view->sprite_axis[2] );
+		return;
+	}
+
+	VectorMA( worldUp, -d, view->or.axis[0], view->sprite_axis[2] );
+	VectorNormalize( view->sprite_axis[2] );
+	CrossProduct( view->sprite_axis[2], view->sprite_axis[0], view->sprite_axis[1] );
+}
+
+
+/*
+================
 R_RenderView
 
 A view may be either the actual camera view,
@@ -1733,6 +1761,8 @@ void R_RenderView( const viewParms_t *parms ) {
 	tr.viewParms = *parms;
 	tr.viewParms.frameSceneNum = tr.frameSceneNum;
 	tr.viewParms.frameCount = tr.frameCount;
+
+	R_SetupSpriteAxis( &tr.viewParms );
 
 	firstDrawSurf = tr.refdef.numDrawSurfs;
 

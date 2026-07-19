@@ -359,6 +359,7 @@ static void AutospriteDeform( void ) {
 	float	radius;
 	vec3_t	left, up;
 	vec3_t	leftDir, upDir;
+	qboolean	eyeAxis;
 
 	if ( tess.numVertexes & 3 ) {
 		ri.Printf( PRINT_WARNING, "Autosprite shader %s had odd vertex count\n", tess.shader->name );
@@ -371,12 +372,19 @@ static void AutospriteDeform( void ) {
 	tess.numVertexes = 0;
 	tess.numIndexes = 0;
 
-	if ( backEnd.currentEntity != &tr.worldEntity ) {
-		GlobalVectorToLocal( backEnd.viewParms.or.axis[1], leftDir );
-		GlobalVectorToLocal( backEnd.viewParms.or.axis[2], upDir );
-	} else {
-		VectorCopy( backEnd.viewParms.or.axis[1], leftDir );
-		VectorCopy( backEnd.viewParms.or.axis[2], upDir );
+	// Same basis policy as RB_SurfaceSprite: eye-facing horizon-locked by
+	// default, raw view axes only for RF_VIEW_ORIENTED (worldEntity has
+	// renderfx 0). The default basis is per quad, from the sightline to
+	// the quad midpoint - a shared per-view basis rotates with the camera.
+	eyeAxis = ( backEnd.currentEntity->e.renderfx & RF_VIEW_ORIENTED ) ? qfalse : qtrue;
+	if ( !eyeAxis ) {
+		if ( backEnd.currentEntity != &tr.worldEntity ) {
+			GlobalVectorToLocal( backEnd.viewParms.or.axis[1], leftDir );
+			GlobalVectorToLocal( backEnd.viewParms.or.axis[2], upDir );
+		} else {
+			VectorCopy( backEnd.viewParms.or.axis[1], leftDir );
+			VectorCopy( backEnd.viewParms.or.axis[2], upDir );
+		}
 	}
 
 	for ( i = 0 ; i < oldVerts ; i+=4 ) {
@@ -389,6 +397,22 @@ static void AutospriteDeform( void ) {
 
 		VectorSubtract( xyz, mid, delta );
 		radius = VectorLength( delta ) * 0.707f;		// / sqrt(2)
+
+		if ( eyeAxis ) {
+			if ( backEnd.currentEntity != &tr.worldEntity ) {
+				vec3_t worldMid, worldLeft, worldUp;
+
+				VectorCopy( backEnd.or.origin, worldMid );
+				VectorMA( worldMid, mid[0], backEnd.or.axis[0], worldMid );
+				VectorMA( worldMid, mid[1], backEnd.or.axis[1], worldMid );
+				VectorMA( worldMid, mid[2], backEnd.or.axis[2], worldMid );
+				RB_SpriteEyeAxis( worldMid, worldLeft, worldUp );
+				GlobalVectorToLocal( worldLeft, leftDir );
+				GlobalVectorToLocal( worldUp, upDir );
+			} else {
+				RB_SpriteEyeAxis( mid, leftDir, upDir );
+			}
+		}
 
 		VectorScale( leftDir, radius, left );
 		VectorScale( upDir, radius, up );

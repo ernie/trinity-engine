@@ -214,31 +214,99 @@ void RB_AddQuadStamp( const vec3_t origin, const vec3_t left, const vec3_t up, c
 
 /*
 ==============
+RB_SpriteEyeAxis
+
+Unit basis for the default sprite tier: faces the eye position with up
+pinned to the world horizon, so sprites hold their world orientation
+under camera motion. The horizon-locked up degenerates on vertical
+sightlines, so above POLE_START authority ramps to the per-view up
+(viewParms.sprite_axis); the references are parallel on-gaze, so the
+handoff cannot flip a watched sprite.
+==============
+*/
+#define POLE_START 0.9f		// |sin(elevation)| where the per-view ramp engages (~64 degrees)
+
+void RB_SpriteEyeAxis( const vec3_t origin, vec3_t left, vec3_t up ) {
+	static const vec3_t worldUp = { 0.0f, 0.0f, 1.0f };
+	vec3_t fwd, headUp;
+	float d, ad, dv, w;
+
+	VectorSubtract( origin, backEnd.viewParms.or.origin, fwd );
+	if ( VectorNormalize( fwd ) < 1.0f ) {
+		VectorCopy( backEnd.viewParms.or.axis[1], left );
+		VectorCopy( backEnd.viewParms.or.axis[2], up );
+		return;
+	}
+
+	d = DotProduct( fwd, worldUp );
+	VectorMA( worldUp, -d, fwd, up );
+	VectorNormalize( up );	// zero only at exactly vertical; ramped out below
+
+	ad = fabsf( d );
+	if ( ad > POLE_START ) {
+		float t = ( ad - POLE_START ) / ( 1.0f - POLE_START );
+
+		// bearing-free reference for the pole zone
+		dv = DotProduct( backEnd.viewParms.sprite_axis[2], fwd );
+		VectorMA( backEnd.viewParms.sprite_axis[2], -dv, fwd, headUp );
+		VectorNormalize( headUp );
+
+		w = t * t;
+		VectorScale( up, 1.0f - w, up );
+		VectorMA( up, w, headUp, up );
+	}
+
+	if ( VectorNormalize( up ) < 0.001f ) {
+		// degenerate near-vertical blend: raw view axes
+		VectorCopy( backEnd.viewParms.or.axis[1], left );
+		VectorCopy( backEnd.viewParms.or.axis[2], up );
+		return;
+	}
+
+	CrossProduct( up, fwd, left );
+}
+#undef POLE_START
+
+
+/*
+==============
 RB_SurfaceSprite
 ==============
 */
 static void RB_SurfaceSprite( void ) {
+	vec3_t		axisLeft, axisUp;
 	vec3_t		left, up;
 	float		radius;
 
 	// calculate the xyz locations for the four corners
 	radius = backEnd.currentEntity->e.radius;
+
+	// Default tier is eye-facing and horizon-locked so sprites hold their
+	// world orientation under camera motion; RF_VIEW_ORIENTED opts back
+	// into the raw view axes.
+	if ( backEnd.currentEntity->e.renderfx & RF_VIEW_ORIENTED ) {
+		VectorCopy( backEnd.viewParms.or.axis[1], axisLeft );
+		VectorCopy( backEnd.viewParms.or.axis[2], axisUp );
+	} else {
+		RB_SpriteEyeAxis( backEnd.currentEntity->e.origin, axisLeft, axisUp );
+	}
+
 	if ( backEnd.currentEntity->e.rotation == 0.0 ) {
-		VectorScale( backEnd.viewParms.or.axis[1], radius, left );
-		VectorScale( backEnd.viewParms.or.axis[2], radius, up );
+		VectorScale( axisLeft, radius, left );
+		VectorScale( axisUp, radius, up );
 	} else {
 		float	s, c;
 		float	ang;
-		
+
 		ang = M_PI * backEnd.currentEntity->e.rotation / 180.0;
 		s = sin( ang );
 		c = cos( ang );
 
-		VectorScale( backEnd.viewParms.or.axis[1], c * radius, left );
-		VectorMA( left, -s * radius, backEnd.viewParms.or.axis[2], left );
+		VectorScale( axisLeft, c * radius, left );
+		VectorMA( left, -s * radius, axisUp, left );
 
-		VectorScale( backEnd.viewParms.or.axis[2], c * radius, up );
-		VectorMA( up, s * radius, backEnd.viewParms.or.axis[1], up );
+		VectorScale( axisUp, c * radius, up );
+		VectorMA( up, s * radius, axisLeft, up );
 	}
 
 	if ( backEnd.viewParms.portalView == PV_MIRROR ) {
@@ -254,16 +322,18 @@ static void RB_SurfaceSprite( void ) {
 RB_SurfaceSpritePoly
 
 Backend expansion of an engine-oriented billboard quad
-(trap_R_AddSpritePolyToScene): stock view-plane basis, resolved per view,
-batching by shader under the world entity like ordinary polys.
+(trap_R_AddSpritePolyToScene): default-tier eye-facing basis, resolved
+per view, batching by shader under the world entity like ordinary polys.
 ==============
 */
 static void RB_SurfaceSpritePoly( const srfSpritePoly_t *sp ) {
-	vec3_t	left, up;
+	vec3_t	axisLeft, axisUp, left, up;
+
+	RB_SpriteEyeAxis( sp->origin, axisLeft, axisUp );
 
 	if ( sp->rotation == 0.0f ) {
-		VectorScale( backEnd.viewParms.or.axis[1], sp->width, left );
-		VectorScale( backEnd.viewParms.or.axis[2], sp->height, up );
+		VectorScale( axisLeft, sp->width, left );
+		VectorScale( axisUp, sp->height, up );
 	} else {
 		float	s, c;
 		float	ang;
@@ -272,11 +342,11 @@ static void RB_SurfaceSpritePoly( const srfSpritePoly_t *sp ) {
 		s = sin( ang );
 		c = cos( ang );
 
-		VectorScale( backEnd.viewParms.or.axis[1], c * sp->width, left );
-		VectorMA( left, -s * sp->height, backEnd.viewParms.or.axis[2], left );
+		VectorScale( axisLeft, c * sp->width, left );
+		VectorMA( left, -s * sp->height, axisUp, left );
 
-		VectorScale( backEnd.viewParms.or.axis[2], c * sp->height, up );
-		VectorMA( up, s * sp->width, backEnd.viewParms.or.axis[1], up );
+		VectorScale( axisUp, c * sp->height, up );
+		VectorMA( up, s * sp->width, axisLeft, up );
 	}
 
 	if ( backEnd.viewParms.portalView == PV_MIRROR ) {
