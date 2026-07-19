@@ -1194,8 +1194,8 @@ void Sys_ApplyPendingUpdate( void )
 	char exePath[MAX_OSPATH];
 
 	#define MAX_UPDATE_FILES 256
-	char movedDst[MAX_UPDATE_FILES][MAX_OSPATH];
-	char movedBak[MAX_UPDATE_FILES][MAX_OSPATH];
+	static char movedDst[MAX_UPDATE_FILES][MAX_OSPATH];
+	static char movedBak[MAX_UPDATE_FILES][MAX_OSPATH];
 	int movedCount = 0;
 
 #ifdef __APPLE__
