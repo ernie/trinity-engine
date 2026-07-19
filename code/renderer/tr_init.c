@@ -2087,6 +2087,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.SyncRender = RE_SyncRender;
 	re.ProjectDecal = RE_ProjectDecal;
 	re.ClearDecals = RE_ClearDecals;
+	re.AddSpritePolyToScene = RE_AddSpritePolyToScene;
 
 	return &re;
 }

@@ -38,6 +38,9 @@ static int			r_firstScenePoly;
 
 static int			r_numpolyverts;
 
+static int			r_numspritepolys;
+static int			r_firstSceneSpritePoly;
+
 
 /*
 ====================
@@ -64,6 +67,9 @@ void R_InitNextFrame( void ) {
 	r_firstScenePoly = 0;
 
 	r_numpolyverts = 0;
+
+	r_numspritepolys = 0;
+	r_firstSceneSpritePoly = 0;
 }
 
 
@@ -77,6 +83,7 @@ void RE_ClearScene( void ) {
 	r_firstSceneDlight = r_numdlights;
 	r_firstSceneEntity = r_numentities;
 	r_firstScenePoly = r_numpolys;
+	r_firstSceneSpritePoly = r_numspritepolys;
 }
 
 /*
@@ -106,6 +113,89 @@ void R_AddPolygonSurfaces( void ) {
 		sh = R_GetShaderByHandle( poly->hShader );
 		R_AddDrawSurf( ( void * )poly, sh, poly->fogIndex, 0 );
 	}
+}
+
+/*
+=====================
+R_AddSpritePolySurfaces
+
+Adds the scene's sprite polys into this view's drawsurf list. Like
+ordinary polys they ride the world entity and batch by shader; unlike
+them, orientation is resolved per view in the backend
+(RB_SurfaceSpritePoly).
+=====================
+*/
+void R_AddSpritePolySurfaces( void ) {
+	int			i;
+	shader_t	*sh;
+	const srfSpritePoly_t	*sp;
+
+	tr.currentEntityNum = REFENTITYNUM_WORLD;
+	tr.shiftedEntityNum = tr.currentEntityNum << QSORT_REFENTITYNUM_SHIFT;
+
+	for ( i = 0, sp = tr.refdef.spritePolys; i < tr.refdef.numSpritePolys; i++, sp++ ) {
+		sh = R_GetShaderByHandle( sp->hShader );
+		R_AddDrawSurf( (void *)sp, sh, sp->fogIndex, 0 );
+	}
+}
+
+/*
+=====================
+RE_AddSpritePolyToScene
+
+Engine-oriented billboard quad: only position/size/rotation/color cross
+the API; the backend chooses the basis per view. Batches like a poly.
+=====================
+*/
+void RE_AddSpritePolyToScene( qhandle_t hShader, const vec3_t origin, float width, float height, float rotation, const byte *rgba ) {
+	srfSpritePoly_t	*sp;
+	int			fogIndex;
+	const fog_t	*fog;
+	float		reach;
+
+	if ( !tr.registered ) {
+		return;
+	}
+	if ( r_numspritepolys >= MAX_SPRITEPOLYS ) {
+		ri.Printf( PRINT_DEVELOPER, "WARNING: RE_AddSpritePolyToScene: MAX_SPRITEPOLYS reached\n" );
+		return;
+	}
+
+	sp = &backEndData->spritePolys[r_numspritepolys];
+	sp->surfaceType = SF_SPRITE_POLY;
+	sp->hShader = hShader;
+	VectorCopy( origin, sp->origin );
+	sp->width = width;
+	sp->height = height;
+	sp->rotation = rotation;
+	sp->rgba.rgba[0] = rgba[0];
+	sp->rgba.rgba[1] = rgba[1];
+	sp->rgba.rgba[2] = rgba[2];
+	sp->rgba.rgba[3] = rgba[3];
+
+	// fog volume, by conservative bounds around the quad
+	if ( tr.world == NULL || tr.world->numfogs == 1 ) {
+		fogIndex = 0;
+	} else {
+		reach = fabsf( width ) + fabsf( height );
+		for ( fogIndex = 1; fogIndex < tr.world->numfogs; fogIndex++ ) {
+			fog = &tr.world->fogs[fogIndex];
+			if ( origin[0] + reach >= fog->bounds[0][0]
+				&& origin[1] + reach >= fog->bounds[0][1]
+				&& origin[2] + reach >= fog->bounds[0][2]
+				&& origin[0] - reach <= fog->bounds[1][0]
+				&& origin[1] - reach <= fog->bounds[1][1]
+				&& origin[2] - reach <= fog->bounds[1][2] ) {
+				break;
+			}
+		}
+		if ( fogIndex == tr.world->numfogs ) {
+			fogIndex = 0;
+		}
+	}
+	sp->fogIndex = fogIndex;
+
+	r_numspritepolys++;
 }
 
 /*
@@ -452,6 +542,9 @@ void RE_RenderScene( const refdef_t *fd ) {
 
 	tr.refdef.numPolys = r_numpolys - r_firstScenePoly;
 	tr.refdef.polys = &backEndData->polys[r_firstScenePoly];
+
+	tr.refdef.numSpritePolys = r_numspritepolys - r_firstSceneSpritePoly;
+	tr.refdef.spritePolys = &backEndData->spritePolys[r_firstSceneSpritePoly];
 
 	// turn off dynamic lighting globally by clearing all the
 	// dlights if it needs to be disabled

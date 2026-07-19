@@ -275,6 +275,50 @@ static void RB_SurfaceSprite( void ) {
 
 
 /*
+==============
+RB_SurfaceSpritePoly
+
+Backend expansion of an engine-oriented billboard quad
+(trap_R_AddSpritePolyToScene): stock view-plane basis, resolved per view,
+batching by shader under the world entity like ordinary polys.
+==============
+*/
+static void RB_SurfaceSpritePoly( const srfSpritePoly_t *sp ) {
+	vec3_t	left, up;
+	float	colors[4];
+	int		i;
+
+	if ( sp->rotation == 0.0f ) {
+		VectorScale( backEnd.viewParms.or.axis[1], sp->width, left );
+		VectorScale( backEnd.viewParms.or.axis[2], sp->height, up );
+	} else {
+		float	s, c;
+		float	ang;
+
+		ang = M_PI * sp->rotation / 180.0f;
+		s = sin( ang );
+		c = cos( ang );
+
+		VectorScale( backEnd.viewParms.or.axis[1], c * sp->width, left );
+		VectorMA( left, -s * sp->height, backEnd.viewParms.or.axis[2], left );
+
+		VectorScale( backEnd.viewParms.or.axis[2], c * sp->height, up );
+		VectorMA( up, s * sp->width, backEnd.viewParms.or.axis[1], up );
+	}
+
+	if ( backEnd.viewParms.isMirror ) {
+		VectorSubtract( vec3_origin, left, left );
+	}
+
+	for ( i = 0; i < 4; i++ ) {
+		colors[i] = sp->rgba[i] / 255.0f;
+	}
+
+	RB_AddQuadStamp( sp->origin, left, up, colors );
+}
+
+
+/*
 =============
 RB_SurfacePolychain
 =============
@@ -1315,4 +1359,5 @@ void (*rb_surfaceTable[SF_NUM_SURFACE_TYPES])( void *) = {
 	(void(*)(void*))RB_SurfaceEntity,		// SF_ENTITY
 	(void(*)(void*))RB_SurfaceVaoMdvMesh,   // SF_VAO_MDVMESH
 	(void(*)(void*))RB_IQMSurfaceAnimVao,   // SF_VAO_IQM
+	(void(*)(void*))RB_SurfaceSpritePoly,   // SF_SPRITE_POLY
 };

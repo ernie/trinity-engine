@@ -126,6 +126,9 @@ typedef struct {
 				qhandle_t hShader, const float rgba[4], int lifeTime );
 	void	(*ClearDecals)( void );
 
+	// engine-oriented billboard quad: poly-batched, backend-oriented per view
+	void	(*AddSpritePolyToScene)( qhandle_t hShader, const vec3_t origin, float width, float height, float rotation, const byte *rgba );
+
 } refexport_t;
 
 //

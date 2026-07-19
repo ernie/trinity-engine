@@ -488,6 +488,9 @@ typedef struct {
 	int			numPolys;
 	struct srfPoly_s	*polys;
 
+	int			numSpritePolys;
+	struct srfSpritePoly_s	*spritePolys;
+
 	int			numDrawSurfs;
 	struct drawSurf_s	*drawSurfs;
 #ifdef USE_PMLIGHT
@@ -609,6 +612,7 @@ typedef enum {
 	SF_IQM,
 	SF_FLARE,
 	SF_ENTITY,				// beams, rails, lightning, etc that can be determined by entity
+	SF_SPRITE_POLY,			// engine-oriented billboard quad (trap_R_AddSpritePolyToScene)
 
 	SF_NUM_SURFACE_TYPES,
 	SF_MAX = 0x7fffffff			// ensures that sizeof( surfaceType_t ) == sizeof( int )
@@ -641,6 +645,22 @@ typedef struct srfPoly_s {
 	int				numVerts;
 	polyVert_t		*verts;
 } srfPoly_t;
+
+// engine-oriented billboard quad: cgame supplies position/size only and the
+// backend expands it per view (view-plane basis on this flatscreen engine),
+// batching like a poly (world entity, no refEntity slot)
+typedef struct srfSpritePoly_s {
+	surfaceType_t	surfaceType;
+	qhandle_t		hShader;
+	int				fogIndex;
+	vec3_t			origin;
+	float			width;
+	float			height;
+	float			rotation;
+	color4ub_t		rgba;
+} srfSpritePoly_t;
+
+#define MAX_SPRITEPOLYS		1024
 
 
 typedef struct srfFlare_s {
@@ -1347,6 +1367,7 @@ void R_AddRailSurfaces( trRefEntity_t *e, qboolean isUnderwater );
 void R_AddLightningBoltSurfaces( trRefEntity_t *e );
 
 void R_AddPolygonSurfaces( void );
+void R_AddSpritePolySurfaces( void );
 
 void R_DecomposeSort( unsigned sort, int *entityNum, shader_t **shader, 
 					 int *fogNum, int *dlightMap );
@@ -1716,6 +1737,7 @@ void R_InitNextFrame( void );
 void RE_ClearScene( void );
 void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime );
 void RE_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *verts, int num );
+void RE_AddSpritePolyToScene( qhandle_t hShader, const vec3_t origin, float width, float height, float rotation, const byte *rgba );
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
@@ -1928,6 +1950,7 @@ typedef struct {
 	trRefEntity_t	entities[MAX_REFENTITIES];
 	srfPoly_t	*polys;//[MAX_POLYS];
 	polyVert_t	*polyVerts;//[MAX_POLYVERTS];
+	srfSpritePoly_t	spritePolys[MAX_SPRITEPOLYS];
 	renderCommandList_t	commands;
 } backEndData_t;
 

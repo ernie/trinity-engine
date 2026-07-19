@@ -516,6 +516,13 @@ static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
 		return qtrue;
 	}
 
+	// engine-oriented billboard quads: poly-batched, backend-oriented per
+	// view; advertised only when the active renderer implements it
+	if ( !Q_stricmp( key, "trap_R_AddSpritePolyToScene" ) && re.AddSpritePolyToScene ) {
+		Com_sprintf( value, valueSize, "%i", CG_R_ADDSPRITEPOLYTOSCENE );
+		return qtrue;
+	}
+
 	// Capability flag (no syscall): renderer honors RF_ANIMFRAME.
 	if ( !Q_stricmp( key, "R_animFrame" ) ) {
 		Com_sprintf( value, valueSize, "1" );
@@ -955,6 +962,10 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 
 	case CG_R_PROJECTDECAL:
 		re.ProjectDecal( VMA(1), VMF(2), VMF(3), VMF(4), args[5], VMA(6), args[7] );
+		return 0;
+
+	case CG_R_ADDSPRITEPOLYTOSCENE:
+		re.AddSpritePolyToScene( args[1], VMA(2), VMF(3), VMF(4), VMF(5), VMA(6) );
 		return 0;
 
 	default:
