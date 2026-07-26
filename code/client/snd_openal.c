@@ -1261,13 +1261,9 @@ static void S_AL_StartSound( const vec3_t origin, int entnum, int entchannel, sf
 
 	S_AL_SanitiseVector(sorigin);
 
-	if((srcActiveCnt > srcCount * 7 / 8) &&
-		(DistanceSquared(sorigin, lastListenerOrigin) >=
-		(s_alMaxDistance->value + s_alGraceDistance->value) * (s_alMaxDistance->value + s_alGraceDistance->value)))
-	{
-		// We're getting tight on sources and source is not within hearing distance so don't add it
-		return;
-	}
+	// One-shots are never distance-culled. They fire once, so a dropped one is
+	// gone for good, and they carry the information. Loops absorb the pool
+	// pressure instead, since S_AL_SrcLoop retries them every frame.
 
 	// Try to grab a source
 	src = S_AL_SrcAlloc(SRCPRI_ONESHOT, entnum, entchannel);
