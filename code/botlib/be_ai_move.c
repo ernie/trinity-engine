@@ -81,6 +81,8 @@ typedef struct bot_movestate_s
 												//(the legacy ride-in endings' semantics)
 	float lastgrappledist3;						//last 3D distance to the anchor: the published
 												//release axis, stall-watched for windowed tows
+	float grapplestall_dist3;					//best 3D distance the tow has reached: the stall
+												//reference, immune to the tether's pinned jitter
 	float grapplearm_dist;						//armed release distance from the anchor; the
 												//per-frame input hook fires the button-up when
 												//the tow closes to it. 0 = disarmed
@@ -91,6 +93,8 @@ typedef struct bot_movestate_s
 												//tow's measured step, the release's sampling unit
 	float grapplearm_release_time;				//when the armed release let go; the attack
 												//hold after it ends on the ground or at 3 s
+	int grapplearm_grounded;					//consecutive released-fall thinks on the ground;
+												//a clipped lip reads as ground for just one
 	//the shot's anchor, and whether the frame hook has seen its bite
 	vec3_t grapplefire_anchor;
 	int grapplefire_bitten;
@@ -134,6 +138,7 @@ static libvar_t *sv_gravity;
 static libvar_t *weapindex_rocketlauncher;
 static libvar_t *weapindex_bfg10k;
 static libvar_t *weapindex_grapple;
+static libvar_t *bot_grappleaim;
 static libvar_t *offhandgrapple;
 static libvar_t *cmd_grappleoff;
 static libvar_t *cmd_grappleon;
@@ -282,8 +287,6 @@ void BotInitMoveState(int handle, bot_initmove_t *initmove)
 	if (initmove->or_moveflags & MFL_GRAPPLEPULL) ms->moveflags |= MFL_GRAPPLEPULL;
 	ms->moveflags &= ~MFL_HOOKREADY;
 	if (initmove->or_moveflags & MFL_HOOKREADY) ms->moveflags |= MFL_HOOKREADY;
-	ms->moveflags &= ~MFL_GRAPPLEAIM;
-	if (initmove->or_moveflags & MFL_GRAPPLEAIM) ms->moveflags |= MFL_GRAPPLEAIM;
 	ms->moveflags &= ~MFL_HOOKOUT;
 	if (initmove->or_moveflags & MFL_HOOKOUT) ms->moveflags |= MFL_HOOKOUT;
 } //end of the function BotInitMoveState
@@ -1158,6 +1161,22 @@ static int BotCheckBarrierJump(bot_movestate_t *ms, vec3_t dir, float speed)
 	if (trace.fraction >= 1.0) return qfalse;
 	//if less than the maximum step height
 	if (trace.endpos[2] - ms->origin[2] < sv_maxstep->value) return qfalse;
+	//the hop lands where the carry puts it, not at the obstacle: momentum
+	//rides through the jump, so the floor is owed at the projected landing.
+	//Bare air there means this is a ledge rim, not a barrier, and the hop
+	//clears it into the drop
+	{
+		float carry;
+
+		carry = DotProduct(ms->velocity, hordir);
+		if (carry < 0) carry = 0;
+		VectorMA(trace.endpos, 40 + carry * 0.5f, hordir, start);
+		start[2] = trace.endpos[2] + 4;
+		VectorCopy(start, end);
+		end[2] = ms->origin[2] - 160;
+		trace = AAS_TraceClientBBox(start, end, PRESENCE_NORMAL, ms->entitynum);
+		if (!trace.startsolid && trace.fraction >= 1.0) return qfalse;
+	}
 	//
 	EA_Jump(ms->client);
 	EA_Move(ms->client, hordir, speed);
@@ -2458,8 +2477,11 @@ static bot_moveresult_t BotTravel_FuncBobbing(bot_movestate_t *ms, aas_reachabil
 			//
 			if (dist > 60) dist = 60;
 			speed = 360 - (360 - 6 * dist);
-			//
-			if (!(ms->moveflags & MFL_SWIMMING) && !BotCheckBarrierJump(ms, dir, 50))
+			//waiting is a GROUNDED act: a body already in the air beside the
+			//boarding point gets steered out over the gap the platform is
+			//not in, so the wait only walks
+			if (!(ms->moveflags & MFL_SWIMMING) && (ms->moveflags & MFL_ONGROUND)
+				&& !BotCheckBarrierJump(ms, dir, 50))
 			{
 				if (speed > 5) EA_Move(ms->client, dir, speed);
 			} //end if
@@ -2762,6 +2784,7 @@ int BotGrappleArmedRelease(int client, struct playerState_s *ps)
 	BotGrappleRouteEnd(ms);
 	ms->grapplearm_dist = -1;
 	ms->grapplearm_release_time = AAS_Time();
+	ms->grapplearm_grounded = 0;
 	ms->moveflags &= ~MFL_ACTIVEGRAPPLE;
 	ms->moveflags |= MFL_GRAPPLERELEASED;
 	//the budget so far priced the PULL; the steered fall the release lets
@@ -2838,6 +2861,7 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 		ms->grapplearm_dist = 0;
 		ms->grapplefire_invalid = 0;
 		ms->moveflags &= ~(MFL_ACTIVEGRAPPLE|MFL_GRAPPLERELEASED);
+		result.flags |= MOVERESULT_GRAPPLEENDED;
 		return result;
 	} //end if
 	//the frame hook let go of a hook that bit outside the published R: remember
@@ -2850,6 +2874,7 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 			EA_Command(ms->client, cmd_grappleoff->string);
 		ms->grapplearm_dist = 0;
 		ms->moveflags &= ~(MFL_ACTIVEGRAPPLE|MFL_GRAPPLERELEASED);
+		result.flags |= MOVERESULT_GRAPPLEENDED;
 		ms->moveflags |= MFL_GRAPPLERESET;
 		ms->reachability_time = 0;	//end the reachability
 		return result;
@@ -2863,7 +2888,12 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 		//this think rebuilds input without attack held: the frame hook's
 		//post-release suppression (grapplearm_dist == -1) can stand down
 		ms->grapplearm_dist = 0;
-		if (ms->moveflags & MFL_ONGROUND)
+		//a lip clipped mid-fall reads as ground for a single think and let
+		//the fight take the bot while it was still airborne: only ground
+		//that holds a second think is a landing, and the steer below keeps
+		//pushing inward through the graze
+		if (!(ms->moveflags & MFL_ONGROUND)) ms->grapplearm_grounded = 0;
+		if ((ms->moveflags & MFL_ONGROUND) && ++ms->grapplearm_grounded >= 2)
 		{
 			//the count is kept per reach, and a budget expiry mid-fall can put
 			//a different reach under a carried release: only the one the
@@ -2880,6 +2910,7 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 				} //end if
 			} //end if
 			ms->moveflags &= ~MFL_GRAPPLERELEASED;
+			result.flags |= MOVERESULT_GRAPPLEENDED;
 			ms->moveflags |= MFL_GRAPPLERESET;
 			ms->reachability_time = 0;	//end the reachability
 			return result;
@@ -2937,6 +2968,7 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 			BotAddToAvoidReach(ms, ms->lastreachnum, AVOIDREACH_TIME);
 			ms->grapplearm_dist = 0;
 			ms->moveflags &= ~MFL_ACTIVEGRAPPLE;
+			result.flags |= MOVERESULT_GRAPPLEENDED;
 			ms->moveflags |= MFL_GRAPPLERESET;
 			ms->reachability_time = 0;	//end the reachability
 			return result;
@@ -2994,11 +3026,12 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 				EA_Command(ms->client, cmd_grappleoff->string);
 			ms->grapplearm_dist = 0;
 			ms->moveflags &= ~MFL_ACTIVEGRAPPLE;
+			result.flags |= MOVERESULT_GRAPPLEENDED;
 			ms->moveflags |= MFL_GRAPPLERESET;
 			ms->reachability_time = 0;	//end the reachability
 			return result;
 		} //end if
-		else if (!state || (state == 2 && dist3 > ms->lastgrappledist3 - 2))
+		else if (!state || (state == 2 && dist3 > ms->grapplestall_dist3 - 2))
 		{
 			if (ms->grapplevisible_time < AAS_Time() - 0.4)
 			{
@@ -3011,6 +3044,7 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 					EA_Command(ms->client, cmd_grappleoff->string);
 				ms->grapplearm_dist = 0;
 				ms->moveflags &= ~MFL_ACTIVEGRAPPLE;
+				result.flags |= MOVERESULT_GRAPPLEENDED;
 				ms->moveflags |= MFL_GRAPPLERESET;
 				ms->reachability_time = 0;	//end the reachability
 				return result;
@@ -3025,9 +3059,13 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 		{
 			EA_Attack(ms->client);
 		} //end if
-		//remember the current grapple distances
+		//the stall reference is the BEST distance the tow has reached, not the
+		//last: a body pinned against a lip oscillates a few units on the
+		//tether, and compared against the previous think that jitter reads as
+		//progress every other think and the watchdog never fires
 		ms->lastgrappledist = dist;
 		ms->lastgrappledist3 = dist3;
+		if (dist3 < ms->grapplestall_dist3) ms->grapplestall_dist3 = dist3;
 	} //end if
 	else
 	{
@@ -3057,11 +3095,11 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 			aimgate = (float) atan2(rtol, Distance(org, reach->end)) * (180.0f / M_PI);
 			if (aimgate > 2.0f) aimgate = 2.0f;
 		} //end if
-		//a game that sets the grapple view to the ideal exactly (MFL_GRAPPLEAIM)
-		//leaves no aim error for a gate to cover: the shot fires on position
-		//and readiness alone, and one frame of motion is all that
-		//remains. Games without the flag keep the gate
-		aimexact = (ms->moveflags & MFL_GRAPPLEAIM) != 0;
+		//a game that sets the grapple view to the ideal exactly (the
+		//bot_grappleaim libvar) leaves no aim error for a gate to cover: the
+		//shot fires on position and readiness alone, and one frame of motion
+		//is all that remains. Games without it keep the gate
+		aimexact = (int) bot_grappleaim->value != 0;
 		//EXACT reaches carry a contract taken within 16u of the mark and fire only
 		//there; everything else fires from anywhere in the 48u approach,
 		//inside the published 64u envelope. A correct bite ends at the anchor
@@ -3109,6 +3147,7 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 			ms->moveflags |= MFL_ACTIVEGRAPPLE;
 			ms->lastgrappledist = 999999;
 			ms->lastgrappledist3 = 999999;
+			ms->grapplestall_dist3 = 999999;
 			//bank the shot's cargo, so the frame hook can judge the bite and
 			//the release against the reach this hook was fired for whatever
 			//the router does in between
@@ -3991,6 +4030,7 @@ int BotSetupMoveAI(void)
 	weapindex_rocketlauncher = LibVar("weapindex_rocketlauncher", "5");
 	weapindex_bfg10k = LibVar("weapindex_bfg10k", "9");
 	weapindex_grapple = LibVar("weapindex_grapple", "10");
+	bot_grappleaim = LibVar("bot_grappleaim", "0");
 	offhandgrapple = LibVar("offhandgrapple", "0");
 	cmd_grappleon = LibVar("cmd_grappleon", "grappleon");
 	cmd_grappleoff = LibVar("cmd_grappleoff", "grappleoff");

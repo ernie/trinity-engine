@@ -50,7 +50,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define MFL_WALK						512		//bot should walk slowly
 #define MFL_GRAPPLERELEASED				1024	//released inside the published window; steering the fall
 #define MFL_HOOKREADY					2048	//the game's grapple is in hand, raised, and not out: set by the game in initmove like MFL_GRAPPLEPULL. MUST MATCH the game's be_ai_move.h
-#define MFL_GRAPPLEAIM					4096	//the game sets the grapple view to the ideal exactly: a route shot fires on position alone. Set by the game in initmove. MUST MATCH the game's be_ai_move.h
 #define MFL_HOOKOUT						8192	//the game's hook entity exists, flying or anchored. Set by the game in initmove. MUST MATCH the game's be_ai_move.h
 // move result flags
 #define MOVERESULT_MOVEMENTVIEW			1		//bot uses view for movement
@@ -62,6 +61,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define MOVERESULT_ONTOPOF_FUNCBOB		64		//bot is ontop of a func_bobbing
 #define MOVERESULT_ONTOPOF_ELEVATOR		128		//bot is ontop of an elevator (func_plat)
 #define MOVERESULT_BLOCKEDBYAVOIDSPOT	256		//bot is blocked by an avoid spot
+#define MOVERESULT_GRAPPLEENDED			512		//the route tow ended THIS think: the game must not
+												//bridge the trigger past botlib letting go. MUST
+												//MATCH the game's be_ai_move.h
 //
 #define MAX_AVOIDREACH					1
 #define MAX_AVOIDSPOTS					32
