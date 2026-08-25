@@ -221,6 +221,7 @@ static int AAS_LoadFiles(const char *mapname)
 {
 	int errnum;
 	char aasfile[MAX_PATH];
+	fileHandle_t fp;
 //	char bspfile[MAX_PATH];
 
 	Q_strncpyz(aasworld.mapname, mapname, sizeof(aasworld.mapname));
@@ -231,11 +232,35 @@ static int AAS_LoadFiles(const char *mapname)
 	// load bsp info
 	AAS_LoadBSPFile();
 
-	//load the aas file
-	Com_sprintf(aasfile, sizeof(aasfile), "maps/%s.aas", mapname);
-	errnum = AAS_LoadAASFile(aasfile);
+	//A Trinity .aat rides BESIDE the map's own .aas under its own extension,
+	//never over it. Its grapple reaches carry the published release window packed
+	//into edgenum, and an engine that does not know that range-checks edgenum
+	//against the edge lump and refuses the whole file: taking the map's bot
+	//routing with it, stock reaches and all. Nothing that does not look for
+	//.aat can find it, so one pak stays safe on every engine.
+	//Probed rather than simply attempted: AAS_LoadAASFile shouts about a file
+	//it cannot open, and most maps will never have one.
+	Com_sprintf(aasfile, sizeof(aasfile), "maps/%s.aat", mapname);
+	botimport.FS_FOpenFile(aasfile, &fp, FS_READ);
+	if (fp)
+	{
+		botimport.FS_FCloseFile(fp);
+		botimport.Print(PRT_MESSAGE, "found %s\n", aasfile);
+		errnum = AAS_LoadAASFile(aasfile);
+	} //end if
+	else
+	{
+		errnum = BLERR_CANNOTOPENAASFILE;
+	} //end else
+	//no Trinity .aat for this map, or one that would not load: the map's own
+	//file answers, exactly as before
 	if (errnum != BLERR_NOERROR)
-		return errnum;
+	{
+		Com_sprintf(aasfile, sizeof(aasfile), "maps/%s.aas", mapname);
+		errnum = AAS_LoadAASFile(aasfile);
+		if (errnum != BLERR_NOERROR)
+			return errnum;
+	} //end if
 
 	botimport.Print(PRT_MESSAGE, "loaded %s\n", aasfile);
 	Q_strncpyz( aasworld.filename, aasfile, sizeof( aasworld.filename ) );
