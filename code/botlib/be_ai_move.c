@@ -98,12 +98,14 @@ typedef struct bot_movestate_s
 	//the shot's anchor, and whether the frame hook has seen its bite
 	vec3_t grapplefire_anchor;
 	int grapplefire_bitten;
+	float grapplefire_bitetime;					//when the frame hook saw the bite; 0 until it does
 	int grapplefire_center;						//the fired reach's window and tolerance, banked
 	int grapplefire_hw;							//at the shot: the frame hook's latch check and
 	int grapplefire_rtol;						//its ANCHOR_INVALID line read these, not the reach
 	int grapplefire_invalid;					//the frame hook let go of an invalid bite; the
 												//next think remembers the reach and ends it
 	float grapplefire_time;						//when the route shot was pressed
+	int grapplefire_stamp;						//the same instant in ms: the diagnostics' clock
 	int grapplefire_attempts;					//shots at grapplefire_attemptreach in a row
 	int grapplefire_attemptreach;
 	float grapplespot_time;						//first think inside the fire radius, hook ready; 0 outside it
@@ -138,6 +140,9 @@ static libvar_t *sv_gravity;
 static libvar_t *weapindex_rocketlauncher;
 static libvar_t *weapindex_bfg10k;
 static libvar_t *weapindex_grapple;
+//the game's own bot_grapple, mirrored in: 2 asks botlib to say what
+//every route shot, bite and tow ending did, and changes nothing else
+static libvar_t *bot_grapple;
 static libvar_t *bot_grappleaim;
 static libvar_t *offhandgrapple;
 static libvar_t *cmd_grappleoff;
@@ -2667,10 +2672,52 @@ static int BotGrappleDeckBelow(bot_movestate_t *ms, aas_reachability_t *reach)
 	return (fabs(trace.endpos[2] - deck.mins[2]) <= 32) ? qtrue : qfalse;
 } //end of the function BotGrappleDeckBelow
 //===========================================================================
-// A route tow is over: the reach it was fired for is no longer outstanding.
+// One line per tow ending, enough to settle whether a body was MANTLED onto
+// a deck standing above its anchor: the two heights, the view pitch that
+// would have to be looking down for the tow target to swing over the lip,
+// and where the body actually finished. Nothing pitches the view down and
+// lip reaches are windowed vault releases, so this reads as absent until a
+// mantle exists.
 //===========================================================================
-static void BotGrappleRouteEnd(bot_movestate_t *ms)
+static void BotGrappleMantleLine(bot_movestate_t *ms, aas_reachability_t *reach, const char *end)
 {
+	aas_areainfo_t deck;
+	vec3_t dir;
+	float dist, dist3;
+	int anchorz, deckz;
+
+	if (bot_grapple->value < 2) return;
+	VectorSubtract(reach->end, ms->origin, dir);
+	dist3 = VectorLength(dir);
+	dir[2] = 0;
+	dist = VectorLength(dir);
+	anchorz = (int) reach->end[2];
+	//an area whose info will not answer has no deck to compare against
+	deckz = AAS_AreaInfo(reach->areanum, &deck) ? (int) deck.mins[2] : anchorz;
+	botimport.Print(PRT_MESSAGE, "GRAPPLE-MANTLE c%d rn %d end %s win %d/%d anchorz %d deckz %d ddz %d pitch %.1f dist %d dist3 %d hspd %d vspd %d area %d/%d ground %d bite2end %.2f\n",
+			ms->client, ms->lastreachnum, end,
+			AAS_GRAPPLE_WINDOW_CENTER(reach->edgenum), AAS_GRAPPLE_WINDOW_HALFWIDTH(reach->edgenum),
+			anchorz, deckz, deckz - anchorz, ms->viewangles[PITCH],
+			(int) dist, (int) dist3,
+			(int) sqrt(ms->velocity[0] * ms->velocity[0] + ms->velocity[1] * ms->velocity[1]),
+			(int) ms->velocity[2],
+			AAS_PointAreaNum(ms->origin), reach->areanum,
+			(ms->moveflags & MFL_ONGROUND) != 0,
+			ms->grapplefire_bitetime ? AAS_Time() - ms->grapplefire_bitetime : 0.0f);
+} //end of the function BotGrappleMantleLine
+//===========================================================================
+// A route tow is over: the reach it was fired for is no longer outstanding.
+// Every ending names its CAUSE, because the cause is what tells a stalled
+// tow from a delivered one after the fact.
+//===========================================================================
+static void BotGrappleRouteEnd(bot_movestate_t *ms, const char *cause, float dist,
+								int center, int halfwidth, int rtol)
+{
+	if (bot_grapple->value >= 2 && ms->grapplefire_reachnum)
+		botimport.Print(PRT_MESSAGE, "GRAPPLE-RELEASE c%d rn %d cause %s d %d center %d hw %d R %d dt %d\n",
+				ms->client, ms->grapplefire_reachnum, cause, (int) dist,
+				center, halfwidth, rtol,
+				(int) (AAS_Time() * 1000) - ms->grapplefire_stamp);
 	ms->grapplefire_reachnum = 0;
 } //end of the function BotGrappleRouteEnd
 //===========================================================================
@@ -2702,14 +2749,28 @@ int BotGrappleArmedRelease(int client, struct playerState_s *ps)
 	{
 		float miss = Distance(ps->grapplePoint, ms->grapplefire_anchor);
 		ms->grapplefire_bitten = 1;
+		ms->grapplefire_bitetime = AAS_Time();
 		ms->reachability_time = AAS_Time() + Distance(ps->origin, ps->grapplePoint) / 800 + 1;
+		if (bot_grapple->value >= 2)
+			botimport.Print(PRT_MESSAGE, "GRAPPLE-BITE c%d rn %d miss %d d %d dt %d\n",
+					ms->client, ms->grapplefire_reachnum, (int) miss,
+					(int) Distance(ps->origin, ps->grapplePoint),
+					(int) (AAS_Time() * 1000) - ms->grapplefire_stamp);
 		//farther out than the published R and the window does not cover this
 		//state: let go now, while it still reads as a hook that did not
 		//stick. The button-up is this frame's; the think that follows
 		//remembers the reach and ends it (grapplefire_invalid)
 		if (ms->grapplefire_rtol > 0 && miss > ms->grapplefire_rtol)
 		{
-			BotGrappleRouteEnd(ms);
+			aas_reachability_t reach;
+
+			BotGrappleRouteEnd(ms, "ANCHOR_INVALID", Distance(ps->origin, ps->grapplePoint),
+					ms->grapplefire_center, ms->grapplefire_hw, ms->grapplefire_rtol);
+			//the frame hook carries no reach of its own: look the fired one
+			//up, and say nothing about a mantle if it has already gone
+			AAS_ReachabilityFromNum(ms->lastreachnum, &reach);
+			if ((reach.traveltype & TRAVELTYPE_MASK) == TRAVEL_GRAPPLEHOOK)
+				BotGrappleMantleLine(ms, &reach, "lost");
 			ms->grapplefire_invalid = 1;
 			//an offhand grapple releases by command: the think's job
 			if ((int) offhandgrapple->value) return qfalse;
@@ -2738,7 +2799,7 @@ int BotGrappleArmedRelease(int client, struct playerState_s *ps)
 			&& !(ps->pm_flags & (int) pmf_grapplepull->value)
 			&& !ms->grapplefire_invalid)
 	{
-		BotGrappleRouteEnd(ms);
+		BotGrappleRouteEnd(ms, "PULLENDED", 0, 0, 0, 0);
 		ms->grapplearm_dist = 0;
 		ms->grapplefire_invalid = 0;
 		ms->moveflags &= ~MFL_ACTIVEGRAPPLE;
@@ -2758,6 +2819,11 @@ int BotGrappleArmedRelease(int client, struct playerState_s *ps)
 		if (ps->groundEntityNum != ENTITYNUM_NONE
 				|| AAS_Time() > ms->grapplearm_release_time + 3)
 		{
+			if (bot_grapple->value >= 2)
+				botimport.Print(PRT_MESSAGE, "GRAPPLE-HOLD c%d end %s dt %d\n",
+						ms->client,
+						ps->groundEntityNum != ENTITYNUM_NONE ? "ground" : "timeout",
+						(int) ((AAS_Time() - ms->grapplearm_release_time) * 1000));
 			ms->grapplearm_dist = 0;
 			return qfalse;
 		} //end if
@@ -2781,7 +2847,8 @@ int BotGrappleArmedRelease(int client, struct playerState_s *ps)
 	if (dist > ms->grapplearm_dist
 			&& fabs(dist - step - ms->grapplearm_dist) < fabs(dist - ms->grapplearm_dist))
 		return qfalse;
-	BotGrappleRouteEnd(ms);
+	BotGrappleRouteEnd(ms, fabs(dist - ms->grapplearm_dist) <= ms->grapplearm_hw ? "DELIVERED" : "OUTSIDE",
+			dist, (int) ms->grapplearm_dist, ms->grapplearm_hw, ms->grapplearm_rtol);
 	ms->grapplearm_dist = -1;
 	ms->grapplearm_release_time = AAS_Time();
 	ms->grapplearm_grounded = 0;
@@ -2811,7 +2878,7 @@ static void BotResetGrapple(bot_movestate_t *ms)
 		{
 			//the router moved on while a shot was still live: a reaction to
 			//something outside the tow: a goal change, a timeout, a death
-			BotGrappleRouteEnd(ms);
+			BotGrappleRouteEnd(ms, "ABANDONED", 0, 0, 0, 0);
 			if (offhandgrapple->value)
 				EA_Command(ms->client, cmd_grappleoff->string);
 			ms->grapplearm_dist = 0;
@@ -2836,7 +2903,7 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 	bot_moveresult_t_cleared( result );
 	float dist, speed, rtol, aimgate, aimerr;
 	vec3_t dir, viewdir, org;
-	int state, areanum, ridx, center, halfwidth, exact, aimexact, atspot;
+	int state, areanum, ridx, center, halfwidth, exact, aimexact, atspot, spotwait;
 	bsp_trace_t trace;
 
 #ifdef DEBUG_GRAPPLE
@@ -2907,8 +2974,12 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 				else if (ms->grapplefire_attempts >= 2)
 				{
 					BotAddToAvoidReach(ms, ms->lastreachnum, AVOIDREACH_TIME);
+					if (bot_grapple->value >= 2)
+						botimport.Print(PRT_MESSAGE, "GRAPPLE-NAV c%d retrycap rn %d att %d\n",
+								ms->client, ms->lastreachnum, ms->grapplefire_attempts);
 				} //end if
 			} //end if
+			BotGrappleMantleLine(ms, reach, "release-ground");
 			ms->moveflags &= ~MFL_GRAPPLERELEASED;
 			result.flags |= MOVERESULT_GRAPPLEENDED;
 			ms->moveflags |= MFL_GRAPPLERESET;
@@ -2964,7 +3035,9 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 		//rule), so this is the only exit a missed route shot has left
 		if (state == 1 && AAS_Time() > ms->grapplefire_time + 2)
 		{
-			BotGrappleRouteEnd(ms);
+			BotGrappleRouteEnd(ms, "NOBITE", Distance(ms->origin, reach->end),
+					center, halfwidth, (int) rtol);
+			BotGrappleMantleLine(ms, reach, "stall");
 			BotAddToAvoidReach(ms, ms->lastreachnum, AVOIDREACH_TIME);
 			ms->grapplearm_dist = 0;
 			ms->moveflags &= ~MFL_ACTIVEGRAPPLE;
@@ -3018,7 +3091,8 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 						&& sqrt(ms->velocity[0] * ms->velocity[0] + ms->velocity[1] * ms->velocity[1]) <= AAS_GRAPPLE_ARRIVE_SPEED))
 				&& BotGrappleDeckBelow(ms, reach))
 		{
-			BotGrappleRouteEnd(ms);
+			BotGrappleRouteEnd(ms, "NOWINDOW", dist3, center, halfwidth, (int) rtol);
+			BotGrappleMantleLine(ms, reach, "arrive");
 #ifdef DEBUG_GRAPPLE
 			botimport.Print(PRT_ERROR, "grapple normal end\n");
 #endif //DEBUG_GRAPPLE
@@ -3035,7 +3109,8 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 		{
 			if (ms->grapplevisible_time < AAS_Time() - 0.4)
 			{
-				BotGrappleRouteEnd(ms);
+				BotGrappleRouteEnd(ms, state ? "STALL" : "WHIFF", dist3, center, halfwidth, (int) rtol);
+				BotGrappleMantleLine(ms, reach, "stall");
 				BotAddToAvoidReach(ms, ms->lastreachnum, AVOIDREACH_TIME);
 #ifdef DEBUG_GRAPPLE
 				botimport.Print(PRT_ERROR, "grapple not visible\n");
@@ -3154,13 +3229,16 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 			ms->grapplefire_reachnum = ms->lastreachnum;
 			VectorCopy(reach->end, ms->grapplefire_anchor);
 			ms->grapplefire_bitten = 0;
+			ms->grapplefire_bitetime = 0;
 			ms->grapplefire_center = center;
 			ms->grapplefire_hw = halfwidth;
 			ms->grapplefire_rtol = (int) rtol;
 			ms->grapplefire_invalid = 0;
 			ms->grapplearm_lastdist = 0;
+			spotwait = ms->grapplespot_time ? (int) ((AAS_Time() - ms->grapplespot_time) * 1000) : 0;
 			ms->grapplespot_time = 0;
 			ms->grapplefire_time = AAS_Time();
+			ms->grapplefire_stamp = (int) (AAS_Time() * 1000);
 			if (ms->grapplefire_attemptreach != ms->lastreachnum)
 			{
 				ms->grapplefire_attemptreach = ms->lastreachnum;
@@ -3170,6 +3248,13 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 			//the 8 s table budget paid for the walk to the mark; from here the
 			//flight and the tow are priced by the tow itself
 			ms->reachability_time = AAS_Time() + Distance(reach->start, reach->end) / 800 + 2;
+			if (bot_grapple->value >= 2)
+				botimport.Print(PRT_MESSAGE, "GRAPPLE-FIRE c%d rn %d exact %d center %d t %d D %d sd %d aim %.2f gate %.2f ay %.2f ap %.2f wait %d att %d\n",
+						ms->client, ms->grapplefire_reachnum, exact, center,
+						ms->grapplefire_stamp, (int) Distance(org, reach->end), (int) dist,
+						aimerr, aimgate,
+						result.ideal_viewangles[YAW], result.ideal_viewangles[PITCH],
+						spotwait, ms->grapplefire_attempts);
 		} //end if
 		else
 		{
@@ -3674,6 +3759,15 @@ void BotMoveToGoal(bot_moveresult_t *result, int movestate, bot_goal_t *goal, in
 				if (ms->reachability_time < AAS_Time() ||
 					(ms->moveflags & MFL_GRAPPLERESET))
 				{
+					//the release re-stamps the budget for the TOW; the steered fall
+					//after it was never priced, so an expiry here is the one ending
+					//nothing else counts
+					if (ms->reachability_time < AAS_Time()
+							&& (ms->moveflags & MFL_GRAPPLERELEASED)
+							&& bot_grapple->value >= 2)
+						botimport.Print(PRT_MESSAGE, "GRAPPLE-NAV c%d releasedexpiry rn %d\n",
+								ms->client,
+								ms->grapplefire_reachnum ? ms->grapplefire_reachnum : ms->lastreachnum);
 					reachnum = 0;
 				} //end if
 			} //end if
@@ -4010,7 +4104,7 @@ void BotResetMoveState(int movestate)
 	ms = BotMoveStateFromHandle(movestate);
 	if (!ms) return;
 	//a reset mid-shot (death, restart) still ends the outstanding route tow
-	BotGrappleRouteEnd(ms);
+	BotGrappleRouteEnd(ms, "ABANDONED", 0, 0, 0, 0);
 	if (ms->client >= 0 && ms->client < MAX_CLIENTS && botmovestate_byclient[ms->client] == ms)
 		botmovestate_byclient[ms->client] = NULL;
 	Com_Memset(ms, 0, sizeof(bot_movestate_t));
@@ -4030,6 +4124,7 @@ int BotSetupMoveAI(void)
 	weapindex_rocketlauncher = LibVar("weapindex_rocketlauncher", "5");
 	weapindex_bfg10k = LibVar("weapindex_bfg10k", "9");
 	weapindex_grapple = LibVar("weapindex_grapple", "10");
+	bot_grapple = LibVar("bot_grapple", "0");
 	bot_grappleaim = LibVar("bot_grappleaim", "0");
 	offhandgrapple = LibVar("offhandgrapple", "0");
 	cmd_grappleon = LibVar("cmd_grappleon", "grappleon");
