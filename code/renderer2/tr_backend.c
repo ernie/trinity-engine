@@ -440,6 +440,7 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	int				pshadowed, oldPshadowed;
 	int             cubemapIndex, oldCubemapIndex;
 	qboolean		depthRange, oldDepthRange, isCrosshair, wasCrosshair;
+	qboolean		batchDepthRange;
 	int				i;
 	drawSurf_t		*drawSurf;
 	unsigned int	oldSort;
@@ -456,6 +457,8 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	backEnd.currentEntity = &tr.worldEntity;
 	oldShader = NULL;
 	oldFogNum = -1;
+	depthRange = qfalse;
+	isCrosshair = qfalse;
 	oldDepthRange = qfalse;
 	wasCrosshair = qfalse;
 	oldDlighted = qfalse;
@@ -566,52 +569,55 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 				}
 			}
 
-			//
-			// change depthrange. Also change projection matrix so first person weapon does not look like coming
-			// out of the screen.
-			//
-			if (oldDepthRange != depthRange || wasCrosshair != isCrosshair)
+			oldEntityNum = entityNum;
+		}
+
+		//
+		// change depthrange. Also change projection matrix so first person weapon does not look like coming
+		// out of the screen.  Outside the entity check because a depthHack shader
+		// pulls even world polys into the weapon range: a shader change alone can
+		// flip this.
+		//
+		batchDepthRange = depthRange || shader->depthHack;
+		if (oldDepthRange != batchDepthRange || wasCrosshair != isCrosshair)
+		{
+			if (batchDepthRange)
 			{
-				if (depthRange)
+				if(backEnd.viewParms.stereoFrame != STEREO_CENTER)
 				{
-					if(backEnd.viewParms.stereoFrame != STEREO_CENTER)
+					if(isCrosshair)
 					{
-						if(isCrosshair)
+						if(oldDepthRange)
 						{
-							if(oldDepthRange)
-							{
-								// was not a crosshair but now is, change back proj matrix
-								GL_SetProjectionMatrix( backEnd.viewParms.projectionMatrix );
-							}
-						}
-						else
-						{
-							viewParms_t temp = backEnd.viewParms;
-
-							R_SetupProjection(&temp, r_znear->value, 0, qfalse);
-
-							GL_SetProjectionMatrix( temp.projectionMatrix );
+							// was not a crosshair but now is, change back proj matrix
+							GL_SetProjectionMatrix( backEnd.viewParms.projectionMatrix );
 						}
 					}
-
-					if(!oldDepthRange)
-						qglDepthRange (0, 0.3);
-				}
-				else
-				{
-					if(!wasCrosshair && backEnd.viewParms.stereoFrame != STEREO_CENTER)
+					else
 					{
-						GL_SetProjectionMatrix( backEnd.viewParms.projectionMatrix );
-					}
+						viewParms_t temp = backEnd.viewParms;
 
-					qglDepthRange (0, 1);
+						R_SetupProjection(&temp, r_znear->value, 0, qfalse);
+
+						GL_SetProjectionMatrix( temp.projectionMatrix );
+					}
 				}
 
-				oldDepthRange = depthRange;
-				wasCrosshair = isCrosshair;
+				if(!oldDepthRange)
+					qglDepthRange (0, 0.3);
+			}
+			else
+			{
+				if(!wasCrosshair && backEnd.viewParms.stereoFrame != STEREO_CENTER)
+				{
+					GL_SetProjectionMatrix( backEnd.viewParms.projectionMatrix );
+				}
+
+				qglDepthRange (0, 1);
 			}
 
-			oldEntityNum = entityNum;
+			oldDepthRange = batchDepthRange;
+			wasCrosshair = isCrosshair;
 		}
 
 		// add the triangles for this surface

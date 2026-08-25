@@ -401,6 +401,7 @@ typedef struct {
 	acff_t			adjustColorsForFog;
 
 	qboolean		isDetail;
+	qboolean		depthFragment;				// extra depth-only pass above the alpha threshold
 
 	stageType_t     type;
 	struct shaderProgram_s *glslShaderGroup;
@@ -469,6 +470,7 @@ typedef struct shader_s {
 	qboolean	polygonOffset;			// set for decals and other items that must be offset 
 	qboolean	noMipMaps;				// for console fonts, 2D elements, etc.
 	qboolean	noPicMip;				// for images that must always be full resolution
+	qboolean	depthHack;				// draw in the view-weapon depth range
 
 	fogPass_t	fogPass;				// draw a blended pass, possibly with depth test equals
 

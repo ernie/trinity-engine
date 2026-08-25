@@ -671,6 +671,11 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 			RB_BeginSurface( shader, fogNum );
 			oldShader = shader;
+#ifdef USE_VULKAN
+			// a depthHack shader pulls even world polys into the weapon range,
+			// so a shader change alone can flip this
+			tess.depthRange = ( depthRange || shader->depthHack ) ? DEPTH_RANGE_WEAPON : DEPTH_RANGE_NORMAL;
+#endif
 		}
 
 		oldSort = drawSurf->sort;
@@ -724,7 +729,7 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 
 #ifdef USE_VULKAN
 			Com_Memcpy( vk_world.modelview_transform, backEnd.or.modelMatrix, 64 );
-			tess.depthRange = depthRange ? DEPTH_RANGE_WEAPON : DEPTH_RANGE_NORMAL;
+			tess.depthRange = ( depthRange || tess.shader->depthHack ) ? DEPTH_RANGE_WEAPON : DEPTH_RANGE_NORMAL;
 			vk_update_mvp( NULL );
 #else
 			qglLoadMatrixf( backEnd.or.modelMatrix );

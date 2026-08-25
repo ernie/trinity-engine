@@ -686,7 +686,9 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 		//
 		// clampmap <name>
 		//
-		else if ( !Q_stricmp( token, "clampmap" ) )
+		// screenMap degrades to clampmap here: rend2 has no screen-copy
+		// texture, so the named image stands in for the screen
+		else if ( !Q_stricmp( token, "clampmap" ) || ( !Q_stricmp( token, "screenMap" ) && s_extendedShader ) )
 		{
 			imgType_t type = IMGTYPE_COLORALPHA;
 			imgFlags_t flags = IMGFLAG_CLAMPTOEDGE;
@@ -1350,12 +1352,27 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 
 			continue;
 		}
-		else if ( !Q_stricmp( token, "depthFragment" ) )
+		else if ( !Q_stricmp( token, "depthFragment" ) && s_extendedShader )
+		{
+			stage->depthFragment = qtrue;
+			continue;
+		}
+		// vk renderers' pick of the per-pixel dlight modulation stage;
+		// rend2's dlights have no such stage: accept and ignore
+		else if ( !Q_stricmp( token, "dlight" ) && s_extendedShader )
 		{
 			continue;
 		}
 		else
 		{
+			// an extended shader may carry keywords only other renderers
+			// implement; losing one keyword must not cost the whole shader
+			if ( s_extendedShader )
+			{
+				ri.Printf( PRINT_WARNING, "WARNING: ignoring unknown parameter '%s' in shader '%s'\n", token, shader.name );
+				SkipRestOfLine( text );
+				continue;
+			}
 			ri.Printf( PRINT_WARNING, "WARNING: unknown parameter '%s' in shader '%s'\n", token, shader.name );
 			return qfalse;
 		}
@@ -2092,6 +2109,17 @@ static qboolean ParseShader( const char **text )
 			shader.noPicMip = qtrue;
 			continue;
 		}
+		// vertex-light stage collapsing is a vq3-renderer concept; accept and ignore
+		else if ( !Q_stricmp( token, "novlcollapse" ) && s_extendedShader )
+		{
+			continue;
+		}
+		// for polys riding a depth-hacked model, which would otherwise hide them
+		else if ( !Q_stricmp( token, "depthhack" ) && s_extendedShader )
+		{
+			shader.depthHack = qtrue;
+			continue;
+		}
 		// polygonOffset
 		else if ( !Q_stricmp( token, "polygonOffset" ) )
 		{
@@ -2241,6 +2269,14 @@ static qboolean ParseShader( const char **text )
 		}
 		else
 		{
+			// an extended shader may carry keywords only other renderers
+			// implement; losing one keyword must not cost the whole shader
+			if ( s_extendedShader )
+			{
+				ri.Printf( PRINT_WARNING, "WARNING: ignoring unknown general shader parameter '%s' in '%s'\n", token, shader.name );
+				SkipRestOfLine( text );
+				continue;
+			}
 			ri.Printf( PRINT_WARNING, "WARNING: unknown general shader parameter '%s' in '%s'\n", token, shader.name );
 			return qfalse;
 		}
@@ -2675,6 +2711,11 @@ static int CollapseStagesToGLSL(void)
 
 			// skip lightmaps
 			if (pStage->bundle[0].tcGen == TCGEN_LIGHTMAP)
+				continue;
+
+			// a depth-fragment stage redraws itself through the generic
+			// program's threshold test; keep it off the lightall path
+			if (pStage->depthFragment)
 				continue;
 
 			diffuse  = pStage;

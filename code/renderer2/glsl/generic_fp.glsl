@@ -27,7 +27,13 @@ void main()
 		if (alpha < 0.5)
 			discard;
 	}
-	
+	else if (u_AlphaTest == 4)
+	{
+		// depth-fragment pass: raw texture alpha, no vertex color
+		if (color.a < 0.85)
+			discard;
+	}
+
 	gl_FragColor.rgb = color.rgb * var_Color.rgb;
 	gl_FragColor.a = alpha;
 }

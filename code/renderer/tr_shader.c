@@ -1916,6 +1916,12 @@ static qboolean ParseShader( const char **text )
 			shader.noVLcollapse = 1;
 			continue;
 		}
+		// for polys riding a depth-hacked model, which would otherwise hide them
+		else if ( !Q_stricmp( token, "depthhack" ) && s_extendedShader )
+		{
+			shader.depthHack = 1;
+			continue;
+		}
 		// polygonOffset
 		else if ( !Q_stricmp( token, "polygonOffset" ) )
 		{

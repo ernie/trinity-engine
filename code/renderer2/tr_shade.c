@@ -1390,6 +1390,17 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		//
 		R_DrawElements(input->numIndexes, input->firstIndex);
 
+		// the silhouette above the alpha threshold writes depth so later
+		// surfaces test against the visible shape, as in the other renderers
+		if ( pStage->depthFragment && !backEnd.depthFill )
+		{
+			GL_State( pStage->stateBits | GLS_DEPTHMASK_TRUE );
+			GLSL_SetUniformInt( sp, UNIFORM_ALPHATEST, 4 );
+			qglColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+			R_DrawElements( input->numIndexes, input->firstIndex );
+			qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+		}
+
 		// allow skipping out to show just lightmaps during development
 		if ( r_lightmap->integer && ( pStage->bundle[0].isLightmap || pStage->bundle[1].isLightmap ) )
 		{

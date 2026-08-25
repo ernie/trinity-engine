@@ -415,6 +415,7 @@ typedef struct shader_s {
 	unsigned	noPicMip:1;				// for images that must always be full resolution
 	unsigned	noLightScale:1;
 	unsigned	noVLcollapse:1;			// ignore vertexlight mode
+	unsigned	depthHack:1;			// draw in the view-weapon depth range
 
 	fogPass_t	fogPass;				// draw a blended pass, possibly with depth test equals
 
