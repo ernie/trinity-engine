@@ -2491,8 +2491,8 @@ typedef enum {
 // these are sort of arbitrary limits.
 // the limits apply to the sum of all scenes in a frame --
 // the main view, all the 3D icons, etc
-#define	MAX_POLYS		600
-#define	MAX_POLYVERTS	3000
+#define	MAX_POLYS		8192
+#define	MAX_POLYVERTS	32768
 
 #define MAX_DECAL_FRAGMENTS		4096
 #define MAX_DECAL_VERTS_PER_FRAG	16
