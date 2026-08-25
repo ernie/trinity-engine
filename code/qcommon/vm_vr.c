@@ -3,7 +3,7 @@
 
 /*
 Module selection behind the shared [vm_vr] seam: stock Quake3e, relocated
-from the pre-seam VM_Create. No VR on flatscreen - the seam funcs are inert.
+from the pre-seam VM_Create. No VR on flatscreen: the seam funcs are inert.
 */
 
 // the shared vm.c unloads native modules through this wrapper; map it onto Sys_UnloadLibrary

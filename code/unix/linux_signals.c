@@ -51,7 +51,7 @@ extern void NORETURN Sys_Exit( int code );
 // context. The previous design called VM_Call(GAME_SHUTDOWN) from the
 // signal handler itself, which lands inside whatever VM call was
 // already on the stack (G_RunFrame, BotAIStartFrame, ClientThink),
-// reentering the Q3 VM which has single-set statics — leading to
+// reentering the Q3 VM which has single-set statics: leading to
 // partial or missing ShutdownGame: log output depending on what
 // frame state the SIGTERM happened to interrupt.
 static void signal_handler_async( int sig )
@@ -110,7 +110,7 @@ static void signal_handler_fatal( int sig )
 
 // Drains the pending-async-signal flag. Called by Sys_Main's main
 // loop between Com_Frame iterations. NORETURN when a signal was
-// pending — Sys_Exit terminates the process after a clean
+// pending: Sys_Exit terminates the process after a clean
 // SV_Shutdown that completes from non-signal context (so G_RunFrame
 // is fully unwound and VM_Call into GAME_SHUTDOWN is a top-level
 // invocation, the way the VM expects).
@@ -139,7 +139,7 @@ void Sys_CheckPendingSignal( void )
 
 void InitSig( void )
 {
-	// Q3 has historically ignored SIGINT — kept that way.
+	// Q3 has historically ignored SIGINT: kept that way.
 	signal( SIGINT,  SIG_IGN );
 
 	// External-request signals: deferred to main-loop context to
@@ -149,7 +149,7 @@ void InitSig( void )
 	signal( SIGTERM, signal_handler_async );
 
 	// Synchronous fault signals: handle in-context, no deferral
-	// possible — returning would be UB.
+	// possible: returning would be UB.
 	signal( SIGILL,  signal_handler_fatal );
 	signal( SIGTRAP, signal_handler_fatal );
 	signal( SIGIOT,  signal_handler_fatal );

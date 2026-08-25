@@ -488,7 +488,7 @@ void SV_TVStream_EndStream( void );   // stream session end: finalize segment + 
 qboolean SV_TVStream_IsActive( void );  // is a stream session live?
 void SV_TVStream_ForceKeyframe( void ); // emit a keyframe on the next frame
 
-// Console tap (sv_contap.c) — loopback TCP stream of raw console
+// Console tap (sv_contap.c): loopback TCP stream of raw console
 // output; kernel-assigned port published via sv_conPort serverinfo.
 #define MAX_CONTAP_CONSUMERS 4
 #define CONTAP_OUTBUF_SIZE   (64*1024) // per-consumer queue; overflow => drop consumer

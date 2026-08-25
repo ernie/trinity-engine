@@ -4621,7 +4621,7 @@ gamedir.  This makes bundled paks behave as if they were installed in
 the homepath directory, where the pak-name sorting convention
 (pak8t > pak8 > pak0) works correctly.
 
-Same-name pk3s already in homepath keep higher priority — a newer
+Same-name pk3s already in homepath keep higher priority: a newer
 version downloaded from a server wins over the bundled copy.
 ================
 */

@@ -880,7 +880,7 @@ static void SV_LogRconAudit( const char *prefix, const netadr_t *from, const cha
 	FS_FCloseFile( f );
 }
 
-// SV_LogRconDenied records a rejected rcon attempt — wrong password,
+// SV_LogRconDenied records a rejected rcon attempt: wrong password,
 // no password set, or otherwise refused. The attempted password is
 // deliberately NOT included in the audit log to avoid leaking secret
 // material into a high-visibility surface; the engine's existing
@@ -895,7 +895,7 @@ static void SV_LogRconDenied( const netadr_t *from ) {
 // connected client whose remote address matches `from`; if no client
 // matches (external rcon, NAT mismatch, separate console socket), the
 // GUID field is emitted as "-". Skips tracker-driven trinity_rconset
-// commands — those are already audited hub-side as rcon.autoset.
+// commands: those are already audited hub-side as rcon.autoset.
 static void SV_LogRconExec( const netadr_t *from, const char *guid, const char *cmd ) {
 	char body[1024];
 
@@ -955,7 +955,7 @@ static void SVC_RemoteCommand( const netadr_t *from ) {
 
 		valid = qfalse;
 		Com_Printf( "Bad rcon from %s: %s\n", NET_AdrToString( from ), Cmd_ArgsFrom( 2 ) );
-		// Audit the rejection. Source address only — we deliberately
+		// Audit the rejection. Source address only: we deliberately
 		// don't log the attempted password into source_audit.
 		SV_LogRconDenied( from );
 	}

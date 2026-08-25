@@ -134,7 +134,7 @@ typedef struct alSfx_s
 	ALuint		buffer;					// OpenAL buffer
 	snd_info_t	info;					// information for this sound like rate, sample count..
 
-	qboolean	isDefault;				// Couldn't be loaded - use default FX
+	qboolean	isDefault;				// Couldn't be loaded: use default FX
 	qboolean	isDefaultChecked;		// Sound has been check if it isDefault
 	qboolean	inMemory;				// Sound is stored in memory
 	qboolean	isLocked;				// Sound is locked (can not be unloaded)
@@ -2677,7 +2677,7 @@ qboolean S_AL_Init( soundInterface_t *si )
 	// !!! FIXME: add some better error reporting.
 	s_alCapture = Cvar_Get( "s_alCapture", "1", CVAR_ARCHIVE | CVAR_LATCH );
 #ifdef __EMSCRIPTEN__
-	// Web player is playback-only — no microphone capture needed
+	// Web player is playback-only: no microphone capture needed
 	Com_Printf("OpenAL capture support disabled for Emscripten\n");
 #else
 	if (!s_alCapture->integer)

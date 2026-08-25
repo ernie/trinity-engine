@@ -36,7 +36,7 @@ vec3 sRGBtoLinear(vec3 c) {
 	return mix(higher, lower, cutoff);
 }
 
-// === BEGIN shared HDR core — keep byte-identical with
+// === BEGIN shared HDR core: keep byte-identical with
 // trinity-vr code/renderervk/shaders/desktopmirror.frag (this is the canonical copy) ===
 // Reconstructs scRGB-linear HDR output from the SDR color buffer and the emissive
 // highlight layer. 1.0 == paper-white; result is scaled to scRGB (paper-white / 80).

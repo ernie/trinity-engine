@@ -350,7 +350,7 @@ rescan:
 	}
 
 	if ( !strcmp( cmd, "trinity_auth_fail" ) ) {
-		// Clear auth credentials — server/tracker says our token is invalid
+		// Clear auth credentials: server/tracker says our token is invalid
 		Cvar_Set( "cl_trinityToken", "" );
 		Cvar_Set( "cl_trinityUser", "" );
 		return qtrue;  // pass through to cgame for user-visible message
@@ -1407,7 +1407,7 @@ void CL_SetCGameTime( void ) {
 		if ( tvPlay.live ) {
 			// Live: one snapshot per frame, render-paced like VOD, so adjacent
 			// snapshots are ~1 server-frame apart and cgame interpolates smoothly.
-			// Always advance the edge (pause is inert here — see top of function).
+			// Always advance the edge (pause is inert here: see top of function).
 			if ( !tvPlay.atEnd ) {
 				while ( cl.serverTime - cl.snap.serverTime >= 0 ) {
 					if ( !CL_TV_NextLiveFrame() ) {

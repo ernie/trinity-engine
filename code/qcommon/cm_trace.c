@@ -1372,7 +1372,7 @@ void CM_BoxTrace( trace_t *results, const vec3_t start, const vec3_t end,
 CM_PointTraceThroughBrush
 
 Simplified brush trace for zero-extent (point) traces.
-Skips capsule logic and offset expansion — uses plane->dist directly.
+Skips capsule logic and offset expansion: uses plane->dist directly.
 ==================
 */
 static void CM_PointTraceThroughBrush( traceWork_t *tw, cbrush_t *brush ) {
@@ -1474,7 +1474,7 @@ static void CM_PointTraceThroughBrush( traceWork_t *tw, cbrush_t *brush ) {
 ==================
 CM_PointTraceThroughLeaf
 
-Simplified leaf trace for point traces — tests brushes only (skips
+Simplified leaf trace for point traces: tests brushes only (skips
 patches), using the point-optimized brush trace.
 ==================
 */
@@ -1513,7 +1513,7 @@ static void CM_PointTraceThroughLeaf( traceWork_t *tw, cLeaf_t *leaf ) {
 ==================
 CM_PointTraceThroughTree
 
-Simplified BSP tree walk for point traces — offset is always 0.
+Simplified BSP tree walk for point traces: offset is always 0.
 ==================
 */
 static void CM_PointTraceThroughTree( traceWork_t *tw, int num,
@@ -1622,7 +1622,7 @@ void CM_PointTrace( trace_t *results, const vec3_t start, const vec3_t end,
 	cm.checkcount++;
 	c_traces++;
 
-	// minimal init — only what the point trace path needs
+	// minimal init: only what the point trace path needs
 	Com_Memset( &tw.trace, 0, sizeof( tw.trace ) );
 	tw.trace.fraction = 1.0f;
 

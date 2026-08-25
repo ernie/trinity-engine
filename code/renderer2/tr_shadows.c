@@ -268,7 +268,7 @@ void RB_ShadowTessEnd( void ) {
 									   + lightDir[1] * backEnd.or.axis[1][j]
 									   + lightDir[2] * backEnd.or.axis[2][j] );
 
-			// mark vertices on lit-facing triangles — back-facing vertices
+			// mark vertices on lit-facing triangles: back-facing vertices
 			// don't contribute to silhouette edges or back caps, so skip them
 			Com_Memset( needsTrace, 0, tess.numVertexes * sizeof( needsTrace[0] ) );
 			for ( i = 0; i < numTris; i++ ) {
@@ -512,7 +512,7 @@ void RB_ShadowFinish( void ) {
 
 	// bind textureColorShader with a fullscreen ortho MVP. renderer2 has no
 	// view/projection UBO (renderergl2's GLSL_BindFullscreenOrthoBuffers), so
-	// build the ortho matrix inline — matching RB_SetGL2D's convention — and feed
+	// build the ortho matrix inline, matching RB_SetGL2D's convention, and feed
 	// it as the single UNIFORM_MODELVIEWPROJECTIONMATRIX. This touches no glState,
 	// so no model-matrix save/restore is needed.
 	{

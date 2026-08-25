@@ -520,7 +520,7 @@ static void Update_PerformCheck( void )
 ==================
 Update_FileWriteCallback
 
-curl write callback for ZIP file download - writes directly to a raw file handle.
+curl write callback for ZIP file download: writes directly to a raw file handle.
 ==================
 */
 static FILE *updateZipFile;
@@ -839,7 +839,7 @@ static qboolean Update_ExtractDMG( void )
 
 	Sys_Mkdir( updatesDir );
 
-	// Clear any partial pending/ from a prior failed extract — copyfile
+	// Clear any partial pending/ from a prior failed extract: copyfile
 	// with COPYFILE_RECURSIVE merges into an existing destination dir
 	// rather than replacing it.
 	{

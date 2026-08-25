@@ -270,7 +270,7 @@ void RB_ShadowTessEnd( void ) {
 									   + lightDir[1] * backEnd.or.axis[1][j]
 									   + lightDir[2] * backEnd.or.axis[2][j] );
 
-			// mark vertices on lit-facing triangles — back-facing vertices
+			// mark vertices on lit-facing triangles: back-facing vertices
 			// don't contribute to silhouette edges or back caps, so skip them
 			Com_Memset( needsTrace, 0, tess.numVertexes * sizeof( needsTrace[0] ) );
 			for ( i = 0; i < numTris; i++ ) {

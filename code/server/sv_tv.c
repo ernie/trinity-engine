@@ -109,7 +109,7 @@ Append a structured event line to the active g_log file (the same
 log the game module writes Kill:/Award:/etc. lines to). Used by the
 demo lifecycle to surface DemoSaved / DemoDiscarded events that
 trinity-tracker's collector log parser keys on. Format matches the
-existing log convention: "<ISO-local> <EventType>: <args>" — the QVM
+existing log convention: "<ISO-local> <EventType>: <args>"; the QVM
 uses localtime() in G_LogPrintf, so we follow suit to keep lines
 chronologically interleaved.
 
@@ -528,7 +528,7 @@ void SV_TV_WriteFrame( void ) {
 
 	// A frame that won't fit can't be recorded or streamed coherently. Drop it;
 	// when recording, abandon the file (matches prior behavior). When only
-	// streaming (warmup), just skip this frame — the next one re-keyframes.
+	// streaming (warmup), just skip this frame: the next one re-keyframes.
 	if ( msg.overflowed ) {
 		if ( tv.recording ) {
 			Com_Printf( "TV: Frame %i overflowed message buffer, stopping recording.\n", tv.frameCount );
@@ -590,7 +590,7 @@ void SV_TV_StopRecord( qboolean discard ) {
 		return;
 	}
 
-	// NB: the live stream session is NOT ended here — it spans the whole map
+	// NB: the live stream session is NOT ended here: it spans the whole map
 	// (warmup..rotation) and is torn down by SV_TV_StreamEnd at the map
 	// boundary. Stopping a recording (e.g. manual tvstop mid-match) leaves the
 	// live feed running.
@@ -790,7 +790,7 @@ void SV_TV_StreamBegin( void ) {
 	}
 
 	// Zero the shared delta-encoder state so warmup frames stream from a clean
-	// baseline — mirrors what SV_TV_StartRecord does for the file. Recording/
+	// baseline: mirrors what SV_TV_StartRecord does for the file. Recording/
 	// file fields are left untouched; recording begins later via autoPending.
 	Com_Memset( tv.prevEntities, 0, sizeof( tv.prevEntities ) );
 	Com_Memset( tv.prevEntityBitmask, 0, sizeof( tv.prevEntityBitmask ) );
@@ -813,7 +813,7 @@ void SV_TV_StreamBegin( void ) {
 SV_TV_StreamEnd
 
 End the current map's live stream session (called at map rotation / shutdown),
-even when no .tvd was recorded — so a warmup-only stream is finalized and
+even when no .tvd was recorded, so a warmup-only stream is finalized and
 consumers get a clean TVLe.
 ===============
 */

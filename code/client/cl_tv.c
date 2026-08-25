@@ -145,7 +145,7 @@ static int TVRing_SegmentKeyframeTime( size_t p ) {
 // backlog a pk3 download accumulated (each TVL segment is a full keyframe, so the
 // jump is lossless). Stops at the first non-TVLs boundary (TVLe/partial), so it
 // never crosses a map change. Called one-shot at initial boot and the map-change
-// asset-gate resume — NOT per read: segments are coarse and skipping one in steady
+// asset-gate resume, NOT per read: segments are coarse and skipping one in steady
 // play tears entity interpolation.
 // Returns the number of segments skipped.
 static int TVRing_CatchUp( int keepMs ) {
@@ -345,7 +345,7 @@ void CL_TV_Init( void ) {
 	cl_tvTime = Cvar_Get( "cl_tvTime", "0", CVAR_ROM );
 	cl_tvDuration = Cvar_Get( "cl_tvDuration", "0", CVAR_ROM );
 	// cl_tvStreamClosed: set by the JS loader at the fetch edge (stream closed).
-	// cl_tvLiveEnded: set by the engine at the playback edge (buffer drained) —
+	// cl_tvLiveEnded: set by the engine at the playback edge (buffer drained),
 	// ~delay-buffer later, and what the web client reconnects on.
 	cl_tvStreamClosed = Cvar_Get( "cl_tvStreamClosed", "0", 0 );
 	cl_tvLiveEnded = Cvar_Get( "cl_tvLiveEnded", "0", CVAR_ROM );
@@ -365,7 +365,7 @@ void CL_TV_Init( void ) {
 
 #ifdef __EMSCRIPTEN__
 	// Browser live entry: the JS loader feeds the stream into the byte-feed ring,
-	// then runs this (replacing "+demo live.tvd" — live no longer uses a file).
+	// then runs this (replacing "+demo live.tvd": live no longer uses a file).
 	Cmd_AddCommand( "tv_openlive", CL_TV_OpenLive_f );
 	// Re-arm the one-shot catch-up: the React shell runs this on tab foreground so a
 	// throttled-tab backlog snaps back to ~the cushion instead of replaying it.
@@ -640,12 +640,12 @@ CL_TV_ReadStreamHeader
 Parse a TVL1 session header, assuming the raw source is positioned just past the
 4-byte "TVL1" magic. Reads svFps/maxclients into tvPlay and the map name into the
 caller's buffer; consumes (but discards) the timestamp + fs_game fields to stay
-aligned with the first segment (fs_game is fixed per stream — see D5). Used by
+aligned with the first segment (fs_game is fixed per stream: see D5). Used by
 both CL_TV_OpenLive (first session) and CL_TV_LiveMapChange (later sessions).
 
 Returns TVSEG_STARVED if the header isn't fully buffered yet (a mid-stream header
-can span feed chunks — the caller rewinds and retries next frame), TVSEG_ENDED on
-an unsupported/oversized header, TVSEG_OK on success. Never closes the stream —
+can span feed chunks: the caller rewinds and retries next frame), TVSEG_ENDED on
+an unsupported/oversized header, TVSEG_OK on success. Never closes the stream;
 the caller decides cleanup.
 ===============
 */
@@ -782,7 +782,7 @@ static qboolean CL_TV_OpenLive( const char *filename ) {
 
 	tvPlay.active = qtrue;
 
-	// tv_seek intentionally NOT registered in live mode — can't seek a delayed-edge stream.
+	// tv_seek intentionally NOT registered in live mode: can't seek a delayed-edge stream.
 	Cmd_AddCommand( "tv_view", CL_TV_View_f );
 	Cmd_AddCommand( "tv_view_next", CL_TV_ViewNext_f );
 	Cmd_AddCommand( "tv_view_prev", CL_TV_ViewPrev_f );
@@ -803,7 +803,7 @@ CL_TV_OpenLive_f
 
 Browser live entry (the "tv_openlive" command). The JS loader has already fed the
 stream's first bytes (magic + header + first segment) into the byte-feed ring,
-then runs this — replacing the old "+demo live.tvd" (live no longer uses a MEMFS
+then runs this: replacing the old "+demo live.tvd" (live no longer uses a MEMFS
 file). Mirrors CL_PlayDemo_f's .tvd prologue, then opens the live stream off the
 ring.
 ===============
@@ -1048,7 +1048,7 @@ qboolean CL_TV_Open( const char *filename ) {
 	// Build first snapshot into standard ring buffer
 	CL_TV_BuildSnapshot();
 
-	// Read second frame — data stays in tvPlay for post-init snapshot build
+	// Read second frame: data stays in tvPlay for post-init snapshot build
 	CL_TV_ReadFrame();
 
 	tvPlay.active = qtrue;
@@ -1112,7 +1112,7 @@ Parse one frame from an in-memory buffer. Shared by VOD playback
 (CL_TV_ReadFrame) and the live-streaming path.
 
 isKeyframe (live only): a segment-leading keyframe lists ALL non-empty
-configstrings, so it is authoritative — clear any we still hold that it omits.
+configstrings, so it is authoritative: clear any we still hold that it omits.
 Else a configstring cleared on a keyframe-coincident frame (its delta is dropped
 for the keyframe) stays stale, e.g. CS_WARMUP replays the fight countdown on the
 next re-init. VOD has no keyframes and passes qfalse.
@@ -1438,10 +1438,10 @@ decompresses.
 
 NOTE: this never skips segments. A TVL segment is a coarse multi-second unit
 (keyframe + many deltas), and in healthy steady state the next whole segment is
-normally buffered ahead — so per-read skipping would drop live content and the
+normally buffered ahead, so per-read skipping would drop live content and the
 cgame would lerp entities across the gap (through walls). Backlog catch-up is done
-out-of-band by TVRing_CatchUp at two one-shot sites — the initial boot
-(CL_TV_NextLiveFrame) and the map-change asset-gate resume (CL_TV_LiveMapChange) —
+out-of-band by TVRing_CatchUp at two one-shot sites: the initial boot
+(CL_TV_NextLiveFrame) and the map-change asset-gate resume (CL_TV_LiveMapChange),
 where jumping the coarse backlog is exactly what's wanted.
 ===============
 */
@@ -1460,26 +1460,26 @@ static tvSegResult_t CL_TV_ReadLiveSegment( void ) {
 
 	// The writer frames a segment as "TVLs" + 8-byte header, but ends a session
 	// with a BARE 4-byte "TVLe" marker (sv_tvstream.c). So read the 4-byte magic
-	// first and dispatch — a fixed 12-byte read would over-read 8 bytes past TVLe
+	// first and dispatch: a fixed 12-byte read would over-read 8 bytes past TVLe
 	// and swallow the next session's "TVL1" header on a map change.
 	got = CL_TV_RawRead( magic, 4 );
 	if ( got < 4 ) { CL_TV_RawSeek( segStart ); return TVSEG_STARVED; }
 
 	if ( !Q_strncmp( (char *)magic, "TVLe", 4 ) ) {
 		// End of this session. Peek the next 4 bytes: a "TVL1" means the stream
-		// continues into the next match (in-place map change); anything else — or
-		// bytes not here yet — is a true end (closed) or a wait (still live).
+		// continues into the next match (in-place map change); anything else, or
+		// bytes not here yet, is a true end (closed) or a wait (still live).
 		byte next[4];
 		got = CL_TV_RawRead( next, 4 );
 		if ( got < 4 ) {
 			// Next session's header not here yet. Rewind PAST the TVLe (to segStart)
-			// so a STARVED retry re-reads the marker and re-peeks — otherwise the
+			// so a STARVED retry re-reads the marker and re-peeks: otherwise the
 			// retry would read the later-arriving "TVL1" as a segment magic and err.
 			CL_TV_RawSeek( segStart );
 			return cl_tvStreamClosed->integer ? TVSEG_ENDED : TVSEG_STARVED;
 		}
 		if ( !Q_strncmp( (char *)next, "TVL1", 4 ) ) {
-			// Positioned just past the new session's "TVL1" magic — exactly what
+			// Positioned just past the new session's "TVL1" magic: exactly what
 			// CL_TV_ReadStreamHeader expects. Caller drives CL_TV_LiveMapChange.
 			return TVSEG_NEWSTREAM;
 		}
@@ -1585,7 +1585,7 @@ CL_TV_AdjustLiveClock
 
 Steady-state live clock controller (WASM live only). Holds the render edge
 ~tvPlay.effKeepMs behind the newest buffered segment by nudging serverTimeDelta a
-few percent per frame — an imperceptible speed change that drains or refills the
+few percent per frame: an imperceptible speed change that drains or refills the
 jitter cushion smoothly, instead of the visible keyframe snap a hard reseek
 causes. Only smooths sub-cushion drift; large backlogs are left to the one-shot
 segment-skip catch-up (boot / map change / foreground re-arm). Also relaxes the
@@ -1642,8 +1642,8 @@ void CL_TV_AdjustLiveClock( void ) {
 }
 
 // Record a steady-state ring underrun: grow the adaptive cushion one step (capped)
-// so the next refill aims deeper. Edge-triggered via tvPlay.starved — one bump per
-// starvation episode — and ignored during boot / map-change gaps, which aren't
+// so the next refill aims deeper. Edge-triggered via tvPlay.starved: one bump per
+// starvation episode, and ignored during boot / map-change gaps, which aren't
 // jitter underruns.
 static void CL_TV_NoteUnderrun( void ) {
 	if ( tvPlay.starved ) {
@@ -1675,8 +1675,8 @@ Drive an in-place map change when the live stream rolls from one match's session
 CL_TV_NextLiveFrame when CL_TV_ReadLiveSegment returns TVSEG_NEWSTREAM, with the
 file positioned just past the new session's "TVL1" magic.
 
-Unlike the React reboot it replaces, this keeps the WASM module — and therefore
-the AudioContext and pointer lock — alive: CL_FlushMemory takes the
+Unlike the React reboot it replaces, this keeps the WASM module, and therefore
+the AudioContext and pointer lock, alive: CL_FlushMemory takes the
 REF_KEEP_CONTEXT branch (fs_game is fixed per stream, D5), so only the registered
 asset set swaps, not the GL/audio devices. Mirrors CL_TV_OpenLive's session
 bootstrap, then runs the Phase-0-proven reload recipe. Returns qtrue once the new
@@ -1718,7 +1718,7 @@ static qboolean CL_TV_LiveMapChange( void ) {
 		tvPlay.awaitingAssets = qtrue;
 		// Source now sits at the new session's first TVLs (its keyframe); it's read in
 		// the reload below once assets are present. Until then the OLD cgame keeps
-		// rendering session A — we deliberately don't reset any state yet.
+		// rendering session A: we deliberately don't reset any state yet.
 	}
 
 	// 2. Asset gate: the new map's BSP must be loadable before CL_InitCGame. If it
@@ -1743,7 +1743,7 @@ static qboolean CL_TV_LiveMapChange( void ) {
 	// new session's segments while we waited, so trim to the small jitter cushion
 	// rather than replaying from the now-stale first keyframe. Keeps the lag from
 	// compounding across maps without dropping to the jittery live edge. (The other
-	// catch-up site is the initial boot — see CL_TV_NextLiveFrame.)
+	// catch-up site is the initial boot: see CL_TV_NextLiveFrame.)
 	{
 		int keepMs = tvPlay.effKeepMs > 0 ? tvPlay.effKeepMs : TV_CATCHUP_KEEP_MS;
 		int skipped = TVRing_CatchUp( keepMs );
@@ -1785,7 +1785,7 @@ static qboolean CL_TV_LiveMapChange( void ) {
 	clc.clientNum = tvPlay.viewpoint;
 	VectorCopy( tvPlay.players[tvPlay.viewpoint].origin, tvPlay.viewOrigin );
 
-	// Swallow the keyframe's "cs" diff dump — see CL_TV_OpenLive's bootstrap.
+	// Swallow the keyframe's "cs" diff dump: see CL_TV_OpenLive's bootstrap.
 	clc.lastExecutedServerCommand = clc.serverCommandSequence;
 
 	// 5. Build snapshot #1 BEFORE the cgame re-init, mirroring CL_TV_OpenLive's
@@ -1851,7 +1851,7 @@ reload) instead of ending.
 ===============
 */
 qboolean CL_TV_NextLiveFrame( void ) {
-	// A map change is paused — either waiting on the next session's header bytes
+	// A map change is paused: either waiting on the next session's header bytes
 	// (awaitingHeader) or on the next map's assets (awaitingAssets); see the gates
 	// in CL_TV_LiveMapChange. Re-enter it each frame until it can proceed; don't
 	// pull live frames meanwhile (the old session keeps rendering).
@@ -1868,8 +1868,8 @@ qboolean CL_TV_NextLiveFrame( void ) {
 		int skipped = TVRing_CatchUp( keepMs );
 		if ( skipped ) {
 			tvPlay.needInitialCatchUp = qfalse;
-			tvPlay.liveClockResync = qtrue;        // serverTime jumps below — snap the clock after the pump
-			tvPlay.reconcileSilent = qtrue;        // the reconciling keyframe replays skipped history — no per-cs events
+			tvPlay.liveClockResync = qtrue;        // serverTime jumps below: snap the clock after the pump
+			tvPlay.reconcileSilent = qtrue;        // the reconciling keyframe replays skipped history: no per-cs events
 			tvPlay.segCursor = tvPlay.segOutLen;   // abandon the stale bootstrap segment
 			Com_DPrintf( "TV: initial catch-up skipped %d segment(s), kept ~%dms buffered\n", skipped, keepMs );
 		}
@@ -1924,7 +1924,7 @@ qboolean CL_TV_NextLiveFrame( void ) {
 			}
 			// TVSEG_OK: segOut refilled (segCursor=0). Every segment begins with a
 			// full keyframe (delta-from-zero), so reset the running delta baseline
-			// before applying it — the keyframe must rebuild state from scratch
+			// before applying it: the keyframe must rebuild state from scratch
 			// (a true I-frame) rather than merge onto our prior state. Without
 			// this, fields that are zero in the keyframe but non-zero in our state
 			// (e.g. scores/powerups reset at warmup->active) would never clear.
@@ -2104,7 +2104,7 @@ void CL_TV_BuildSnapshot( void ) {
 	}
 
 	if ( total <= MAX_ENTITIES_IN_SNAPSHOT ) {
-		// All fit — simple copy, no sorting needed
+		// All fit: simple copy, no sorting needed
 		count = 0;
 		for ( i = 0; i < MAX_GENTITIES - 1; i++ ) {
 			if ( !( tvPlay.entityBitmask[i >> 3] & ( 1 << ( i & 7 ) ) ) )
@@ -2121,7 +2121,7 @@ void CL_TV_BuildSnapshot( void ) {
 			count++;
 		}
 	} else {
-		// Too many entities — keep the nearest MAX_ENTITIES_IN_SNAPSHOT
+		// Too many entities: keep the nearest MAX_ENTITIES_IN_SNAPSHOT
 		tvEntDist_t candidates[MAX_GENTITIES];
 		int n = 0;
 
@@ -2280,7 +2280,7 @@ void CL_TV_Seek( int targetTime ) {
 		tvPlay.serverTime - tvPlay.firstServerTime );
 
 	// Snap cl.serverTime to the seek target so the view updates immediately,
-	// even when paused (timescale 0) — the frozen branch of CL_SetCGameTime
+	// even when paused (timescale 0): the frozen branch of CL_SetCGameTime
 	// never recomputes cl.serverTime, so without this it would stay stale.
 	cl.serverTime = cl.snap.serverTime;
 }
@@ -2300,7 +2300,7 @@ static void CL_TV_RebuildSnapshots( void ) {
 	// to the new viewpoint, not the old one.
 	VectorCopy( tvPlay.players[tvPlay.viewpoint].origin, tvPlay.viewOrigin );
 
-	// Build two NEW snapshots (no rollback — incrementing sequence so
+	// Build two NEW snapshots (no rollback: incrementing sequence so
 	// cgame sees them as genuinely new via trap_GetCurrentSnapshotNumber).
 	// CG_SetNextSnap detects the clientNum change and sets nextFrameTeleport,
 	// and CG_TransitionSnapshot updates cg.clientNum automatically.
@@ -2311,7 +2311,7 @@ static void CL_TV_RebuildSnapshots( void ) {
 	Cvar_SetIntegerValue( "cl_tvViewpoint", tvPlay.viewpoint );
 
 	// Update client timing state so the view updates immediately,
-	// even when paused (timescale 0) — same pattern as CL_TV_Seek.
+	// even when paused (timescale 0): same pattern as CL_TV_Seek.
 	// The frozen branch of CL_SetCGameTime never recomputes
 	// cl.serverTime, so without this it would stay stale.
 	cl.snap = cl.snapshots[clc.serverMessageSequence & PACKET_MASK];

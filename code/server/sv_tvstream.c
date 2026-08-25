@@ -1,5 +1,5 @@
 /*
- * Live TV stream tap — see docs. Broadcasts the in-progress match in the
+ * Live TV stream tap: see docs. Broadcasts the in-progress match in the
  * "TVL1" wire format over a loopback TCP socket. Single-threaded,
  * non-blocking, polled from the server frame. Never blocks the game loop.
  */
@@ -50,7 +50,7 @@ static void SV_TVStream_DropConsumer( tvConsumer_t *c ) {
 
 // Bind the loopback listener. Called once at process init and again from every
 // SV_SpawnServer, so it must be idempotent: a normal map rotation never runs
-// SV_Shutdown, so the listener (and its connected consumers) is still live —
+// SV_Shutdown, so the listener (and its connected consumers) is still live;
 // leave it. Only the 12h SV_Restart's full SV_Shutdown closes it, after which
 // the next spawn rebinds. listenFd is >0 only while a socket is open: zero-init
 // is 0, SV_TVStream_Shutdown resets to TVS_INVALID_SOCKET (-1).
@@ -125,7 +125,7 @@ void SV_TVStream_Shutdown( void ) {
 }
 
 // Queue bytes for a consumer. Returns qfalse (and the caller drops the
-// consumer) if the bounded buffer can't hold them — gameplay never waits.
+// consumer) if the bounded buffer can't hold them: gameplay never waits.
 static qboolean SV_TVStream_Enqueue( tvConsumer_t *c, const void *data, int len ) {
 	if ( c->outHead == c->outTail ) {
 		c->outHead = c->outTail = 0;
@@ -240,7 +240,7 @@ static void SV_TVStream_Send( tvConsumer_t *c, const void *data, int len ) {
 static int SV_TVStream_BuildHeader( byte *buf, int bufSize ) {
 	const char *mapName = sv_mapname->string;
 	const char *ts = ""; // timestamp is informational for the live header; empty is valid
-	// fs_game in clear text so the browser can load the right paks before boot —
+	// fs_game in clear text so the browser can load the right paks before boot,
 	// the live analog of the demo header's CS_SYSTEMINFO\fs_game, which the
 	// browser can't read here because the keyframe carrying it is compressed.
 	const char *gameName = Cvar_VariableString( "fs_game" );
@@ -286,7 +286,7 @@ Keyframe builder + per-segment zstd streaming
 
 A keyframe is byte-identical to a normal .tvd frame (see SV_TV_WriteFrame),
 except every entity/player is delta'd from a zeroed baseline and ALL non-empty
-configstrings are dumped — so the browser's .tvd frame decoder parses it with
+configstrings are dumped, so the browser's .tvd frame decoder parses it with
 zero new logic. Each segment is its own independent zstd stream.
 ==================
 */
@@ -324,7 +324,7 @@ static int SV_TVStream_BuildKeyframe( byte *buf, int bufSize ) {
 	MSG_WriteData( &msg, entityBitmask, sizeof( entityBitmask ) );
 	// force=qtrue: a flagged slot must emit its number even when it equals the null
 	// baseline, else an empty linked entity (e.g. q3dm2 slot 119) is omitted and the
-	// keyframe never populates it -- the reader keeps a zeroed phantom on number 0.
+	// keyframe never populates it: the reader keeps a zeroed phantom on number 0.
 	for ( i = 0; i < MAX_GENTITIES; i++ ) {
 		if ( !( entityBitmask[i >> 3] & ( 1 << ( i & 7 ) ) ) ) continue;
 		MSG_WriteDeltaEntity( &msg, &nullEntity, &SV_GentityNum( i )->s, qtrue );
@@ -506,7 +506,7 @@ void SV_TVStream_Frame( const byte *deltaData, int deltaLen, int serverTime ) {
 
 	// Two graceful size caps, one per buffer axis: cut a large segment by starting
 	// a clean keyframe rather than via the lossy abandon-on-overflow backstop in
-	// CompressToSegment. They don't reduce to one — highly-compressible state grows
+	// CompressToSegment. They don't reduce to one: highly-compressible state grows
 	// the DECOMPRESSED size (client segOut) while compressed stays small;
 	// incompressible state grows the COMPRESSED size (segBuf) first. Cut on
 	// whichever is approached first; with both here the abandon is a true backstop
@@ -540,7 +540,7 @@ void SV_TVStream_Frame( const byte *deltaData, int deltaLen, int serverTime ) {
 				tvs.lastKeyframeTime = serverTime;
 			} else {
 				// The keyframe overflowed MAX_TV_MSGLEN, so no segment can start
-				// and every subsequent frame would retry this silently — a black
+				// and every subsequent frame would retry this silently: a black
 				// live feed with no operator signal. Warn, rate-limited.
 				static int lastOverflowWarn;
 				if ( lastOverflowWarn == 0 || serverTime - lastOverflowWarn >= 5000 ) {

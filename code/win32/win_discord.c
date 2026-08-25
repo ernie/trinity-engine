@@ -63,7 +63,7 @@ int Sys_DiscordWrite( discordConn_t *c, const void *buf, int len ) {
 		return -1;
 	}
 	/* Single WriteFile; a short write (wrote < len) is returned as-is so the
-	   caller resets the connection — frames are tiny, so a short write means
+	   caller resets the connection: frames are tiny, so a short write means
 	   the pipe is unhealthy. */
 	if ( !WriteFile( c->pipe, buf, (DWORD)len, &wrote, NULL ) ) {
 		return -1;

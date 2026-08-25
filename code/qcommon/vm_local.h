@@ -223,7 +223,7 @@ struct vm_s {
 
 	int			privateFlag;
 
-	// === [vm_vr] fields — all VR VM logic lives in vm_vr.c ===
+	// === [vm_vr] fields: all VR VM logic lives in vm_vr.c ===
 	struct vr_shared_s *vrShared;	// translated host pointer into module/VM memory
 	int			vrWriter;			// VR_WRITER_* sync-out scope
 	int			vrStructSize;		// module-declared struct size, sanitized to [0,sizeof]; bounds every sync

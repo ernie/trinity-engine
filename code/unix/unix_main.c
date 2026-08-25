@@ -94,7 +94,7 @@ typedef enum {
 
 #ifdef __EMSCRIPTEN__
 
-// Stubs for Emscripten - no tty console in browser
+// Stubs for Emscripten: no tty console in browser
 static qboolean ttycon_on = qfalse;
 static int ttycon_hide = 0;
 static qboolean ttycon_color_on = qfalse;
@@ -1201,7 +1201,7 @@ void Sys_ApplyPendingUpdate( void )
 #ifdef __APPLE__
 	// On macOS the staging root is the user-data dir; assets target it,
 	// .app contents target the running app's parent dir (resolved per file).
-	// Sys_DefaultHomePath() not Cvar_VariableString — this code runs before
+	// Sys_DefaultHomePath() not Cvar_VariableString: this code runs before
 	// Com_Init registers cvars, so the cvar is empty here.
 	Q_strncpyz( pwd, Sys_DefaultHomePath(), sizeof( pwd ) );
 #else
@@ -1215,7 +1215,7 @@ void Sys_ApplyPendingUpdate( void )
 
 	f = fopen( manifestPath, "r" );
 	if ( !f ) {
-		// no pending update — clean up .updates/ tree from a previous update
+		// no pending update: clean up .updates/ tree from a previous update
 		// Brief delay to let the previous process fully exit and release file locks
 		// on the backed-up exe in .updates/previous/ (race with fork/exec + exit)
 		{
@@ -1472,7 +1472,7 @@ int main( int argc, const char* argv[] )
 	{
 #ifdef __linux__
 		// Drain any async signal (TERM/HUP/QUIT) caught since the
-		// last iteration. NORETURN when a signal was pending — runs
+		// last iteration. NORETURN when a signal was pending: runs
 		// SV_Shutdown from non-signal context so VM_Call(GAME_SHUTDOWN)
 		// is a top-level invocation, not a reentry into a G_RunFrame
 		// already on the stack.

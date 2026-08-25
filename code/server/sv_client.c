@@ -1847,7 +1847,7 @@ void SV_UserinfoChanged( client_t *cl, qboolean updateUserinfo, qboolean runFilt
 
 	// Hub-supplied name lock: if the tracker has confirmed this client's
 	// identity and pushed a canonical name via trinity_auth_ok, override
-	// whatever the client sent in userinfo. The override is silent — the
+	// whatever the client sent in userinfo. The override is silent: the
 	// client's /name attempt simply doesn't take. This persists across
 	// map changes because client_t is engine-side memory.
 	if ( cl->trinityName[0] ) {

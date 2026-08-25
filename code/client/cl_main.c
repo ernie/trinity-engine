@@ -3593,7 +3593,7 @@ static void CL_InitRef( void ) {
 	// Renderer DLLs live inside Trinity.app/Contents/MacOS/, but
 	// Sys_DefaultBasePath() returns the .app's *parent* directory (so
 	// fs_basepath can find pk3 data alongside the bundle). Pass the bare
-	// basename instead — Sys_LoadLibrary's @executable_path shim resolves
+	// basename instead: Sys_LoadLibrary's @executable_path shim resolves
 	// names without slashes against Contents/MacOS/.
 	ospath = dllName;
 #else

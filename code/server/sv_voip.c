@@ -30,7 +30,7 @@ SV_UserVoip
 Parse clc_voipOpus (or legacy clc_voipSpeex) data from a client message
 and route the encoded packet to all eligible recipients.
 
-The server never decodes the audio -- it just forwards opaque Opus frames.
+The server never decodes the audio: it just forwards opaque Opus frames.
 ==================
 */
 void SV_UserVoip( client_t *cl, msg_t *msg, qboolean ignoreData )

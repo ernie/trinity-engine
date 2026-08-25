@@ -474,7 +474,7 @@ LOAD/UNLOAD DLL
 
 #ifdef __EMSCRIPTEN__
 
-// Emscripten stubs - no dynamic library loading in browser
+// Emscripten stubs: no dynamic library loading in browser
 void *Sys_LoadLibrary( const char *name ) { return NULL; }
 void Sys_UnloadLibrary( void *handle ) {}
 void *Sys_LoadFunction( void *handle, const char *name ) { return NULL; }

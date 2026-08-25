@@ -1,5 +1,5 @@
 /*
- * Console tap — streams raw console output (^-color codes intact) over
+ * Console tap: streams raw console output (^-color codes intact) over
  * a loopback TCP socket for the collector. Same discipline as the TV
  * tap: non-blocking, polled per frame, slow consumers dropped. Port is
  * always kernel-assigned and published via the sv_conPort serverinfo
@@ -134,7 +134,7 @@ void SV_ConTap_Shutdown( void ) {
 }
 
 // Queue bytes for a consumer. Returns qfalse on overflow (caller drops
-// the consumer — no mid-stream byte gaps, ever; the collector redials).
+// the consumer: no mid-stream byte gaps, ever; the collector redials).
 static qboolean SV_ConTap_Enqueue( conTapConsumer_t *c, const void *data, int len ) {
 	if ( c->outHead == c->outTail ) {
 		c->outHead = c->outTail = 0;
@@ -178,7 +178,7 @@ static qboolean SV_ConTap_PumpConsumer( conTapConsumer_t *c ) {
 ==================
 SV_ConTap_Print
 
-The Com_Printf hook. Runs inside Com_Printf: never print, never block —
+The Com_Printf hook. Runs inside Com_Printf: never print, never block;
 just memcpy into consumer buffers (overflow drops the consumer).
 Fragments forwarded as-is; the collector assembles lines.
 ==================

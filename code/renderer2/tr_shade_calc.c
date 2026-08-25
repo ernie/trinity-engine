@@ -376,7 +376,7 @@ static void AutospriteDeform( void ) {
 	// Same basis policy as RB_SurfaceSprite: eye-facing horizon-locked by
 	// default, raw view axes only for RF_VIEW_ORIENTED (worldEntity has
 	// renderfx 0). The default basis is per quad, from the sightline to
-	// the quad midpoint - a shared per-view basis rotates with the camera.
+	// the quad midpoint: a shared per-view basis rotates with the camera.
 	eyeAxis = ( backEnd.currentEntity->e.renderfx & RF_VIEW_ORIENTED ) ? qfalse : qtrue;
 	if ( !eyeAxis ) {
 		if ( backEnd.currentEntity != &tr.worldEntity ) {

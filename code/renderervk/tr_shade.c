@@ -1030,7 +1030,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		}
 
 		// mark entity model pixels with stencil bit 0x80 so shadows skip them;
-		// fogged entities excluded — their shadow volumes are never added
+		// fogged entities excluded: their shadow volumes are never added
 		if ( r_shadows->integer == 2 && tess.fogNum == 0
 			&& backEnd.currentEntity != &tr.worldEntity
 			&& backEnd.currentEntity->e.reType == RT_MODEL ) {

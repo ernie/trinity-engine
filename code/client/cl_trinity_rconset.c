@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 // SipHash-2-4, 128-bit output, raw byte form. Byte-identical to the Go
 // implementation in internal/crypto/siphash.go (which itself is
-// byte-identical to the QVM-side BG_HashKeyed in trinity's bg_hash.c —
+// byte-identical to the QVM-side BG_HashKeyed in trinity's bg_hash.c;
 // the difference here is we operate on byte buffers with explicit
 // lengths so payloads with embedded NULs are safe).
 // ---------------------------------------------------------------------------
@@ -168,7 +168,7 @@ static int CTEqual( const byte *a, const byte *b, int n ) {
 // + length), the decoded blob, and writes the plaintext into pt with
 // at most ptCap bytes. Returns the plaintext length on success, -1 on
 // any failure (bad version, bad ct_len, MAC mismatch, length mismatch).
-// Plaintext is NOT validated for printability — caller decides.
+// Plaintext is NOT validated for printability: caller decides.
 static int rconsetDecrypt(
 	const byte *token, int tokenLen,
 	const byte *blob, int blobLen,

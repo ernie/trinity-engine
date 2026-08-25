@@ -888,7 +888,7 @@ void Sys_ApplyPendingUpdate( void )
 
 	f = fopen( manifestPath, "r" );
 	if ( !f ) {
-		// no pending update — clean up .updates/ tree from a previous update
+		// no pending update: clean up .updates/ tree from a previous update
 		// Brief delay to let the previous process fully exit and release file locks
 		// on the backed-up exe in .updates/previous/ (race with CreateProcess/ExitProcess)
 		{

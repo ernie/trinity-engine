@@ -5,7 +5,7 @@
 
 #ifdef USE_VOIP
 
-// VOIP level bucketing — encodes per-frame transmission state and loudness into a 0-5
+// VOIP level bucketing: encodes per-frame transmission state and loudness into a 0-5
 // digit for both cl_voipLevel (local self) and cl_voipLevels (per-client received).
 //   0 = not transmitting / stale
 //   1 = transmitting but silent (peak < VOIP_PEAK_FLOOR)
@@ -329,7 +329,7 @@ void CL_CaptureVoip( void )
 		cl_voipUseVAD->modified = qfalse;
 	}
 
-	// Capture-device edge events. Validation gates only the rising edge —
+	// Capture-device edge events. Validation gates only the rising edge;
 	// falling edge always honors so we clean up if state went bad.
 	if ( cl_voipCapture->modified ) {
 		cl_voipCapture->modified = qfalse;
@@ -360,7 +360,7 @@ void CL_CaptureVoip( void )
 	}
 
 	// Open capture device on rising edge. Master gain ducking is tied to
-	// cl_voipSend (actively transmitting), not to the capture device — so a
+	// cl_voipSend (actively transmitting), not to the capture device, so a
 	// VAD session with the device permanently open doesn't permanently duck.
 	if ( captureStart ) {
 		if ( S_AvailableCaptureSamples() < 0 ) {
@@ -440,7 +440,7 @@ void CL_CaptureVoip( void )
 
 				// check the "power" (energy, for VAD) and "peak" (amplitude, for HUD)
 				// of this packet, using the same amplified-and-clamped samples that get
-				// encoded — so both metrics reflect what receivers will see.
+				// encoded, so both metrics reflect what receivers will see.
 				{
 					float peakAmp = 0.0f;
 					for ( i = 0; i < actualSamples; i++ ) {
@@ -459,7 +459,7 @@ void CL_CaptureVoip( void )
 
 				// Decide whether THIS frame emits a packet.
 				if ( finalFrame ) {
-					// Forced teardown — emit the tail only if mid-utterance
+					// Forced teardown: emit the tail only if mid-utterance
 					// (PTT release while speaking, VAD-off mid-burst).
 					shouldSend = (cl_voipSend->integer != 0);
 				} else if ( useVad ) {
@@ -469,7 +469,7 @@ void CL_CaptureVoip( void )
 						shouldSend = qtrue;
 					} else if ( clc.voipLastSelfSendTime > 0
 					         && cls.realtime - clc.voipLastSelfSendTime < VOIP_TALKING_TIMEOUT ) {
-						// Below threshold but within hangover window — bridge
+						// Below threshold but within hangover window: bridge
 						// brief dips so wire behavior matches HUD decay.
 						shouldSend = qtrue;
 						hangover = qtrue;
@@ -543,7 +543,7 @@ void CL_CaptureVoip( void )
 		S_StopCapture();
 
 		// Drain any remaining samples so they don't leak into the next
-		// generation — alcCaptureStop does not discard buffered data.
+		// generation: alcCaptureStop does not discard buffered data.
 		{
 			int remaining = S_AvailableCaptureSamples();
 			if ( remaining > 0 ) {
@@ -564,7 +564,7 @@ void CL_CaptureVoip( void )
 		}
 	}
 
-	// Update cl_voipLevel each frame — encodes whether we're emitting and how loud.
+	// Update cl_voipLevel each frame: encodes whether we're emitting and how loud.
 	// Bucketing uses clc.voipPeak (linear amplitude, post-amp/post-clamp) so the HUD
 	// level reflects "how close to clipping am I" rather than averaged energy. cl_voipSend
 	// gates whether we're emitting at all; PTT-silent frames produce digit 1 because peak
@@ -601,7 +601,7 @@ void CL_UpdateVoipLevels( void ) {
 
 		if ( i == clc.clientNum && !clc.demoplaying && !tvPlay.active ) {
 			// Local self uses cl_voipLevel for live capture; this slot stays 0 in the per-client string.
-			// During demo/TV playback there's no live capture, and clc.clientNum is the followed player —
+			// During demo/TV playback there's no live capture, and clc.clientNum is the followed player:
 			// fall through to bucket like any other client.
 			digit = 0;
 		} else if ( clc.voipIncomingPowerTime[i] == 0 ||
@@ -724,7 +724,7 @@ static void CL_PlayVoip( int sender, int samplecnt, const byte *data, int flags 
 	if ( cl_voipMuteAll->integer )     flags &= ~VOIP_ALL;
 
 	// Play as non-spatialized (direct) audio if any non-spatial flag is set.
-	// VOIP_DIRECT, VOIP_TEAM, and VOIP_ALL all play the same way — the
+	// VOIP_DIRECT, VOIP_TEAM, and VOIP_ALL all play the same way: the
 	// distinction is routing metadata, not a playback mode.
 	if ( flags & ( VOIP_DIRECT | VOIP_TEAM | VOIP_ALL ) ) {
 		S_RawSamples( sender + 1, samplecnt, 48000, 2, 1,
