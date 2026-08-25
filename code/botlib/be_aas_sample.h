@@ -65,9 +65,8 @@ int AAS_AreaInfo( int areanum, aas_areainfo_t *info );
 int AAS_PointAreaNum(vec3_t point);
 //
 int AAS_PointReachabilityAreaIndex( vec3_t point );
-#if 0
-//returns the plane the given face is in
+//returns the plane the given face is in (BotTravel_Grapple's post-release
+//steer; callers pass abs(facenum))
 void AAS_FacePlane(int facenum, vec3_t normal, float *dist);
-#endif
 
 

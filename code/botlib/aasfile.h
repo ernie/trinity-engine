@@ -60,6 +60,34 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define TRAVELFLAG_NOTTEAM1			(1 << 24)
 #define TRAVELFLAG_NOTTEAM2			(2 << 24)
 
+/* The grapple cargo published per reach, read by BotTravel_Grapple. MUST MATCH
+   the .aat compiler's aasfile.h: it writes, this reads, and the two drifting
+   apart is a silent wrong-flight.
+
+   Bits 26-28 of traveltype carry the proven anchor tolerance R as a
+   contiguous 3-bit index (0 = unpublished/unmeasured; 1..AAS_GRAPPLE_R_STEPS
+   select the .aat compiler's aas_grapple_r_step table, mirrored in
+   be_ai_move.c). R is stated in BITE space: the largest distance between a
+   passing slop-sample bite and the anchor, rounded up to a step, so it is the
+   hook's real bite that is measured against it; a tolerance measured on the
+   eye instead would reject bites the proof covered on any angled wall.
+   Bit 29 is the precision contract: fire only from reach->start. */
+#define TRAVELFLAG_GRAPPLEEXACT		(1 << 29)	//fire only from reach->start; the window holds only under a narrow envelope
+#define TRAVELFLAG_GRAPPLE_R_MASK	(7 << 26)
+#define AAS_UNPACK_GRAPPLE_R_INDEX(tt)	( ((tt) >> 26) & 7 )
+#define AAS_GRAPPLE_R_STEPS			6
+
+/* The published release WINDOW: low 16 bits of edgenum are the window CENTER
+   (distance from the anchor, units, scan-snapped), high 16 the HALF-WIDTH.
+   For TRAVEL_GRAPPLEHOOK edgenum is CARGO, not an edge index: the .aat
+   compiler's optimizer leaves it unremapped and AAS_ValidateAASData exempts it
+   (facenum IS still a real, remapped index: the post-release steer reads its
+   plane normal). 0 means no window published: the ceiling/slide/drop builders
+   ride all the way in, and for them the stock near-anchor ending is correct.
+   MUST MATCH the .aat compiler's aasfile.h. */
+#define AAS_GRAPPLE_WINDOW_CENTER(edgenum)		( (edgenum) & 0xFFFF )
+#define AAS_GRAPPLE_WINDOW_HALFWIDTH(edgenum)	( ((edgenum) >> 16) & 0xFFFF )
+
 //face flags
 #define FACE_SOLID					1		//just solid at the other side
 #define FACE_LADDER					2		//ladder

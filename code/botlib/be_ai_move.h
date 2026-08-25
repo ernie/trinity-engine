@@ -48,6 +48,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define MFL_ACTIVEGRAPPLE				128		//bot is using the grapple hook
 #define MFL_GRAPPLERESET				256		//bot has reset the grapple
 #define MFL_WALK						512		//bot should walk slowly
+#define MFL_GRAPPLERELEASED				1024	//released inside the published window; steering the fall
+#define MFL_HOOKREADY					2048	//the game's grapple is in hand, raised, and not out: set by the game in initmove like MFL_GRAPPLEPULL. MUST MATCH the game's be_ai_move.h
+#define MFL_GRAPPLEAIM					4096	//the game sets the grapple view to the ideal exactly: a route shot fires on position alone. Set by the game in initmove. MUST MATCH the game's be_ai_move.h
+#define MFL_HOOKOUT						8192	//the game's hook entity exists, flying or anchored. Set by the game in initmove. MUST MATCH the game's be_ai_move.h
 // move result flags
 #define MOVERESULT_MOVEMENTVIEW			1		//bot uses view for movement
 #define MOVERESULT_SWIMVIEW				2		//bot uses view for swimming
@@ -133,6 +137,8 @@ void BotFreeMoveState(int handle);
 void BotInitMoveState(int handle, bot_initmove_t *initmove);
 //add a spot to avoid (if type == AVOID_CLEAR all spots are removed)
 void BotAddAvoidSpot(int movestate, const vec3_t origin, float radius, int type);
+//per-frame executor of a think-armed grapple release (see botlib.h)
+int BotGrappleArmedRelease(int client, struct playerState_s *ps);
 //must be called every map change
 void BotSetBrushModelTypes(void);
 //setup movement AI

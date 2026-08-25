@@ -240,6 +240,14 @@ static const char *AAS_ValidateAASData(void)
 			return "reachability: bad areanum";
 		switch (aasworld.reachability[i].traveltype & TRAVELTYPE_MASK)
 			case TRAVEL_ELEVATOR: case TRAVEL_JUMPPAD: case TRAVEL_FUNCBOB: continue;
+		if ((aasworld.reachability[i].traveltype & TRAVELTYPE_MASK) == TRAVEL_GRAPPLEHOOK) {
+			//facenum is a real remapped index and stays checked; edgenum
+			//carries the published release window (see aasfile.h): a range
+			//check against the edge lump would reject every windowed reach
+			if (UABS(aasworld.reachability[i].facenum) >= aasworld.numfaces)
+				return "reachability: bad facenum";
+			continue;
+		}
 		if (UABS(aasworld.reachability[i].facenum) >= aasworld.numfaces)
 			return "reachability: bad facenum";
 		if (UABS(aasworld.reachability[i].edgenum) >= aasworld.numedges)

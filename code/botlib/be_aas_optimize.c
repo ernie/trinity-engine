@@ -297,7 +297,18 @@ void AAS_Optimize(void)
 		if ((aasworld.reachability[i].traveltype & TRAVELTYPE_MASK) == TRAVEL_JUMPPAD) continue;
 		//NOTE: for TRAVEL_FUNCBOB the facenum and edgenum contain other coded information
 		if ((aasworld.reachability[i].traveltype & TRAVELTYPE_MASK) == TRAVEL_FUNCBOB) continue;
-		//
+		//TRAVEL_GRAPPLEHOOK: facenum is a real face index (the post-release
+		//steer reads its plane normal) and IS remapped like any other;
+		//edgenum carries the published release window (aasfile.h) and is cargo.
+		//MUST MATCH the .aat compiler's be_aas_optimize.c, even though the engine does
+		//not normally run the optimizer.
+		if ((aasworld.reachability[i].traveltype & TRAVELTYPE_MASK) == TRAVEL_GRAPPLEHOOK)
+		{
+			sign = aasworld.reachability[i].facenum;
+			aasworld.reachability[i].facenum = optimized.faceoptimizeindex[abs(aasworld.reachability[i].facenum)];
+			if (sign < 0) aasworld.reachability[i].facenum = -aasworld.reachability[i].facenum;
+			continue;
+		} //end if
 		sign = aasworld.reachability[i].facenum;
 		aasworld.reachability[i].facenum = optimized.faceoptimizeindex[abs(aasworld.reachability[i].facenum)];
 		if (sign < 0) aasworld.reachability[i].facenum = -aasworld.reachability[i].facenum;

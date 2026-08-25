@@ -589,7 +589,14 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 			unsigned clientNum = args[1];
 			if ( clientNum < sv.maxclients )
 			{
-				SV_ClientThink( &svs.clients[ clientNum ], VMA(2) );
+				usercmd_t *ucmd = VMA(2);
+				//thinks arm a bot's grapple release; this frame acts.
+				//Clearing attack here lands the button-up on the exact server
+				//frame the tow crosses the published release point
+				if ( botlib_export->ai.BotGrappleArmedRelease( clientNum,
+						SV_GameClientNum( clientNum ) ) )
+					ucmd->buttons &= ~BUTTON_ATTACK;
+				SV_ClientThink( &svs.clients[ clientNum ], ucmd );
 			}
 		}
 		return 0;

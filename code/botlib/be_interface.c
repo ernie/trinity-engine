@@ -814,6 +814,7 @@ static void Init_AI_Export( ai_export_t *ai ) {
 	ai->BotFreeMoveState = BotFreeMoveState;
 	ai->BotInitMoveState = BotInitMoveState;
 	ai->BotAddAvoidSpot = BotAddAvoidSpot;
+	ai->BotGrappleArmedRelease = BotGrappleArmedRelease;
 	//-----------------------------------
 	// be_ai_weap.h
 	//-----------------------------------

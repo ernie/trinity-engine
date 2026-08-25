@@ -382,6 +382,10 @@ typedef struct ai_export_s
 	void	(*BotFreeMoveState)(int handle);
 	void	(*BotInitMoveState)(int handle, struct bot_initmove_s *initmove);
 	void	(*BotAddAvoidSpot)(int movestate, const vec3_t origin, float radius, int type);
+	//thinks arm a bot's grapple release; the server consults this at
+	//the bot input syscall each frame and clears BUTTON_ATTACK when it says
+	//so: think-decides/frame-acts, the aim system's shape (be_ai_move.c)
+	int		(*BotGrappleArmedRelease)(int client, struct playerState_s *ps);
 	//-----------------------------------
 	// be_ai_weap.h
 	//-----------------------------------
@@ -499,7 +503,6 @@ name:						default:			module(s):			description:
 "weapindex_rocketlauncher"	"5"					be_ai_move.c		rl weapon index for rocket jumping
 "weapindex_bfg10k"			"9"					be_ai_move.c		bfg weapon index for bfg jumping
 "weapindex_grapple"			"10"				be_ai_move.c		grapple weapon index for grappling
-"entitytypemissile"			"3"					be_ai_move.c		ET_MISSILE
 "offhandgrapple"			"0"					be_ai_move.c		enable off hand grapple hook
 "cmd_grappleon"				"grappleon"			be_ai_move.c		command to activate off hand grapple
 "cmd_grappleoff"			"grappleoff"		be_ai_move.c		command to deactivate off hand grapple
