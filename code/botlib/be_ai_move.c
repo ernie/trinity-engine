@@ -3133,6 +3133,7 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 		if (!(int) offhandgrapple->value)
 		{
 			EA_Attack(ms->client);
+			result.flags |= MOVERESULT_GRAPPLETRIGGER;
 		} //end if
 		//the stall reference is the BEST distance the tow has reached, not the
 		//last: a body pinned against a lip oscillates a few units on the
@@ -3218,6 +3219,7 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 			else
 			{
 				EA_Attack(ms->client);
+				result.flags |= MOVERESULT_GRAPPLETRIGGER;
 			} //end else
 			ms->moveflags |= MFL_ACTIVEGRAPPLE;
 			ms->lastgrappledist = 999999;
