@@ -2303,6 +2303,11 @@ static int AAS_Reachability_Jump(int area1num, int area2num)
 			dir[2] = 0;
 			VectorNormalize(dir);
 			VectorScale(dir, speed, velocity);
+			//a running jump holds forward: without the input, ground friction
+			//guts the seeded launch speed on the first frame and long gap
+			//jumps read as unreachable
+			cmdmove[0] = dir[0] * aassettings.phys_maxwalkvelocity;
+			cmdmove[1] = dir[1] * aassettings.phys_maxwalkvelocity;
 			//
 			AAS_PredictClientMovement(&move, -1, beststart, PRESENCE_NORMAL, qtrue,
 										velocity, cmdmove, 3, 30, 0.1f,

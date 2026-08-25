@@ -89,6 +89,8 @@ typedef struct bot_movestate_s
 	float grapplearm_lastdist;					//the tether length the frame hook saw last frame,
 												//0 before the first pull frame: its delta is the
 												//tow's measured step, the release's sampling unit
+	float grapplearm_release_time;				//when the armed release let go; the attack
+												//hold after it ends on the ground or at 3 s
 	//the shot's anchor, and whether the frame hook has seen its bite
 	vec3_t grapplefire_anchor;
 	int grapplefire_bitten;
@@ -97,6 +99,9 @@ typedef struct bot_movestate_s
 	int grapplefire_rtol;						//its ANCHOR_INVALID line read these, not the reach
 	int grapplefire_invalid;					//the frame hook let go of an invalid bite; the
 												//next think remembers the reach and ends it
+	float grapplefire_time;						//when the route shot was pressed
+	int grapplefire_attempts;					//shots at grapplefire_attemptreach in a row
+	int grapplefire_attemptreach;
 	float grapplespot_time;						//first think inside the fire radius, hook ready; 0 outside it
 	float reachability_time;					//time to use current reachability
 	int avoidreach[MAX_AVOIDREACH];				//reachabilities to avoid
@@ -2675,6 +2680,7 @@ int BotGrappleArmedRelease(int client, struct playerState_s *ps)
 	{
 		float miss = Distance(ps->grapplePoint, ms->grapplefire_anchor);
 		ms->grapplefire_bitten = 1;
+		ms->reachability_time = AAS_Time() + Distance(ps->origin, ps->grapplePoint) / 800 + 1;
 		//farther out than the published R and the window does not cover this
 		//state: let go now, while it still reads as a hook that did not
 		//stick. The button-up is this frame's; the think that follows
@@ -2686,6 +2692,7 @@ int BotGrappleArmedRelease(int client, struct playerState_s *ps)
 			//an offhand grapple releases by command: the think's job
 			if ((int) offhandgrapple->value) return qfalse;
 			ms->grapplearm_dist = -1;
+			ms->grapplearm_release_time = AAS_Time();
 			return qtrue;
 		} //end if
 		//a valid bite on a windowed reach ARMS the release here, from the
@@ -2703,9 +2710,11 @@ int BotGrappleArmedRelease(int client, struct playerState_s *ps)
 	//hook: the game's expressive layer taking the weapon for a maneuver,
 	//a teleporter, a death. The route tow is over, so disarm, or the armed
 	//window would judge whatever hook comes next
+	//an invalid bite has already ended the route and waits for its think to avoid the reach
 	if (ms->grapplefire_bitten && ms->grapplearm_dist >= 0
 			&& (ms->moveflags & MFL_ACTIVEGRAPPLE)
-			&& !(ps->pm_flags & (int) pmf_grapplepull->value))
+			&& !(ps->pm_flags & (int) pmf_grapplepull->value)
+			&& !ms->grapplefire_invalid)
 	{
 		BotGrappleRouteEnd(ms);
 		ms->grapplearm_dist = 0;
@@ -2719,7 +2728,19 @@ int BotGrappleArmedRelease(int client, struct playerState_s *ps)
 	//rebuilds input, and a single cleared frame would re-fire the hook
 	//on the very next one. Keep suppressing; the released-steer think
 	//resets this to 0.
-	if (ms->grapplearm_dist < 0) return qtrue;
+	if (ms->grapplearm_dist < 0)
+	{
+		//keep attack off through the fall so nothing fires into it; the
+		//landing hands it back (3 s covers a water landing), instead of
+		//waiting for a think that may never walk a route
+		if (ps->groundEntityNum != ENTITYNUM_NONE
+				|| AAS_Time() > ms->grapplearm_release_time + 3)
+		{
+			ms->grapplearm_dist = 0;
+			return qfalse;
+		} //end if
+		return qtrue;
+	} //end if
 	if (ms->grapplearm_dist == 0) return qfalse;
 	if (!(ms->moveflags & MFL_ACTIVEGRAPPLE)) return qfalse;
 	//not pulling: the hook is still flying, or already gone, grapplePoint
@@ -2740,8 +2761,13 @@ int BotGrappleArmedRelease(int client, struct playerState_s *ps)
 		return qfalse;
 	BotGrappleRouteEnd(ms);
 	ms->grapplearm_dist = -1;
+	ms->grapplearm_release_time = AAS_Time();
 	ms->moveflags &= ~MFL_ACTIVEGRAPPLE;
 	ms->moveflags |= MFL_GRAPPLERELEASED;
+	//the budget so far priced the PULL; the steered fall the release lets
+	//go into is its own phase, and the router was abandoning the reach
+	//mid-air without one. 3 s covers the tallest vault's drop
+	ms->reachability_time = AAS_Time() + 3;
 	return qtrue;
 } //end of the function BotGrappleArmedRelease
 //===========================================================================
@@ -2839,21 +2865,44 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 		ms->grapplearm_dist = 0;
 		if (ms->moveflags & MFL_ONGROUND)
 		{
+			//the count is kept per reach, and a budget expiry mid-fall can put
+			//a different reach under a carried release: only the one the
+			//retries were counted for may wear the penalty
+			if (ms->grapplefire_attemptreach == ms->lastreachnum)
+			{
+				//a landing anywhere but the start area is the reach working,
+				//and it clears the count: only back-to-back landings back where
+				//the body started are a window this map does not honor
+				if (ms->areanum != ms->reachareanum) ms->grapplefire_attempts = 0;
+				else if (ms->grapplefire_attempts >= 2)
+				{
+					BotAddToAvoidReach(ms, ms->lastreachnum, AVOIDREACH_TIME);
+				} //end if
+			} //end if
 			ms->moveflags &= ~MFL_GRAPPLERELEASED;
 			ms->moveflags |= MFL_GRAPPLERESET;
 			ms->reachability_time = 0;	//end the reachability
 			return result;
 		} //end if
+		//face zero is the dummy every unkept face remaps to,
+		//and the dummy's plane is arbitrary, never
+		//this anchor's. Keeping the index in range is the loader's job
+		if (reach->facenum)
 		{
 			float facedist;
 			AAS_FacePlane(abs(reach->facenum), dir, &facedist);
-		}
-		VectorNegate(dir, dir);
-		dir[2] = 0;
+			VectorNegate(dir, dir);
+			dir[2] = 0;
+		} //end if
+		else
+		{
+			VectorClear(dir);
+		} //end else
 		if (VectorNormalize(dir) < 0.1f)
 		{
-			//floor or ceiling anchor has no horizontal normal: continue along
-			//the tow's own horizontal, the one heading the reach itself carries
+			//no horizontal to push along: a floor or ceiling anchor, or no
+			//anchor face in the file at all: continue along the tow's own
+			//horizontal, the one heading the reach itself carries
 			VectorSubtract(reach->end, reach->start, dir);
 			dir[2] = 0;
 			VectorNormalize(dir);
@@ -2879,6 +2928,19 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 #endif //DEBUG_GRAPPLE
 		//
 		state = GrappleState(ms, reach);
+		//a shot that has flown 2 s without biting is not going to: every tow
+		//bites inside that at 1800 ups. Bots throw once per press (the game's
+		//rule), so this is the only exit a missed route shot has left
+		if (state == 1 && AAS_Time() > ms->grapplefire_time + 2)
+		{
+			BotGrappleRouteEnd(ms);
+			BotAddToAvoidReach(ms, ms->lastreachnum, AVOIDREACH_TIME);
+			ms->grapplearm_dist = 0;
+			ms->moveflags &= ~MFL_ACTIVEGRAPPLE;
+			ms->moveflags |= MFL_GRAPPLERESET;
+			ms->reachability_time = 0;	//end the reachability
+			return result;
+		} //end if
 		//
 		VectorSubtract(reach->end, ms->origin, dir);
 		dist3 = VectorLength(dir);
@@ -3059,6 +3121,16 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 			ms->grapplefire_invalid = 0;
 			ms->grapplearm_lastdist = 0;
 			ms->grapplespot_time = 0;
+			ms->grapplefire_time = AAS_Time();
+			if (ms->grapplefire_attemptreach != ms->lastreachnum)
+			{
+				ms->grapplefire_attemptreach = ms->lastreachnum;
+				ms->grapplefire_attempts = 0;
+			} //end if
+			ms->grapplefire_attempts++;
+			//the 8 s table budget paid for the walk to the mark; from here the
+			//flight and the tow are priced by the tow itself
+			ms->reachability_time = AAS_Time() + Distance(reach->start, reach->end) / 800 + 2;
 		} //end if
 		else
 		{

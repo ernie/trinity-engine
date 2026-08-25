@@ -67,6 +67,8 @@ typedef struct optimized_s
 	int *vertexoptimizeindex;
 	int *edgeoptimizeindex;
 	int *faceoptimizeindex;
+	//faces to keep for a reason other than their own flags
+	byte *facekeep;
 } optimized_t;
 
 //===========================================================================
@@ -130,9 +132,10 @@ static int AAS_OptimizeEdge(optimized_t *optimized, int edgenum)
 // Returns:					-
 // Changes Globals:		-
 //===========================================================================
-static int AAS_KeepFace(aas_face_t *face)
+static int AAS_KeepFace(optimized_t *optimized, int facenum)
 {
-	if (!(face->faceflags & FACE_LADDER)) return 0;
+	if (optimized->facekeep[abs(facenum)]) return 1;
+	if (!(aasworld.faces[abs(facenum)].faceflags & FACE_LADDER)) return 0;
 	else return 1;
 } //end of the function AAS_KeepFace
 //===========================================================================
@@ -147,7 +150,7 @@ static int AAS_OptimizeFace(optimized_t *optimized, int facenum)
 	aas_face_t *face, *optface;
 
 	face = &aasworld.faces[abs(facenum)];
-	if (!AAS_KeepFace(face)) return 0;
+	if (!AAS_KeepFace(optimized, facenum)) return 0;
 
 	optfacenum = optimized->faceoptimizeindex[abs(facenum)];
 	if (optfacenum)
@@ -233,7 +236,31 @@ static void AAS_OptimizeAlloc(optimized_t *optimized)
 	optimized->vertexoptimizeindex = (int *) GetClearedMemory(aasworld.numvertexes * sizeof(int));
 	optimized->edgeoptimizeindex = (int *) GetClearedMemory(aasworld.numedges * sizeof(int));
 	optimized->faceoptimizeindex = (int *) GetClearedMemory(aasworld.numfaces * sizeof(int));
+	optimized->facekeep = (byte *) GetClearedMemory(aasworld.numfaces * sizeof(byte));
 } //end of the function AAS_OptimizeAlloc
+//===========================================================================
+// a grapple release steers along the negated horizontal of its anchor face's
+// normal, so the runtime reads that face's plane out of the shipped file. A
+// face nothing keeps remaps to the dummy, whose plane is whichever one the
+// file lists first and never this anchor's. Mark those faces and keep
+// them the way a ladder's face is kept.
+//
+// Parameter:				-
+// Returns:					-
+// Changes Globals:		-
+//===========================================================================
+static void AAS_MarkSteerFaces(optimized_t *optimized)
+{
+	int i, facenum;
+
+	for (i = 0; i < aasworld.reachabilitysize; i++)
+	{
+		if ((aasworld.reachability[i].traveltype & TRAVELTYPE_MASK) != TRAVEL_GRAPPLEHOOK) continue;
+		//face zero means the builder had no anchor face to store
+		facenum = abs(aasworld.reachability[i].facenum);
+		if (facenum > 0 && facenum < aasworld.numfaces) optimized->facekeep[facenum] = 1;
+	} //end for
+} //end of the function AAS_MarkSteerFaces
 //===========================================================================
 //
 // Parameter:				-
@@ -270,6 +297,7 @@ static void AAS_OptimizeStore(optimized_t *optimized)
 	FreeMemory(optimized->vertexoptimizeindex);
 	FreeMemory(optimized->edgeoptimizeindex);
 	FreeMemory(optimized->faceoptimizeindex);
+	FreeMemory(optimized->facekeep);
 } //end of the function AAS_OptimizeStore
 //===========================================================================
 //
@@ -283,6 +311,8 @@ void AAS_Optimize(void)
 	optimized_t optimized;
 
 	AAS_OptimizeAlloc(&optimized);
+	//the keep test reads this, so every mark has to be in before the walk
+	AAS_MarkSteerFaces(&optimized);
 	for (i = 1; i < aasworld.numareas; i++)
 	{
 		AAS_OptimizeArea(&optimized, i);
