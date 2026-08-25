@@ -250,10 +250,15 @@ typedef struct aas_s
 	//routing update
 	aas_routingupdate_t *areaupdate;
 	aas_routingupdate_t *portalupdate;
+	//update list ordered on travel time; updateheappos is 1-based, 0 = unqueued
+	int *updateheap;
+	int *updateheappos;
 	//number of routing updates during a frame (reset every frame)
 	int frameroutingupdates;
 	//reversed reachability links
 	aas_reversedreachability_t *reversedreachability;
+	//zero row for an update's start area, sized to the longest reversed link list
+	unsigned short int *startareatraveltimes;
 	//travel times within the areas
 	unsigned short ***areatraveltimes;
 	//array of size numclusters with cluster cache

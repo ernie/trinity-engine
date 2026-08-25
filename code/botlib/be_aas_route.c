@@ -418,7 +418,7 @@ static void AAS_InitAreaContentsTravelFlags(void)
 //===========================================================================
 static void AAS_CreateReversedReachability(void)
 {
-	int i, n;
+	int i, n, maxlinks;
 	aas_reversedlink_t *revlink;
 	aas_reachability_t *reach;
 	aas_areasettings_t *settings;
@@ -461,6 +461,17 @@ static void AAS_CreateReversedReachability(void)
 			aasworld.reversedreachability[reach->areanum].numlinks++;
 		} //end for
 	} //end for
+	//an update's start area indexes this by IN degree, which the 128 cap above
+	//does not bound
+	maxlinks = 0;
+	for (i = 0; i < aasworld.numareas; i++)
+	{
+		if (aasworld.reversedreachability[i].numlinks > maxlinks)
+			maxlinks = aasworld.reversedreachability[i].numlinks;
+	} //end for
+	if (aasworld.startareatraveltimes) FreeMemory(aasworld.startareatraveltimes);
+	aasworld.startareatraveltimes = (unsigned short int *) GetClearedMemory(
+									(maxlinks + 1) * sizeof(unsigned short int));
 #ifdef DEBUG
 	botimport.Print(PRT_MESSAGE, "reversed reachability %d msec\n", Sys_MilliSeconds() - starttime);
 #endif
@@ -876,6 +887,11 @@ static void AAS_InitRoutingUpdate(void)
 	//allocate memory for the routing update fields
 	aasworld.areaupdate = (aas_routingupdate_t *) GetClearedMemory(
 									maxreachabilityareas * sizeof(aas_routingupdate_t));
+	//each area queues at most once, so the heap cannot outgrow the cluster
+	if (aasworld.updateheap) FreeMemory(aasworld.updateheap);
+	aasworld.updateheap = (int *) GetClearedMemory(maxreachabilityareas * sizeof(int));
+	if (aasworld.updateheappos) FreeMemory(aasworld.updateheappos);
+	aasworld.updateheappos = (int *) GetClearedMemory(maxreachabilityareas * sizeof(int));
 	//
 	if (aasworld.portalupdate) FreeMemory(aasworld.portalupdate);
 	//allocate memory for the portal update fields
@@ -1269,9 +1285,15 @@ void AAS_FreeRoutingCaches(void)
 	// free reversed reachability links
 	if (aasworld.reversedreachability) FreeMemory(aasworld.reversedreachability);
 	aasworld.reversedreachability = NULL;
+	if (aasworld.startareatraveltimes) FreeMemory(aasworld.startareatraveltimes);
+	aasworld.startareatraveltimes = NULL;
 	// free routing algorithm memory
 	if (aasworld.areaupdate) FreeMemory(aasworld.areaupdate);
 	aasworld.areaupdate = NULL;
+	if (aasworld.updateheap) FreeMemory(aasworld.updateheap);
+	aasworld.updateheap = NULL;
+	if (aasworld.updateheappos) FreeMemory(aasworld.updateheappos);
+	aasworld.updateheappos = NULL;
 	if (aasworld.portalupdate) FreeMemory(aasworld.portalupdate);
 	aasworld.portalupdate = NULL;
 	// free lists with areas the reachabilities go through
@@ -1285,7 +1307,68 @@ void AAS_FreeRoutingCaches(void)
 	aasworld.areacontentstravelflags = NULL;
 } //end of the function AAS_FreeRoutingCaches
 //===========================================================================
+// restore heap order upward from pos
+//
+// Parameter:			pos		: heap slot to sift up from
+// Returns:				-
+// Changes Globals:		-
+//===========================================================================
+static void AAS_UpdateHeapSiftUp(int pos)
+{
+	int parent, node;
+	unsigned short int t;
+	int *heap = aasworld.updateheap;
+	int *heappos = aasworld.updateheappos;
+
+	node = heap[pos];
+	t = aasworld.areaupdate[node].tmptraveltime;
+	while (pos > 0)
+	{
+		parent = (pos - 1) >> 1;
+		if (aasworld.areaupdate[heap[parent]].tmptraveltime <= t) break;
+		heap[pos] = heap[parent];
+		heappos[heap[pos]] = pos + 1;
+		pos = parent;
+	} //end while
+	heap[pos] = node;
+	heappos[node] = pos + 1;
+} //end of the function AAS_UpdateHeapSiftUp
+//===========================================================================
+// restore heap order downward from pos
+//
+// Parameter:			pos		: heap slot to sift down from
+//						count	: number of entries in the heap
+// Returns:				-
+// Changes Globals:		-
+//===========================================================================
+static void AAS_UpdateHeapSiftDown(int pos, int count)
+{
+	int child, node;
+	unsigned short int t;
+	int *heap = aasworld.updateheap;
+	int *heappos = aasworld.updateheappos;
+
+	node = heap[pos];
+	t = aasworld.areaupdate[node].tmptraveltime;
+	for (;;)
+	{
+		child = 2 * pos + 1;
+		if (child >= count) break;
+		if (child + 1 < count && aasworld.areaupdate[heap[child+1]].tmptraveltime <
+									aasworld.areaupdate[heap[child]].tmptraveltime) child++;
+		if (aasworld.areaupdate[heap[child]].tmptraveltime >= t) break;
+		heap[pos] = heap[child];
+		heappos[heap[pos]] = pos + 1;
+		pos = child;
+	} //end for
+	heap[pos] = node;
+	heappos[node] = pos + 1;
+} //end of the function AAS_UpdateHeapSiftDown
+//===========================================================================
 // update the given routing cache
+//
+// Heap ordered, not FIFO: popping in travel time order leaves an area final on
+// first pop, killing the FIFO's re-expansions.
 //
 // Parameter:			areacache		: routing cache to update
 // Returns:				-
@@ -1294,9 +1377,9 @@ void AAS_FreeRoutingCaches(void)
 static void AAS_UpdateAreaRoutingCache(aas_routingcache_t *areacache)
 {
 	int i, nextareanum, cluster, badtravelflags, clusterareanum, linknum;
-	int numreachabilityareas;
-	unsigned short int t, startareatraveltimes[128]; //NOTE: not more than 128 reachabilities per area allowed
-	aas_routingupdate_t *updateliststart, *updatelistend, *curupdate, *nextupdate;
+	int numreachabilityareas, curareanum, heapcount;
+	unsigned short int t;
+	aas_routingupdate_t *curupdate, *nextupdate;
 	aas_reachability_t *reach;
 	const aas_reversedreachability_t *revreach;
 	const aas_reversedlink_t *revlink;
@@ -1316,30 +1399,30 @@ static void AAS_UpdateAreaRoutingCache(aas_routingcache_t *areacache)
 	clusterareanum = AAS_ClusterAreaNum(areacache->cluster, areacache->areanum);
 	if (clusterareanum >= numreachabilityareas) return;
 	//
-	Com_Memset(startareatraveltimes, 0, sizeof(startareatraveltimes));
-	//
 	curupdate = &aasworld.areaupdate[clusterareanum];
 	curupdate->areanum = areacache->areanum;
 	//VectorCopy(areacache->origin, curupdate->start);
-	curupdate->areatraveltimes = startareatraveltimes;
+	curupdate->areatraveltimes = aasworld.startareatraveltimes;
 	curupdate->tmptraveltime = areacache->starttraveltime;
 	//
 	areacache->traveltimes[clusterareanum] = areacache->starttraveltime;
-	//put the area to start with in the current read list
-	curupdate->next = NULL;
-	curupdate->prev = NULL;
-	updateliststart = curupdate;
-	updatelistend = curupdate;
-	//while there are updates in the current list
-	while (updateliststart)
+	//put the area to start with in the heap
+	aasworld.updateheap[0] = clusterareanum;
+	aasworld.updateheappos[clusterareanum] = 1;
+	heapcount = 1;
+	//while there are areas queued
+	while (heapcount > 0)
 	{
-		curupdate = updateliststart;
-		//
-		if (curupdate->next) curupdate->next->prev = NULL;
-		else updatelistend = NULL;
-		updateliststart = curupdate->next;
-		//
-		curupdate->inlist = qfalse;
+		//lowest travel time first
+		curareanum = aasworld.updateheap[0];
+		aasworld.updateheappos[curareanum] = 0;
+		heapcount--;
+		if (heapcount > 0)
+		{
+			aasworld.updateheap[0] = aasworld.updateheap[heapcount];
+			AAS_UpdateHeapSiftDown(0, heapcount);
+		} //end if
+		curupdate = &aasworld.areaupdate[curareanum];
 		//check all reversed reachability links
 		revreach = &aasworld.reversedreachability[curupdate->areanum];
 		//
@@ -1380,18 +1463,18 @@ static void AAS_UpdateAreaRoutingCache(aas_routingcache_t *areacache)
 				//VectorCopy(reach->start, nextupdate->start);
 				nextupdate->areatraveltimes = aasworld.areatraveltimes[nextareanum][linknum -
 													aasworld.areasettings[nextareanum].firstreachablearea];
-				if (!nextupdate->inlist)
+				if (aasworld.updateheappos[clusterareanum])
 				{
-					// we add the update to the end of the list
-					// we could also use a B+ tree to have a real sorted list
-					// on travel time which makes for faster routing updates
-					nextupdate->next = NULL;
-					nextupdate->prev = updatelistend;
-					if (updatelistend) updatelistend->next = nextupdate;
-					else updateliststart = nextupdate;
-					updatelistend = nextupdate;
-					nextupdate->inlist = qtrue;
+					//already queued; travel time only drops, so sifting up suffices
+					AAS_UpdateHeapSiftUp(aasworld.updateheappos[clusterareanum] - 1);
 				} //end if
+				else
+				{
+					aasworld.updateheap[heapcount] = clusterareanum;
+					aasworld.updateheappos[clusterareanum] = heapcount + 1;
+					heapcount++;
+					AAS_UpdateHeapSiftUp(heapcount - 1);
+				} //end else
 			} //end if
 		} //end for
 	} //end while
