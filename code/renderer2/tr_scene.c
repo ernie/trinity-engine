@@ -188,6 +188,13 @@ void R_AddPolygonSurfaces( void ) {
 	fogMask = -((tr.refdef.rdflags & RDF_NOFOG) == 0);
 
 	for ( i = 0, poly = tr.refdef.polys; i < tr.refdef.numPolys ; i++, poly++ ) {
+		// the same view gating refents get in R_AddEntitySurfaces
+		if ( ( poly->renderfx & RF_FIRST_PERSON ) && tr.viewParms.isPortal ) {
+			continue;
+		}
+		if ( ( poly->renderfx & RF_THIRD_PERSON ) && !tr.viewParms.isPortal ) {
+			continue;
+		}
 		sh = R_GetShaderByHandle( poly->hShader );
 		R_AddDrawSurf( ( void * )poly, sh, poly->fogIndex & fogMask, qfalse, qfalse, 0 /*cubeMap*/  );
 	}
@@ -195,11 +202,11 @@ void R_AddPolygonSurfaces( void ) {
 
 /*
 =====================
-RE_AddPolyToScene
+RE_AddPolysToScene2
 
 =====================
 */
-void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts, int numPolys ) {
+void RE_AddPolysToScene2( qhandle_t hShader, int numVerts, const polyVert_t *verts, int numPolys, int renderfx ) {
 	srfPoly_t	*poly;
 	int			i, j;
 	int			fogIndex;
@@ -232,6 +239,7 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
 		poly = &backEndData->polys[r_numpolys];
 		poly->surfaceType = SF_POLY;
 		poly->hShader = hShader;
+		poly->renderfx = renderfx;
 		poly->numVerts = numVerts;
 		poly->verts = &backEndData->polyVerts[r_numpolyverts];
 		
@@ -278,6 +286,17 @@ void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts
 		}
 		poly->fogIndex = fogIndex;
 	}
+}
+
+
+/*
+=====================
+RE_AddPolyToScene
+
+=====================
+*/
+void RE_AddPolyToScene( qhandle_t hShader, int numVerts, const polyVert_t *verts, int numPolys ) {
+	RE_AddPolysToScene2( hShader, numVerts, verts, numPolys, 0 );
 }
 
 

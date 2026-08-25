@@ -129,6 +129,11 @@ typedef struct {
 	// engine-oriented billboard quad: poly-batched, backend-oriented per view
 	void	(*AddSpritePolyToScene)( qhandle_t hShader, const vec3_t origin, float width, float height, float rotation, const byte *rgba );
 
+	// polys with view gating: RF_FIRST_PERSON / RF_THIRD_PERSON honored the
+	// way refents honor them, so first-person effect polys stay out of
+	// mirrors and mirror-only ones out of the main view
+	void	(*AddPolysToScene2)( qhandle_t hShader, int numVerts, const polyVert_t *verts, int num, int renderfx );
+
 } refexport_t;
 
 //

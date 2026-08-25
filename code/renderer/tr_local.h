@@ -644,6 +644,7 @@ typedef struct srfPoly_s {
 	surfaceType_t	surfaceType;
 	qhandle_t		hShader;
 	int				fogIndex;
+	int				renderfx;		// RF_FIRST_PERSON / RF_THIRD_PERSON view gating
 	int				numVerts;
 	polyVert_t		*verts;
 } srfPoly_t;
@@ -1740,6 +1741,7 @@ void R_InitNextFrame( void );
 void RE_ClearScene( void );
 void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime );
 void RE_AddPolyToScene( qhandle_t hShader , int numVerts, const polyVert_t *verts, int num );
+void RE_AddPolysToScene2( qhandle_t hShader, int numVerts, const polyVert_t *verts, int num, int renderfx );
 void RE_AddSpritePolyToScene( qhandle_t hShader, const vec3_t origin, float width, float height, float rotation, const byte *rgba );
 void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
