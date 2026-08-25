@@ -4,6 +4,8 @@ output/
 .vs/
 .vscode/
 .claude/
+CLAUDE.md
+docs/superpowers/
 *.user
 cmake-*
 .idea
