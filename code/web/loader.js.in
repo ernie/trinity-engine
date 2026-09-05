@@ -8,6 +8,10 @@ const EMSCRIPTEN_PRELOAD_FILE = '@EMSCRIPTEN_PRELOAD_FILE@' === 'ON';
 const CACHE_NAME = `${CLIENT_NAME}-assets-v1`;
 const cacheAvailable = typeof caches !== 'undefined';
 
+// iPadOS reports "MacIntel"; maxTouchPoints is the only tell there.
+const isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+    || (/Mac/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
 function authHeaders(url, authToken) {
     if (!authToken) return {};
     try { if (new URL(url).origin !== location.origin) return {}; } catch {}
@@ -376,8 +380,10 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
                             continue;
                         }
                         for (const file of config[gamedir].files) {
-                            const name = file.src.match(/[^/]+$/)[0];
-                            assets.push({ url: new URL(file.src, dataURL).href, dir: file.dst, name });
+                            // srcMobile is a reduced pak; the full one gets mobile tabs jetsammed.
+                            const src = (isMobileDevice && file.srcMobile) || file.src;
+                            const name = src.match(/[^/]+$/)[0];
+                            assets.push({ url: new URL(src, dataURL).href, dir: file.dst, name });
                         }
                     }
                     for (const url of extraPk3s) {

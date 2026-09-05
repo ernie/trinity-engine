@@ -124,6 +124,10 @@ used as a web client or demo player, and embedded into an existing page.
 
 Requires the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html) (`emcmake`/`emmake`).
 
+### Bot Grapple Navigation
+
+Botlib can fly a grapple along its routes. It reads Trinity navigation data (`maps/<map>.aat`) beside the map's own `.aas`, falling back to stock routing on maps that have none, while the game module decides when a bot shoots, bites, and lets go. `bot_grapple` defaults to `1`; `2` logs every route shot, bite, and tow ending. Navigation reads never mark a pak referenced, so clients are never asked to download server-only data.
+
 ### Server Lifecycle Callbacks
 
 Game DLL callbacks for server startup and shutdown events, enabling integration with external tooling for statistics tracking and server management.
@@ -132,6 +136,7 @@ Game DLL callbacks for server startup and shutdown events, enabling integration 
 
 - `sv_conTap` — with `1`, stream the server console over a loopback TCP socket on a kernel-assigned port, advertised read-only in serverinfo as `sv_conPort` (`0` = no tap offered). The Trinity tracker consumes this for `trinity console`.
 - `com_writeConfig` — with `0`, never write archived cvars back to `q3config.cfg` (`q3config_server.cfg` on dedicated servers). Disable on multi-instance dedicated hosts that share a homepath, where the write-back cross-contaminates instances.
+- `sv_fps` defaults to `40` and client `rate` to `50000` — the values the Trinity mod is tuned against.
 
 ## Game Data
 
