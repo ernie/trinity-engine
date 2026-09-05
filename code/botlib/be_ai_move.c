@@ -109,6 +109,9 @@ typedef struct bot_movestate_s
 	int grapplefire_attempts;					//shots at grapplefire_attemptreach in a row
 	int grapplefire_attemptreach;
 	float grapplespot_time;						//first think inside the fire radius, hook ready; 0 outside it
+	int grapplelof_reach;						//one lofclose line per attempt
+	int grapplelofshort_reach;					//one lofshort line per attempt
+	int grapplekeep_reach;						//one areakeep line per attempt
 	float reachability_time;					//time to use current reachability
 	int avoidreach[MAX_AVOIDREACH];				//reachabilities to avoid
 	float avoidreachtimes[MAX_AVOIDREACH];		//times to avoid the reachabilities
@@ -184,6 +187,9 @@ static const float aas_grapple_r_step[AAS_GRAPPLE_R_STEPS] = {8, 16, 24, 32, 48,
 //the tighter one
 #define AAS_GRAPPLE_FIRE_RADIUS					48
 #define AAS_GRAPPLE_FIRE_RADIUS_EXACT			16
+#define AAS_GRAPPLE_MARK_TOL					4		//this close is standing on the mark the line was proven from
+#define AAS_GRAPPLE_CLOSE_SPEED					100		//under this the wish cannot beat ground friction
+#define AAS_GRAPPLE_MARK_DZ						32		//farther off the mark's level is another deck
 //type of model, func_plat or func_bobbing
 static int modeltypes[MAX_MODELS];
 
@@ -2901,7 +2907,7 @@ static void BotResetGrapple(bot_movestate_t *ms)
 static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_t *reach)
 {
 	bot_moveresult_t_cleared( result );
-	float dist, speed, rtol, aimgate, aimerr;
+	float dist, speed, rtol, aimgate, aimerr, shortfall;
 	vec3_t dir, viewdir, org;
 	int state, areanum, ridx, center, halfwidth, exact, aimexact, atspot, spotwait;
 	bsp_trace_t trace;
@@ -3206,8 +3212,34 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 			VectorAdd(ms->origin, ms->viewoffset, org);
 			trace = AAS_Trace(org, NULL, NULL, reach->end, ms->entitynum, CONTENTS_SOLID);
 			VectorSubtract(reach->end, trace.endpos, dir);
-			if (VectorLength(dir) > 16)
+			shortfall = VectorLength(dir);
+			if (shortfall > 16)
 			{
+				//a lip can hide a low anchor from a step behind the mark: close on it and ask again
+				if (dist > AAS_GRAPPLE_MARK_TOL)
+				{
+					if (bot_grapple->value >= 2 && ms->grapplelof_reach != ms->lastreachnum)
+					{
+						ms->grapplelof_reach = ms->lastreachnum;
+						botimport.Print(PRT_MESSAGE, "GRAPPLE-NAV c%d lofclose rn %d short %d sd %d\n",
+								ms->client, ms->lastreachnum, (int) shortfall, (int) dist);
+					} //end if
+					VectorSubtract(reach->start, ms->origin, dir);
+					if (!(ms->moveflags & MFL_SWIMMING)) dir[2] = 0;
+					VectorNormalize(dir);
+					speed = 4 * dist;
+					if (speed < AAS_GRAPPLE_CLOSE_SPEED) speed = AAS_GRAPPLE_CLOSE_SPEED;
+					BotCheckBlocked(ms, dir, qtrue, &result);
+					EA_Move(ms->client, dir, speed);
+					VectorCopy(dir, result.movedir);
+					return result;
+				} //end if
+				if (bot_grapple->value >= 2 && ms->grapplelofshort_reach != ms->lastreachnum)
+				{
+					ms->grapplelofshort_reach = ms->lastreachnum;
+					botimport.Print(PRT_MESSAGE, "GRAPPLE-NAV c%d lofshort rn %d short %d sd %d\n",
+							ms->client, ms->lastreachnum, (int) shortfall, (int) dist);
+				} //end if
 				result.failure = qtrue;
 				return result;
 			} //end if
@@ -3239,6 +3271,9 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 			ms->grapplearm_lastdist = 0;
 			spotwait = ms->grapplespot_time ? (int) ((AAS_Time() - ms->grapplespot_time) * 1000) : 0;
 			ms->grapplespot_time = 0;
+			ms->grapplelof_reach = 0;
+			ms->grapplelofshort_reach = 0;
+			ms->grapplekeep_reach = 0;
 			ms->grapplefire_time = AAS_Time();
 			ms->grapplefire_stamp = (int) (AAS_Time() * 1000);
 			if (ms->grapplefire_attemptreach != ms->lastreachnum)
@@ -3268,9 +3303,21 @@ static bot_moveresult_t BotTravel_Grapple(bot_movestate_t *ms, aas_reachability_
 			EA_Move(ms->client, dir, speed);
 			VectorCopy(dir, result.movedir);
 		} //end else
-		//if in another area before actually grappling
+		//another area ends the reach unless still on the mark's disc and level: a seam sliver is not a departure
 		areanum = AAS_PointAreaNum(ms->origin);
-		if (areanum && areanum != ms->reachareanum) ms->reachability_time = 0;
+		if (areanum && areanum != ms->reachareanum)
+		{
+			if (dist >= AAS_GRAPPLE_FIRE_RADIUS
+					|| fabs(reach->start[2] - ms->origin[2]) > AAS_GRAPPLE_MARK_DZ)
+				ms->reachability_time = 0;
+			else if (bot_grapple->value >= 2 && ms->grapplekeep_reach != ms->lastreachnum)
+			{
+				ms->grapplekeep_reach = ms->lastreachnum;
+				botimport.Print(PRT_MESSAGE, "GRAPPLE-NAV c%d areakeep rn %d area %d/%d sd %d dz %d\n",
+						ms->client, ms->lastreachnum, areanum, ms->reachareanum, (int) dist,
+						(int) (ms->origin[2] - reach->start[2]));
+			} //end else if
+		} //end if
 	} //end else
 	return result;
 } //end of the function BotTravel_Grapple
