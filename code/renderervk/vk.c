@@ -5896,7 +5896,10 @@ void vk_create_blur_pipeline( uint32_t index, uint32_t width, uint32_t height, q
 	set_shader_stage_desc( shader_stages+0, VK_SHADER_STAGE_VERTEX_BIT, vk.modules.gamma_vs, "main" );
 	set_shader_stage_desc( shader_stages+1, VK_SHADER_STAGE_FRAGMENT_BIT, vk.modules.blur_fs, "main" );
 
-	frag_spec_data[0] = 1.2 / (float) width; // x offset
+	// blur.frag offsets the coordinate it samples the source with, so the
+	// offset is in source texels. Each horizontal pass reads the previous
+	// octave at twice its own width, the verticals read their own resolution
+	frag_spec_data[0] = 1.2 / (float) ( width * 2 ); // x offset
 	frag_spec_data[1] = 1.2 / (float) height; // y offset
 	frag_spec_data[2] = 1.0; // intensity?
 
