@@ -1737,11 +1737,6 @@ install: release
 			$(STRIP) "$(DESTDIR)$$i"; \
 		fi \
 	done
-ifdef MINGW
-	@$(INSTALL) -D -m 0644 misc/update-trinity.bat "$(DESTDIR)update-trinity.bat"
-else
-	@$(INSTALL) -D -m 0755 misc/update-trinity.sh "$(DESTDIR)update-trinity.sh"
-endif
 
 clean: clean-debug clean-release
 

@@ -378,13 +378,6 @@ jobs:
     needs: [windows-msys, windows-msys32, windows-msvc, ubuntu-x86, ubuntu-arm64, build-armv7, macos, web]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          sparse-checkout: |
-            misc/update-trinity.bat
-            misc/update-trinity.sh
-
       - name: Download build artifacts
         uses: actions/download-artifact@v8
 
@@ -437,15 +430,6 @@ jobs:
             else
               echo "Warning: $dir not found, skipping"
             fi
-          done
-
-      - name: Bundle update scripts
-        run: |
-          for dir in windows-mingw-x86 windows-mingw-x86_64 windows-msvc-arm64; do
-            [ -d "$dir" ] && cp misc/update-trinity.bat "$dir/"
-          done
-          for dir in linux-x86 linux-x86_64 linux-arm64 linux-armv7; do
-            [ -d "$dir" ] && cp misc/update-trinity.sh "$dir/"
           done
 
       - name: Restore executable permissions
