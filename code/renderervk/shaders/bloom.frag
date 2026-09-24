@@ -1,6 +1,8 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "postprocess_source.glsl"
 
-layout(set = 0, binding = 0) uniform sampler2D texture0;
+layout(set = 0, binding = 0) uniform sceneSampler texture0;
 
 layout(location = 0) in vec2 frag_tex_coord;
 
@@ -17,7 +19,7 @@ layout(constant_id = 6) const int base_modulate = 0;
 //const vec3 sRGB = { 0.2126, 0.7152, 0.0722 };
 
 void main() {
-	vec3 base = texture(texture0, frag_tex_coord).rgb;
+	vec3 base = sceneSample(texture0, frag_tex_coord).rgb;
 
 	if ( extract_mode == 1 ) // (r+g+b)/3 >= threshold
 	{

@@ -25,6 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "snd_codec.h"
 #include "snd_local.h"
 #include "snd_public.h"
+#include "../vrcommon/vr_state.h"
 
 cvar_t *s_volume;
 cvar_t *s_musicVolume;
@@ -234,6 +235,15 @@ void S_UpdateEntityPosition( int entityNum, const vec3_t origin )
 }
 
 
+/* Window focus belongs to desktop presentation. Active VR keeps audio even
+ * when its mirror is unfocused or minimized; requested VR alone does not. */
+qboolean S_ShouldMuteForFocus( void )
+{
+	if ( VR_IsActiveMode() ) return qfalse;
+	return (s_muteWhenMinimized->integer && gw_minimized) ||
+		(s_muteWhenUnfocused->integer && !gw_active && !gw_minimized);
+}
+
 /*
 =================
 S_Update
@@ -241,23 +251,10 @@ S_Update
 */
 void S_Update( int msec )
 {
-	if(s_muted->integer)
-	{
-		if(!(s_muteWhenMinimized->integer && gw_minimized) &&
-		   !(s_muteWhenUnfocused->integer && !gw_active && !gw_minimized))
-		{
-			s_muted->integer = qfalse;
-			s_muted->modified = qtrue;
-		}
-	}
-	else
-	{
-		if((s_muteWhenMinimized->integer && gw_minimized) ||
-		   (s_muteWhenUnfocused->integer && !gw_active && !gw_minimized))
-		{
-			s_muted->integer = qtrue;
-			s_muted->modified = qtrue;
-		}
+	qboolean muted = S_ShouldMuteForFocus();
+	if ( s_muted->integer != muted ) {
+		s_muted->integer = muted;
+		s_muted->modified = qtrue;
 	}
 
 	if ( si.Update ) {
@@ -535,6 +532,12 @@ void S_Init( void )
 			}
 
 			S_SoundInfo();
+#ifdef USE_VOIP
+			// A replacement device is not recording yet, whatever the capture
+			// setting says. Resume through the normal client gates.
+			if ( cl_voipCapture && cl_voipCapture->integer )
+				cl_voipCapture->modified = qtrue;
+#endif
 			Com_Printf( "Sound initialization successful.\n" );
 		} else {
 			Com_Printf( "Sound initialization failed.\n" );

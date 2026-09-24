@@ -134,6 +134,7 @@ typedef struct {
 	int			needDlights;	// 1 for bmodels that touch a dlight
 #endif
 	qboolean	lightingCalculated;
+	qboolean reflected;
 	vec3_t		lightDir;		// normalized direction towards light
 	vec3_t		ambientLight;	// color normalized to 0-255
 	int			ambientLightInt;	// 32 bit rgba packed
@@ -651,6 +652,13 @@ typedef struct {
 	int			scissorX, scissorY, scissorWidth, scissorHeight;
 	float		fovX, fovY;
 	float		projectionMatrix[16];
+	qboolean xrProjection;
+	qboolean xrMultiview;
+	float eyeProjection[2][16];
+	vec3_t eyeOrigin[2], eyePvsOrigin[2];
+	vec3_t eyeAxis[2][3];
+	float eyeFov[2][4];
+	float xrFov[4];
 	cplane_t	frustum[5];
 	vec3_t		visBounds[2];
 	float		zFar;
@@ -1225,6 +1233,8 @@ typedef struct {
 
 	shader_t				*flareShader;
 	shader_t				*sunShader;
+	shader_t *hudShader;
+	shader_t *virtualScreenShader, *virtualFloorShader;
 
 	int						numLightmaps;
 	image_t					**lightmaps;
@@ -1251,6 +1261,12 @@ typedef struct {
 	trRefdef_t				refdef;
 
 	int						viewCluster;
+	struct {
+		const world_t *world;
+		int center, eye[2], novis;
+		qboolean valid, multiview;
+		byte areamask[MAX_MAP_AREA_BYTES];
+	} pvsCache;
 #ifdef USE_PMLIGHT
 	dlight_t				*light;				// current light during R_RecursiveLightNode
 #endif
@@ -1385,6 +1401,7 @@ extern	cvar_t	*r_norefresh;			// bypasses the ref rendering
 extern	cvar_t	*r_drawentities;		// disable/enable entity rendering
 extern	cvar_t	*r_drawworld;			// disable/enable world rendering
 extern	cvar_t	*r_speeds;				// various levels of information display
+extern cvar_t *r_gpuTimeLog;
 extern  cvar_t	*r_detailTextures;		// enables/disables detail texturing stages
 extern	cvar_t	*r_novis;				// disable/enable usage of PVS
 extern	cvar_t	*r_nocull;
@@ -1681,6 +1698,7 @@ typedef struct shaderCommands_s
 extern	shaderCommands_t	tess;
 
 void RB_BeginSurface( shader_t *shader, int fogNum );
+void RB_DrawTrackingStatus( qhandle_t font, qhandle_t icon, float cell );
 void RB_EndSurface( void );
 void RB_CheckOverflow( int verts, int indexes );
 #define RB_CHECKOVERFLOW(v,i) RB_CheckOverflow(v,i)
@@ -1724,6 +1742,9 @@ void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, vec3_t 
 void RB_AddDlightFlares( void );
 void RB_RenderFlares( void );
 void RB_RenderDeferredFlares( void );
+qboolean RB_CaptureDeferredHud( const vec3_t origin, const vec3_t left, const vec3_t up, color4ub_t color );
+void RB_DrawDeferredHud( void );
+void RB_ClearDeferredHud( void );
 
 /*
 ============================================================
@@ -1755,6 +1776,7 @@ SHADOWS
 */
 
 void RB_ShadowTessEnd( void );
+qboolean RB_ReverseWinding( void );
 void RB_ShadowFinish( void );
 void RB_ProjectionShadowDeform( void );
 
@@ -1829,6 +1851,15 @@ void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float inten
 void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orientation,
 		qhandle_t hShader, const float rgba[4], int lifeTime );
 void RE_ClearDecals( void );
+void RE_HUDBufferStart( qboolean clear );
+void RE_HUDBufferEnd( void );
+void vk_hud_init( void );
+void vk_hud_begin( qboolean clear );
+void vk_hud_end( void );
+image_t *vk_hud_image( void );
+qboolean vk_hud_recording( void );
+extern qboolean tr_hudDrawing;
+extern qboolean tr_hudScreenDrawing;
 void R_AddDecalSurfaces( void );
 
 void RE_RenderScene( const refdef_t *fd );
@@ -1951,6 +1982,10 @@ typedef struct {
 typedef struct {
 	int		commandId;
 } finishBloomCommand_t;
+typedef struct {
+	int commandId;
+	qboolean start, clear, overlay;
+} hudBufferCommand_t;
 
 typedef struct {
 	int		commandId;
@@ -1996,9 +2031,9 @@ typedef enum {
 	RC_FINISHBLOOM,
 	RC_COLORMASK,
 	RC_CLEARDEPTH,
-	RC_CLEARCOLOR
+	RC_CLEARCOLOR,
+	RC_HUD_BUFFER
 } renderCommand_t;
-
 
 // these are sort of arbitrary limits.
 // the limits apply to the sum of all scenes in a frame --

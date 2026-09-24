@@ -359,6 +359,9 @@ typedef struct {
 	netchan_t	netchan;
 
 	qboolean compat;
+	qboolean	serverSupportsVR;	// vr_support serverinfo key
+	int		serverGametype;			// g_gametype from CS_SERVERINFO
+	qboolean	vrIdentity;			// vr userinfo value last sent to the server
 
 	// simultaneous demo playback and recording
 	int		eventMask;
@@ -491,6 +494,7 @@ typedef struct {
 	// rendering info
 	glconfig_t	glconfig;
 	qhandle_t	charSetShader;
+	qhandle_t vrTrackingIcon;
 	qhandle_t	whiteShader;
 	qhandle_t	consoleShader;
 
@@ -762,6 +766,7 @@ void CL_InitCGame( void );
 void CL_ShutdownCGame( void );
 qboolean CL_GameCommand( void );
 void CL_CGameRendering( stereoFrame_t stereo );
+void CL_CGameUpdate( void );
 void CL_SetCGameTime( void );
 
 //

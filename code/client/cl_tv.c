@@ -979,6 +979,7 @@ qboolean CL_TV_Open( const char *filename ) {
 #ifdef USE_VOIP
 		clc.svVoipVersion = atoi( Info_ValueForKey( si, "sv_voipVersion" ) );
 #endif
+		clc.serverGametype = atoi( Info_ValueForKey( si, "g_gametype" ) );
 	}
 
 	// Read trailer for duration (before saving frame offset)

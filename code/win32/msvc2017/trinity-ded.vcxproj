@@ -374,6 +374,10 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">true</ExcludedFromBuild>
     </CustomBuild>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\qcommon\vm_vr_state.c" />
+    <ClCompile Include="..\..\vrcommon\vr_shared_sync.c" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

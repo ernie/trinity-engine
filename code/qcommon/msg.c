@@ -573,7 +573,7 @@ usercmd_t communication
 MSG_WriteDeltaUsercmdKey
 =====================
 */
-void MSG_WriteDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, const usercmd_t *to ) {
+void MSG_WriteDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, const usercmd_t *to, int buttonBits ) {
 	if ( (unsigned)(to->serverTime - from->serverTime) < 256 ) {
 		MSG_WriteBits( msg, 1, 1 );
 		MSG_WriteBits( msg, to->serverTime - from->serverTime, 8 );
@@ -600,7 +600,7 @@ void MSG_WriteDeltaUsercmdKey( msg_t *msg, int key, const usercmd_t *from, const
 	MSG_WriteDeltaKey( msg, key, from->forwardmove, to->forwardmove, 8 );
 	MSG_WriteDeltaKey( msg, key, from->rightmove, to->rightmove, 8 );
 	MSG_WriteDeltaKey( msg, key, from->upmove, to->upmove, 8 );
-	MSG_WriteDeltaKey( msg, key, from->buttons, to->buttons, 16 );
+	MSG_WriteDeltaKey( msg, key, from->buttons, to->buttons, buttonBits );
 	MSG_WriteDeltaKey( msg, key, from->weapon, to->weapon, 8 );
 }
 

@@ -1,10 +1,105 @@
 #include "vm_local.h"
 #include "vm_vr.h"
+#include "../vrcommon/vr_shared.h"
+#if defined(__linux__)
+#include <unistd.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#endif
 
 /*
-Module selection behind the shared [vm_vr] seam: stock Quake3e, relocated
-from the pre-seam VM_Create. No VR on flatscreen: the seam funcs are inert.
+Module selection behind the shared [vm_vr] seam. Native VR fallback is an
+explicit handoff choice, never an implicit change to normal QVM selection.
 */
+
+typedef struct {
+	qboolean selected;
+	qboolean missionpack;
+} vrNativeFallback_t;
+static vrNativeFallback_t vrNative[VM_COUNT];
+
+static qboolean VM_VRNativeIndex( vmIndex_t index ) {
+	return index == VM_CGAME || index == VM_UI;
+}
+
+// Resolve the executable location, not fs_game, downloads, homepath or cwd.
+// Loading a fixed child of this directory keeps the module a bundled binary.
+static qboolean VM_VRNativePath( char *path, int size, vmIndex_t index, qboolean missionpack ) {
+	char directory[MAX_OSPATH];
+#ifdef _WIN32
+	Q_strncpyz( directory, Sys_Pwd(), sizeof( directory ) ); // GetModuleFileName-based
+	if ( !directory[0] || !directory[1] || directory[1] != ':' ) return qfalse;
+#elif defined(__linux__)
+	char *slash;
+	int length = readlink( "/proc/self/exe", directory, sizeof( directory ) - 1 );
+	if ( length <= 0 || length >= sizeof( directory ) - 1 ) return qfalse;
+	directory[length] = '\0';
+	slash = strrchr( directory, '/' );
+	if ( !slash ) return qfalse;
+	*slash = '\0';
+#elif defined(__APPLE__)
+	char *slash;
+	uint32_t length = sizeof( directory );
+	if ( _NSGetExecutablePath( directory, &length ) != 0 || directory[0] != '/' ) return qfalse;
+	slash = strrchr( directory, '/' );
+	if ( !slash ) return qfalse;
+	*slash = '\0';
+#else
+	return qfalse;
+#endif
+	return Com_sprintf( path, size, "%s/trinity-native/%s/%s" ARCH_STRING DLL_EXT,
+		directory, missionpack ? "missionpack" : "baseq3", index == VM_CGAME ? "cgame" : "ui" ) < size;
+}
+
+void VM_VRCancelNativeFallback( vmIndex_t index ) {
+	vrNativeFallback_t *fallback;
+	if ( !VM_VRNativeIndex( index ) ) return;
+	fallback = &vrNative[index];
+	memset( fallback, 0, sizeof( *fallback ) );
+}
+
+// Each caller owns this reference. Preflight releases it immediately; VM_Create
+// keeps its fresh reference until the ordinary VM_Free path unloads it.
+static void *VM_VRLoadNativeFallback( vmIndex_t index, qboolean missionpack,
+	vmMainFunc_t *main, dllEntry_t *entry ) {
+	char path[MAX_OSPATH];
+	void *handle;
+	int (QDECL *api)(void);
+	int version;
+	if ( !VM_VRNativePath( path, sizeof( path ), index, missionpack ) ) return NULL;
+	handle = Sys_LoadLibrary( path );
+	if ( !handle ) {
+		Com_Printf( "VR fallback is unavailable: %s\n", path );
+		return NULL;
+	}
+	*entry = (dllEntry_t)Sys_LoadFunction( handle, "dllEntry" );
+	*main = (vmMainFunc_t)Sys_LoadFunction( handle, "vmMain" );
+	api = (int (QDECL *)(void))Sys_LoadFunction( handle, "TrinityVRAPI" );
+	version = api ? api() : 0;
+	if ( !*entry || !*main || version != ( ( VR_API_MAJOR << 16 ) | VR_API_MINOR ) ) {
+		Com_Printf( "VR fallback has no compatible VR ABI: %s\n", path );
+		Sys_UnloadLibrary( handle );
+		return NULL;
+	}
+	return handle;
+}
+
+qboolean VM_VRPrepareNativeFallback( vmIndex_t index, qboolean qvmOnly, qboolean missionpack ) {
+	void *handle;
+	vmMainFunc_t main;
+	dllEntry_t entry;
+	if ( !VM_VRNativeIndex( index ) || qvmOnly || Cvar_VariableIntegerValue( "fs_restrict" ) ) return qfalse;
+	VM_VRCancelNativeFallback( index );
+	handle = VM_VRLoadNativeFallback( index, missionpack, &main, &entry );
+	if ( !handle ) return qfalse;
+	Sys_UnloadLibrary( handle );
+	vrNative[index].missionpack = missionpack;
+	return qtrue;
+}
+
+void VM_VRSetNativeFallback( vmIndex_t index, qboolean enabled ) {
+	if ( VM_VRNativeIndex( index ) ) vrNative[index].selected = enabled;
+}
 
 // the shared vm.c unloads native modules through this wrapper; map it onto Sys_UnloadLibrary
 void Sys_UnloadDll( void *dllHandle ) {
@@ -58,6 +153,29 @@ static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllS
 
 qboolean VM_VRSelectModule( vm_t *vm, vmInterpret_t *interpret, qboolean qvmOnly, vmHeader_t **header ) {
 	*header = NULL;
+	if ( VM_VRNativeIndex( vm->index ) && vrNative[vm->index].selected ) {
+		vrNativeFallback_t *fallback = &vrNative[vm->index];
+		dllEntry_t entry;
+		vmMainFunc_t main;
+		void *handle;
+		// Recheck at consumption: a prepare from an earlier connection grants
+		// no permission to substitute native code on a later pure connection.
+		if ( qvmOnly || Cvar_VariableIntegerValue( "fs_restrict" ) ) {
+			Com_Printf( "%s: native VR fallback blocked by pure/restricted policy\n", vm->name );
+			return qfalse;
+		}
+		handle = VM_VRLoadNativeFallback( vm->index, fallback->missionpack, &main, &entry );
+		if ( !handle ) return qfalse;
+		vm->dllHandle = handle;
+		vm->entryPoint = main;
+		vm->privateFlag = 0;
+		vm->dataAlloc = vm->dataMask = ~0U;
+		vm->dataBase = NULL;
+		entry( vm->dllSyscall );
+		Com_Printf( "%s: using bundled native VR fallback (VR API %d.%d), trinity-native/%s\n",
+			vm->name, VR_API_MAJOR, VR_API_MINOR, fallback->missionpack ? "missionpack" : "baseq3" );
+		return qtrue;
+	}
 
 	// never allow dll loading with a demo
 	if ( *interpret == VMI_NATIVE ) {
@@ -84,32 +202,37 @@ qboolean VM_VRSelectModule( vm_t *vm, vmInterpret_t *interpret, qboolean qvmOnly
 	// a QVM can't run native; execute under the JIT
 	if ( *interpret == VMI_NATIVE )
 		*interpret = VMI_COMPILED;
-	// load the qvm: FS-priority winner, any QVM, no inspection
+	// Load the FS-priority winner; sentinel inspection never changes selection.
 	*header = VM_LoadQVM( vm, qtrue );
-	return ( *header != NULL ) ? qtrue : qfalse;
+	if ( !*header ) return qfalse;
+	if ( vm->vrSentinel )
+		Com_Printf( "%s: loaded VR-aware QVM (VR API %d.%d)\n", vm->name, VR_API_MAJOR, VR_API_MINOR );
+	else
+		Com_Printf( "%s: loaded QVM without a supported VR API marker\n", vm->name );
+	return qtrue;
 }
 
 int VM_VRLoadQVMFile( vm_t *vm, const char *filename, void **buffer ) {
-	return FS_ReadFile( filename, buffer );
-}
-
-void VM_VRModuleUnloaded( vm_t *vm ) {
-}
-
-void VM_VRCallEnter( vm_t *vm ) {
-}
-
-void VM_VRCallLeave( vm_t *vm ) {
-}
-
-void VM_RegisterVRShared( vm_t *vm, int writer, intptr_t vmAddr, int structSize, int apiMajor, int apiMinor ) {
-	Com_Error( ERR_DROP, "VM_RegisterVRShared: not a VR engine" );
-}
-
-qboolean VM_VRSentinel( vm_t *vm ) {
-	return qfalse;
-}
-
-qboolean VM_VRRegistered( vm_t *vm ) {
-	return qfalse;
+	static const char needle[] = "TRINITY_VR_API/";
+	const int needleLen = (int)sizeof( needle ) - 1;
+	const byte *data;
+	int length, i;
+	vm->vrSentinel = qfalse;
+	length = FS_ReadFile( filename, buffer );
+	if ( length < needleLen || !buffer || !*buffer ) return length;
+	data = (const byte *)*buffer;
+	// FS_ReadFile's trailing allocation byte is outside the file and not scanned.
+	for ( i = 0; i + needleLen <= length; i++ ) {
+		const char *p;
+		int major, minor = 0;
+		if ( data[i] != needle[0] || memcmp( data + i, needle, needleLen ) ) continue;
+		p = (const char *)data + i + needleLen;
+		major = atoi( p );
+		while ( p < (const char *)data + length && *p >= '0' && *p <= '9' ) p++;
+		if ( p < (const char *)data + length && *p == '.' ) minor = atoi( p + 1 );
+		// The engine runs a QVM whose major matches and whose minor it meets or exceeds.
+		if ( major == VR_API_MAJOR && minor <= VR_API_MINOR ) vm->vrSentinel = qtrue;
+		break;
+	}
+	return length;
 }

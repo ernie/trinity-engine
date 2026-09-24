@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // console.c
 
 #include "client.h"
+#include "../vrcommon/vr_state.h"
+#include "../vrcommon/vr_cvars.h"
 
 #define  DEFAULT_CONSOLE_WIDTH 78
 #define  MAX_CONSOLE_WIDTH 120
@@ -97,6 +99,12 @@ void Con_ToggleConsole_f( void ) {
 	Key_SetCatcher( Key_GetCatcher() ^ KEYCATCH_CONSOLE );
 }
 
+
+/* Controller bindings use the same Escape path as a keyboard press. */
+static void Con_ToggleMenu_f( void ) {
+	CL_KeyEvent( K_ESCAPE, qtrue, Sys_Milliseconds() );
+	CL_KeyEvent( K_ESCAPE, qfalse, Sys_Milliseconds() );
+}
 
 /*
 ================
@@ -410,6 +418,7 @@ void Con_Init( void )
 	Cmd_AddCommand( "condump", Con_Dump_f );
 	Cmd_SetCommandCompletionFunc( "condump", Cmd_CompleteTxtName );
 	Cmd_AddCommand( "toggleconsole", Con_ToggleConsole_f );
+	Cmd_AddCommand( "togglemenu", Con_ToggleMenu_f );
 	Cmd_AddCommand( "messagemode", Con_MessageMode_f );
 	Cmd_AddCommand( "messagemode2", Con_MessageMode2_f );
 	Cmd_AddCommand( "messagemode3", Con_MessageMode3_f );
@@ -427,6 +436,7 @@ void Con_Shutdown( void )
 	Cmd_RemoveCommand( "clear" );
 	Cmd_RemoveCommand( "condump" );
 	Cmd_RemoveCommand( "toggleconsole" );
+	Cmd_RemoveCommand( "togglemenu" );
 	Cmd_RemoveCommand( "messagemode" );
 	Cmd_RemoveCommand( "messagemode2" );
 	Cmd_RemoveCommand( "messagemode3" );
@@ -656,53 +666,180 @@ Con_DrawNotify
 Draws the last few lines of output transparently over the game top
 ================
 */
-static void Con_DrawNotify( void )
+/* Notify glyphs use the HUD target's pixel coordinates, independently of the
+ * framebuffer-dependent smallchar dimensions used by the flat console. */
+static void Con_DrawNotifyCharVR(float x, float y, float scale, int ch)
 {
-	int		x, v;
-	short	*text;
-	int		i;
-	int		time;
-	int		skip;
-	int		currentColorIndex;
-	int		colorIndex;
+	float s, t;
+	ch &= 255;
+	if (ch == ' ' || !ch) return;
+	s = (ch & 15) * 0.0625f;
+	t = (ch >> 4) * 0.0625f;
+	re.DrawStretchPic((int)x, (int)y, (int)(SMALLCHAR_WIDTH * scale),
+		(int)(SMALLCHAR_HEIGHT * scale), s, t, s + 0.0625f, t + 0.0625f,
+		cls.charSetShader);
+}
 
-	currentColorIndex = ColorIndex( COLOR_WHITE );
-	re.SetColor( g_color_table[ currentColorIndex ] );
+/* Match the static in-world HUD transform without changing global screen
+ * coordinates (menus and the solid console have different requirements). */
+static void Con_AdjustNotifyVR(float *x, float *y)
+{
+	float scale, tanUp, tanDown, tanHeight, opticalOffset = 0.0f;
+	if (vr.virtual_screen) {
+		SCR_AdjustFrom640(x, y, NULL, NULL);
+		return;
+	}
+	scale = cls.glconfig.vidWidth / 640.0f / 2.25f;
+	tanUp = tanf(vr.fov_angle_up);
+	tanDown = tanf(vr.fov_angle_down);
+	tanHeight = tanUp - tanDown;
+	if (fabsf(tanHeight) > 0.001f)
+		opticalOffset = 240.0f * (tanUp + tanDown) / tanHeight * scale;
+	*x = *x * scale + (cls.glconfig.vidWidth - 640.0f * scale) / 2.0f;
+	*y = *y * scale + (cls.glconfig.vidHeight - 480.0f * scale) / 2.0f + opticalOffset;
+}
 
-	v = 0;
-	for (i= con.current-NUM_CON_TIMES+1 ; i<=con.current ; i++)
-	{
-		if (i < 0)
+typedef void (*conGlyphFn_t)( int column, int row, int ch, void *ctx );
+
+/* Skips entirely while the UI or cgame owns the screen outside intermission. */
+static int Con_VisibleNotifyLines( const short *lines[NUM_CON_TIMES] ) {
+	int i, count = 0;
+	if ( cl.snap.ps.pm_type != PM_INTERMISSION && ( Key_GetCatcher() & ( KEYCATCH_UI | KEYCATCH_CGAME ) ) )
+		return 0;
+	for ( i = con.current - NUM_CON_TIMES + 1; i <= con.current; i++ ) {
+		int time;
+		if ( i < 0 )
 			continue;
 		time = con.times[i % NUM_CON_TIMES];
-		if (time == 0)
+		if ( time == 0 )
 			continue;
-		time = cls.realtime - time;
-		if ( time >= con_notifytime->value*1000 )
+		if ( cls.realtime - time >= con_notifytime->value * 1000 )
 			continue;
-		text = con.text + (i % con.totallines)*con.linewidth;
+		lines[count++] = con.text + ( i % con.totallines ) * con.linewidth;
+	}
+	return count;
+}
 
-		if (cl.snap.ps.pm_type != PM_INTERMISSION && Key_GetCatcher( ) & (KEYCATCH_UI | KEYCATCH_CGAME) ) {
+static void Con_WalkNotifyGlyphs( const short *text, int start, int end, int row, conGlyphFn_t fn, void *ctx, int *currentColor ) {
+	int x;
+	for ( x = start; x < end; x++ ) {
+		int colorIndex;
+		if ( ( text[x] & 0xff ) == ' ' || !( text[x] & 0xff ) )
 			continue;
+		colorIndex = ( text[x] >> 8 ) & 63;
+		if ( *currentColor != colorIndex ) {
+			*currentColor = colorIndex;
+			re.SetColor( g_color_table[colorIndex] );
 		}
+		fn( x, row, text[x] & 0xff, ctx );
+	}
+}
 
-		for (x = 0 ; x < con.linewidth ; x++) {
-			if ( ( text[x] & 0xff ) == ' ' ) {
-				continue;
+typedef struct {
+	float scale;   // pixels per 640x480 unit
+	float x0;
+	float y;
+	int start;
+} conVRGlyph_t;
+
+static void Con_VRNotifyGlyph( int column, int row, int ch, void *ctx ) {
+	const conVRGlyph_t *g = ctx;
+	float x = g->x0 + ( column - g->start + 1 ) * SMALLCHAR_WIDTH * g->scale;
+	Con_DrawNotifyCharVR( x, g->y, g->scale, ch );
+}
+
+static int Con_DrawNotifyVR(void)
+{
+	typedef struct { const short *text; int start, end; } notifySegment_t;
+	notifySegment_t segments[NUM_CON_TIMES];
+	int i, end, start, stop, space, count = 0, v = 0;
+	int mode = vr_currentHudDrawStatus ? vr_currentHudDrawStatus->integer : 1;
+	int currentColor = ColorIndex(COLOR_WHITE);
+	const int maxChars = 510 / SMALLCHAR_WIDTH;
+	float scale = con_scale ? con_scale->value : 2.0f;
+	float xadjust = 10.0f, yadjust = 10.0f, offset = 0.0f;
+	const short *text;
+	conVRGlyph_t glyph;
+	const short *lines[NUM_CON_TIMES];
+	int lineCount, n;
+	if (vr.weapon_zoomed || mode == 0 ||
+		(vr_showConsoleMessages && !vr_showConsoleMessages->integer) ||
+		!re.HUDBufferStart || !re.HUDBufferEnd) return 0;
+	if (mode == 2) {
+		scale = vr.virtual_screen ? scale * 1.5f : scale / 1.5f;
+		Con_AdjustNotifyVR(&xadjust, &yadjust);
+	}
+	if (cl_conXOffset->integer > 0) {
+		offset = cl_conXOffset->integer * (mode == 1 ? 2.0f : cls.glconfig.vidWidth / 640.0f);
+		if (mode == 2 && !vr.virtual_screen) offset /= 2.25f;
+	}
+	lineCount = Con_VisibleNotifyLines( lines );
+	for (n = 0; n < lineCount; ++n) {
+		text = lines[n];
+		end = con.linewidth;
+		while (end > 0 && ((text[end - 1] & 255) == ' ' || !(text[end - 1] & 255))) --end;
+		for (start = 0; start < end; start = stop) {
+			stop = start + maxChars;
+			if (stop >= end) stop = end;
+			else {
+				for (space = stop; space > start && (text[space] & 255) != ' ' &&
+					(text[space] & 255); --space) {}
+				if (space > start) stop = space + 1;
 			}
-			colorIndex = ( text[x] >> 8 ) & 63;
-			if ( currentColorIndex != colorIndex ) {
-				currentColorIndex = colorIndex;
-				re.SetColor( g_color_table[ colorIndex ] );
-			}
-			SCR_DrawSmallChar( cl_conXOffset->integer + con.xadjust + (x+1)*smallchar_width, v, text[x] & 0xff );
+			segments[count % NUM_CON_TIMES].text = text;
+			segments[count % NUM_CON_TIMES].start = start;
+			segments[count % NUM_CON_TIMES].end = stop;
+			++count;
 		}
+	}
+	if (!count) return 0;
+	re.HUDBufferStart(qfalse);
+	re.SetColor(g_color_table[currentColor]);
+	glyph.scale = scale;
+	glyph.x0 = offset + con.xadjust + xadjust;
+	for (i = count > NUM_CON_TIMES ? count - NUM_CON_TIMES : 0; i < count; ++i) {
+		notifySegment_t *segment = &segments[i % NUM_CON_TIMES];
+		glyph.start = segment->start;
+		glyph.y = v + yadjust;
+		Con_WalkNotifyGlyphs( segment->text, segment->start, segment->end, v, Con_VRNotifyGlyph, &glyph, &currentColor );
+		v += SMALLCHAR_HEIGHT * scale;
+	}
+	re.SetColor(NULL);
+	re.HUDBufferEnd();
+	/* The common chat path expects framebuffer pixels before its 480 rescale. */
+	return mode == 1 ? (int)(v * cls.glconfig.vidHeight / 960.0f) : v;
+}
 
-		v += smallchar_height;
+static void Con_FlatNotifyGlyph( int column, int row, int ch, void *ctx ) {
+	SCR_DrawSmallChar( cl_conXOffset->integer + con.xadjust + (column + 1) * smallchar_width, row, ch );
+}
+
+static void Con_DrawNotify( void )
+{
+	int		v;
+	int		skip;
+	int		currentColorIndex;
+
+	if (VR_IsActiveMode()) {
+		if (vr.weapon_zoomed) return;
+		v = Con_DrawNotifyVR();
+		goto drawChat;
 	}
 
-	re.SetColor( NULL );
+	{
+		const short *lines[NUM_CON_TIMES];
+		int count = Con_VisibleNotifyLines( lines ), n;
+		currentColorIndex = ColorIndex( COLOR_WHITE );
+		re.SetColor( g_color_table[currentColorIndex] );
+		v = 0;
+		for ( n = 0; n < count; n++ ) {
+			Con_WalkNotifyGlyphs( lines[n], 0, con.linewidth, v, Con_FlatNotifyGlyph, NULL, &currentColorIndex );
+			v += smallchar_height;
+		}
+		re.SetColor( NULL );
+	}
 
+drawChat:
 	if ( Key_GetCatcher() & (KEYCATCH_UI | KEYCATCH_CGAME) ) {
 		return;
 	}
@@ -763,14 +900,11 @@ static void Con_DrawSolidConsole( float frac ) {
 	if ( lines > cls.glconfig.vidHeight )
 		lines = cls.glconfig.vidHeight;
 
-	wf = SCREEN_WIDTH;
-
-	// draw the background
-	yf = frac * SCREEN_HEIGHT;
-
-	// on wide screens, we will center the text
+	// Console glyphs use framebuffer pixels. Keep the background and border
+	// in that same space; the virtual-screen compositor crops them together.
+	wf = cls.glconfig.vidWidth;
+	yf = lines;
 	con.xadjust = 0;
-	SCR_AdjustFrom640( &con.xadjust, &yf, &wf, NULL );
 
 	if ( yf < 1.0 ) {
 		yf = 0;

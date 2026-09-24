@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // tr_init.c -- functions that are not called every frame
 
 #include "tr_local.h"
+#include "vk_xr.h"
 
 glconfig_t	glConfig;
 
@@ -114,6 +115,7 @@ cvar_t	*r_norefresh;
 cvar_t	*r_drawentities;
 cvar_t	*r_drawworld;
 cvar_t	*r_speeds;
+cvar_t *r_gpuTimeLog;
 cvar_t	*r_fullbright;
 cvar_t	*r_novis;
 cvar_t	*r_nocull;
@@ -596,6 +598,10 @@ static void InitOpenGL( void )
 
 		ri.GLimp_InitGamma( &glConfig );
 
+		if ( VK_XR_Enabled() ) {
+			// The desktop gamma ramp never reaches the headset
+			glConfig.deviceSupportsGamma = qfalse;
+		}
 		gls.deviceSupportsGamma = glConfig.deviceSupportsGamma;
 
 		if ( r_ignorehwgamma->integer )
@@ -1079,6 +1085,13 @@ static void R_ScreenShot_f( void ) {
 	qboolean	silent;
 	int			typeMask;
 	const char	*ext;
+
+#ifdef USE_VULKAN
+	if ( vk.xrDirect ) {
+		ri.Printf( PRINT_WARNING, "Screenshots read the scene framebuffer; set \\r_fbo 1 and \\vid_restart to take one\n" );
+		return;
+	}
+#endif
 
 	if ( ri.CL_IsMinimized() && !RE_CanMinimize() ) {
 		ri.Printf( PRINT_WARNING, "WARNING: unable to take screenshot when minimized because FBO is not available/enabled.\n" );
@@ -1714,6 +1727,8 @@ static void R_Register( void )
 	r_showcluster = ri.Cvar_Get ("r_showcluster", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_showcluster, "Shows current cluster index." );
 	r_speeds = ri.Cvar_Get ("r_speeds", "0", CVAR_CHEAT);
+	r_gpuTimeLog = ri.Cvar_Get( "r_gpuTimeLog", "0", CVAR_TEMP );
+	ri.Cvar_SetDescription( r_gpuTimeLog, "GPU eye/HUD milliseconds, excluding desktop mirror. Window in frames (1..4096); 0 disables queries. Reports median/p99/max." );
 	ri.Cvar_SetDescription( r_speeds, "Prints out various debugging stats from PVS:\n 0: Disabled\n 1: Backend BSP\n 2: Frontend grid culling\n 3: Current view cluster index\n 4: Dynamic lighting\n 5: zFar clipping\n 6: Flares" );
 	r_debugSurface = ri.Cvar_Get ("r_debugSurface", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_debugSurface, "Backend visual debugging tool for bezier mesh surfaces." );
@@ -1814,7 +1829,9 @@ static void R_Register( void )
 	r_device->modified = qfalse;
 
 	r_fbo = ri.Cvar_Get( "r_fbo", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
-	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary video size and screenshot/video capture.\n Required for bloom, HDR rendering, anti-aliasing and greyscale effects." );
+	ri.Cvar_CheckRange( r_fbo, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary video size and screenshot/video capture.\n Required for bloom, HDR rendering, anti-aliasing and greyscale effects.\n"
+		" In VR, 0 draws straight into the headset swapchain image: no overbright (multi-stage surfaces and blends look different), no bloom, \\r_greyscale, \\r_dither, \\r_presentBits, \\r_hdr, HDR mirror output, screenshots or video capture; \\r_gamma is baked into textures at load, so it needs a \\vid_restart. There \\r_ext_multisample works without the framebuffer, resolving into the swapchain, and the desktop mirror shows the headset image unprocessed." );
 	r_hdr = ri.Cvar_Get( "r_hdr", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_SetDescription(r_hdr, "Enables high dynamic range frame buffer texture format. Requires \\r_fbo 1.\n -1: 4-bit, for testing purposes, heavy color banding, might not work on all systems\n  0: 8 bit, default, moderate color banding with multi-stage shaders\n  1: 16 bit, enhanced blending precision, no color banding, might decrease performance on AMD / Intel GPUs\n" );
 
@@ -1980,6 +1997,7 @@ void R_Init( void ) {
 	InitOpenGL();
 
 	R_InitImages();
+	vk_hud_init();
 
 	VarInfo();
 
@@ -2043,7 +2061,7 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	//}
 
 #ifdef USE_VULKAN
-	vk_release_resources();
+	if ( vk.device ) vk_release_resources();
 #endif
 
 	R_DoneFreeType();
@@ -2058,6 +2076,11 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	if ( code != REF_KEEP_CONTEXT ) {
 #ifdef USE_VULKAN
 		vk_shutdown( code );
+		if ( code == REF_KEEP_WINDOW ) {
+			glConfig.vidWidth = gls.captureWidth * (r_ext_supersample->integer ? 2 : 1);
+			glConfig.vidHeight = gls.captureHeight * (r_ext_supersample->integer ? 2 : 1);
+			glConfig.windowAspect = (float)gls.windowWidth / gls.windowHeight;
+		}
 
 		Com_Memset( &glState, 0, sizeof( glState ) );
 
@@ -2181,6 +2204,20 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.VertexLighting = RE_VertexLighting;
 	re.SyncRender = RE_SyncRender;
 	re.ProjectDecal = RE_ProjectDecal;
+	re.XRPrepareInit = VK_XR_PrepareInit;
+	re.XRSetActive = VK_XR_SetActive;
+	re.XRBeginFrame = VK_XR_BeginFrame;
+	re.XREndFrame = VK_XR_EndFrame;
+	re.XRStatus = VK_XR_Status;
+	re.XRLastError = VK_XR_LastError;
+	re.XRHaptic = VK_XR_Haptic;
+	re.XRSetVirtualScreen = VK_XR_SetVirtualScreen;
+	re.XRSetZoom = VK_XR_SetZoom;
+	re.XRResolutionChanged = VK_XR_ResolutionChanged;
+	re.DesktopTrackingStatus = VK_DesktopTrackingStatus;
+	re.SceneComplete = RE_FinishBloom;
+	re.HUDBufferStart = RE_HUDBufferStart;
+	re.HUDBufferEnd = RE_HUDBufferEnd;
 	re.ClearDecals = RE_ClearDecals;
 	re.AddSpritePolyToScene = RE_AddSpritePolyToScene;
 	re.AddPolysToScene2 = RE_AddPolysToScene2;

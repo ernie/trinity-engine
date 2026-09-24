@@ -1,0 +1,107 @@
+vert color_vert_spv  color.vert mv
+vert dot_vert_spv    dot.vert mv
+vert fog_vert_spv    fog.vert mv
+vert gamma_vert_spv  gamma.vert -
+frag blend_frag_spv  blend.frag mv
+frag bloom_frag_spv  bloom.frag mv
+frag blur_frag_spv   blur.frag mv
+frag color_frag_spv  color.frag -
+frag dot_frag_spv    dot.frag mv
+frag floor_grid_frag_spv floor_grid.frag -
+frag virtualscreen_frag_spv virtualscreen.frag -
+frag fog_frag_spv    fog.frag -
+frag gamma_frag_spv  gamma.frag mv+array
+frag foveationdebug_frag_spv foveationdebug.frag -
+vert vert_light          light_vert.tmpl mv
+vert vert_light_fog      light_vert.tmpl mv -DUSE_FOG
+frag frag_light          light_frag.tmpl - -DUSE_EMISSIVE
+frag frag_light_fog      light_frag.tmpl - -DUSE_FOG -DUSE_EMISSIVE
+frag frag_light_line     light_frag.tmpl - -DUSE_LINE -DUSE_EMISSIVE
+frag frag_light_line_fog light_frag.tmpl - -DUSE_LINE -DUSE_FOG -DUSE_EMISSIVE
+vert vert_tx0                gen_vert.tmpl mv
+vert vert_tx0_overbright     gen_vert.tmpl mv -DUSE_OVERBRIGHT
+vert vert_tx0_overbright_fog gen_vert.tmpl mv -DUSE_OVERBRIGHT -DUSE_FOG
+vert vert_tx0_fog            gen_vert.tmpl mv -DUSE_FOG
+vert vert_tx0_env            gen_vert.tmpl mv -DUSE_ENV
+vert vert_tx0_env_fog        gen_vert.tmpl mv -DUSE_FOG -DUSE_ENV
+vert vert_tx0_ident1         gen_vert.tmpl mv -DUSE_CLX_IDENT
+vert vert_tx0_ident1_fog     gen_vert.tmpl mv -DUSE_CLX_IDENT -DUSE_FOG
+vert vert_tx0_ident1_env     gen_vert.tmpl mv -DUSE_CLX_IDENT -DUSE_ENV
+vert vert_tx0_ident1_env_fog gen_vert.tmpl mv -DUSE_CLX_IDENT -DUSE_FOG -DUSE_ENV
+vert vert_tx0_fixed          gen_vert.tmpl mv -DUSE_FIXED_COLOR
+vert vert_tx0_fixed_fog      gen_vert.tmpl mv -DUSE_FIXED_COLOR -DUSE_FOG
+vert vert_tx0_fixed_env      gen_vert.tmpl mv -DUSE_FIXED_COLOR -DUSE_ENV
+vert vert_tx0_fixed_env_fog  gen_vert.tmpl mv -DUSE_FIXED_COLOR -DUSE_FOG -DUSE_ENV
+vert vert_tx1                gen_vert.tmpl mv -DUSE_TX1
+vert vert_tx1_fog            gen_vert.tmpl mv -DUSE_TX1 -DUSE_FOG
+vert vert_tx1_env            gen_vert.tmpl mv -DUSE_TX1 -DUSE_ENV
+vert vert_tx1_env_fog        gen_vert.tmpl mv -DUSE_TX1 -DUSE_FOG -DUSE_ENV
+vert vert_tx1_ident1         gen_vert.tmpl mv -DUSE_CLX_IDENT -DUSE_TX1
+vert vert_tx1_ident1_fog     gen_vert.tmpl mv -DUSE_CLX_IDENT -DUSE_TX1 -DUSE_FOG
+vert vert_tx1_ident1_env     gen_vert.tmpl mv -DUSE_CLX_IDENT -DUSE_TX1 -DUSE_ENV
+vert vert_tx1_ident1_env_fog gen_vert.tmpl mv -DUSE_CLX_IDENT -DUSE_TX1 -DUSE_FOG -DUSE_ENV
+vert vert_tx1_fixed          gen_vert.tmpl mv -DUSE_FIXED_COLOR -DUSE_TX1
+vert vert_tx1_fixed_fog      gen_vert.tmpl mv -DUSE_FIXED_COLOR -DUSE_TX1 -DUSE_FOG
+vert vert_tx1_fixed_env      gen_vert.tmpl mv -DUSE_FIXED_COLOR -DUSE_TX1 -DUSE_ENV
+vert vert_tx1_fixed_env_fog  gen_vert.tmpl mv -DUSE_FIXED_COLOR -DUSE_TX1 -DUSE_FOG -DUSE_ENV
+vert vert_tx1_cl             gen_vert.tmpl mv -DUSE_CL1 -DUSE_TX1
+vert vert_tx1_cl_fog         gen_vert.tmpl mv -DUSE_CL1 -DUSE_TX1 -DUSE_FOG
+vert vert_tx1_cl_env         gen_vert.tmpl mv -DUSE_CL1 -DUSE_TX1 -DUSE_ENV
+vert vert_tx1_cl_env_fog     gen_vert.tmpl mv -DUSE_CL1 -DUSE_TX1 -DUSE_ENV -DUSE_FOG
+vert vert_tx2                gen_vert.tmpl mv -DUSE_TX2
+vert vert_tx2_fog            gen_vert.tmpl mv -DUSE_TX2 -DUSE_FOG
+vert vert_tx2_env            gen_vert.tmpl mv -DUSE_TX2 -DUSE_ENV
+vert vert_tx2_env_fog        gen_vert.tmpl mv -DUSE_TX2 -DUSE_ENV -DUSE_FOG
+vert vert_tx2_cl             gen_vert.tmpl mv -DUSE_CL2 -DUSE_TX2
+vert vert_tx2_cl_fog         gen_vert.tmpl mv -DUSE_CL2 -DUSE_TX2 -DUSE_FOG
+vert vert_tx2_cl_env         gen_vert.tmpl mv -DUSE_CL2 -DUSE_TX2 -DUSE_ENV
+vert vert_tx2_cl_env_fog     gen_vert.tmpl mv -DUSE_CL2 -DUSE_TX2 -DUSE_ENV -DUSE_FOG
+frag frag_tx0                gen_frag.tmpl - -DUSE_ATEST -DUSE_EMISSIVE
+frag frag_tx0_overbright     gen_frag.tmpl - -DUSE_ATEST -DUSE_OVERBRIGHT -DUSE_EMISSIVE
+frag frag_tx0_overbright_fog gen_frag.tmpl - -DUSE_ATEST -DUSE_OVERBRIGHT -DUSE_FOG -DUSE_EMISSIVE
+frag frag_tx0_fog            gen_frag.tmpl - -DUSE_ATEST -DUSE_FOG -DUSE_EMISSIVE
+frag frag_tx0_ident1         gen_frag.tmpl - -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_EMISSIVE
+frag frag_tx0_ident1_fog     gen_frag.tmpl - -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_FOG -DUSE_EMISSIVE
+frag frag_tx0_fixed          gen_frag.tmpl - -DUSE_FIXED_COLOR -DUSE_ATEST -DUSE_EMISSIVE
+frag frag_tx0_fixed_fog      gen_frag.tmpl - -DUSE_FIXED_COLOR -DUSE_ATEST -DUSE_FOG -DUSE_EMISSIVE
+frag frag_tx0_ent            gen_frag.tmpl - -DUSE_ENT_COLOR -DUSE_ATEST -DUSE_EMISSIVE
+frag frag_tx0_ent_fog        gen_frag.tmpl - -DUSE_ENT_COLOR -DUSE_ATEST -DUSE_FOG -DUSE_EMISSIVE
+frag frag_tx0_df             gen_frag.tmpl - -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_DF
+frag frag_tx1                gen_frag.tmpl - -DUSE_TX1 -DUSE_EMISSIVE
+frag frag_tx1_fog            gen_frag.tmpl - -DUSE_TX1 -DUSE_FOG -DUSE_EMISSIVE
+frag frag_tx1_ident1         gen_frag.tmpl - -DUSE_CLX_IDENT -DUSE_TX1 -DUSE_EMISSIVE
+frag frag_tx1_ident1_fog     gen_frag.tmpl - -DUSE_CLX_IDENT -DUSE_TX1 -DUSE_FOG -DUSE_EMISSIVE
+frag frag_tx1_fixed          gen_frag.tmpl - -DUSE_FIXED_COLOR -DUSE_TX1 -DUSE_EMISSIVE
+frag frag_tx1_fixed_fog      gen_frag.tmpl - -DUSE_FIXED_COLOR -DUSE_TX1 -DUSE_FOG -DUSE_EMISSIVE
+frag frag_tx1_cl             gen_frag.tmpl - -DUSE_CL1 -DUSE_TX1 -DUSE_EMISSIVE
+frag frag_tx1_cl_fog         gen_frag.tmpl - -DUSE_CL1 -DUSE_TX1 -DUSE_FOG -DUSE_EMISSIVE
+frag frag_tx2                gen_frag.tmpl - -DUSE_TX2 -DUSE_EMISSIVE
+frag frag_tx2_fog            gen_frag.tmpl - -DUSE_TX2 -DUSE_FOG -DUSE_EMISSIVE
+frag frag_tx2_cl             gen_frag.tmpl - -DUSE_CL2 -DUSE_TX2 -DUSE_EMISSIVE
+frag frag_tx2_cl_fog         gen_frag.tmpl - -DUSE_CL2 -DUSE_TX2 -DUSE_FOG -DUSE_EMISSIVE
+frag frag_light_ne              light_frag.tmpl -
+frag frag_light_fog_ne          light_frag.tmpl - -DUSE_FOG
+frag frag_light_line_ne         light_frag.tmpl - -DUSE_LINE
+frag frag_light_line_fog_ne     light_frag.tmpl - -DUSE_LINE -DUSE_FOG
+frag frag_tx0_ne                gen_frag.tmpl - -DUSE_ATEST
+frag frag_tx0_overbright_ne     gen_frag.tmpl - -DUSE_ATEST -DUSE_OVERBRIGHT
+frag frag_tx0_overbright_fog_ne gen_frag.tmpl - -DUSE_ATEST -DUSE_OVERBRIGHT -DUSE_FOG
+frag frag_tx0_fog_ne            gen_frag.tmpl - -DUSE_ATEST -DUSE_FOG
+frag frag_tx0_ident1_ne         gen_frag.tmpl - -DUSE_CLX_IDENT -DUSE_ATEST
+frag frag_tx0_ident1_fog_ne     gen_frag.tmpl - -DUSE_CLX_IDENT -DUSE_ATEST -DUSE_FOG
+frag frag_tx0_fixed_ne          gen_frag.tmpl - -DUSE_FIXED_COLOR -DUSE_ATEST
+frag frag_tx0_fixed_fog_ne      gen_frag.tmpl - -DUSE_FIXED_COLOR -DUSE_ATEST -DUSE_FOG
+frag frag_tx0_ent_ne            gen_frag.tmpl - -DUSE_ENT_COLOR -DUSE_ATEST
+frag frag_tx0_ent_fog_ne        gen_frag.tmpl - -DUSE_ENT_COLOR -DUSE_ATEST -DUSE_FOG
+frag frag_tx1_ne                gen_frag.tmpl - -DUSE_TX1
+frag frag_tx1_fog_ne            gen_frag.tmpl - -DUSE_TX1 -DUSE_FOG
+frag frag_tx1_ident1_ne         gen_frag.tmpl - -DUSE_CLX_IDENT -DUSE_TX1
+frag frag_tx1_ident1_fog_ne     gen_frag.tmpl - -DUSE_CLX_IDENT -DUSE_TX1 -DUSE_FOG
+frag frag_tx1_fixed_ne          gen_frag.tmpl - -DUSE_FIXED_COLOR -DUSE_TX1
+frag frag_tx1_fixed_fog_ne      gen_frag.tmpl - -DUSE_FIXED_COLOR -DUSE_TX1 -DUSE_FOG
+frag frag_tx1_cl_ne             gen_frag.tmpl - -DUSE_CL1 -DUSE_TX1
+frag frag_tx1_cl_fog_ne         gen_frag.tmpl - -DUSE_CL1 -DUSE_TX1 -DUSE_FOG
+frag frag_tx2_ne                gen_frag.tmpl - -DUSE_TX2
+frag frag_tx2_fog_ne            gen_frag.tmpl - -DUSE_TX2 -DUSE_FOG
+frag frag_tx2_cl_ne             gen_frag.tmpl - -DUSE_CL2 -DUSE_TX2
+frag frag_tx2_cl_fog_ne         gen_frag.tmpl - -DUSE_CL2 -DUSE_TX2 -DUSE_FOG

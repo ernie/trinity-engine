@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_types.h"
 #include "vulkan/vulkan.h"
 
-#define	REF_API_VERSION		9
+#define	REF_API_VERSION		14
 
 //
 // these are the functions exported by the refresh module
@@ -134,6 +134,23 @@ typedef struct {
 	// mirrors and mirror-only ones out of the main view
 	void	(*AddPolysToScene2)( qhandle_t hShader, int numVerts, const polyVert_t *verts, int num, int renderfx );
 
+
+	qboolean (*XRPrepareInit)( qboolean enabled );
+	qboolean (*XRSetActive)( qboolean active );
+	int (*XRBeginFrame)( refXRFrame_t *frame );
+	int (*XREndFrame)( void );
+	int (*XRStatus)( void ); // 0 absent, 1 initialized, 2 active, -1 lost
+	const char *(*XRLastError)( void );
+	qboolean (*XRHaptic)( int hand, float amplitude, int durationMs );
+	void (*XRSetVirtualScreen)( qboolean enabled, refXRFrame_t *frame );
+	void (*XRSetZoom)( qboolean zoomed, float *level );
+	void (*SceneComplete)( void );
+	void (*HUDBufferStart)( qboolean clear );
+	void (*HUDBufferEnd)( void );
+
+	/* Query between frames; changed logical eye dimensions require vid_restart. */
+	qboolean (*XRResolutionChanged)( void );
+	void (*DesktopTrackingStatus)( qboolean visible, qhandle_t font, qhandle_t icon );
 } refexport_t;
 
 //

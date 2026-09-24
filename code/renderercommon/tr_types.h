@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //
 #ifndef __TR_TYPES_H
 #define __TR_TYPES_H
+#include "../vrcommon/vr_input_types.h"
+#include "../vrcommon/vr_screen_geometry.h"
 
 #define MAX_VIDEO_HANDLES	16
 
@@ -38,6 +40,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 										// projection matrix won't be hacked to reduce the stereo separation as
 										// is done for the gun.
 
+#define RF_OVERBRIGHT       0x0020      // compensate model identity-light dimming
+
 #define	RF_NOSHADOW			0x0040		// don't add stencil shadows
 
 #define RF_LIGHTING_ORIGIN	0x0080		// use refEntity->lightingOrigin instead of refEntity->origin
@@ -48,10 +52,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	RF_SHADOW_PLANE		0x0100		// use refEntity->shadowPlane
 #define	RF_WRAP_FRAMES		0x0200		// mod the model frames by the maxframes to allow continuous
 										// animation without needing to know the frame count
-										// 0x0400 is RF_WORLD_ORIENTED in the VR clients (q3vr, ioq3quest)
+#define RF_WORLD_ORIENTED 0x0400    // sprite uses entity axes (VR panel)
 #define	RF_ANIMFRAME		0x0800		// index animMap by refEntity->frame, not time (caller-driven)
 #define	RF_VIEW_ORIENTED	0x1000		// sprite on the raw view axes, not the horizon-locked default
-										// (same bit as the VR clients)
 
 // refdef flags
 #define RDF_NOWORLDMODEL	0x0001		// used for player configuration screen
@@ -62,6 +65,19 @@ typedef struct {
 	float		st[2];
 	color4ub_t	modulate;
 } polyVert_t;
+
+typedef struct {
+	float position[3]; // meters, OpenXR coordinates
+	float orientation[4]; // x,y,z,w
+	float fov[4]; // left, right, up, down angles in radians
+} refXREye_t;
+typedef struct {
+	qboolean running, focused, renderable;
+	refXREye_t head; // center pose; FOV fields unused
+	refXREye_t eyes[2];
+	clXRInputSample_t input;
+	vrScreenGeometry_t screen;
+} refXRFrame_t;
 
 typedef struct poly_s {
 	qhandle_t			hShader;
@@ -79,6 +95,7 @@ typedef enum {
 	RT_LIGHTNING,
 	RT_PORTALSURFACE,		// doesn't draw anything, just info for portals
 
+	RT_LASERSIGHT,			// VR API value 8
 	RT_MAX_REF_ENTITY_TYPE
 } refEntityType_t;
 

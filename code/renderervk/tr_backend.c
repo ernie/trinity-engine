@@ -20,6 +20,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "tr_local.h"
+#include "vk_xr.h"
 
 backEndData_t	*backEndData;
 backEndState_t	backEnd;
@@ -1197,16 +1198,99 @@ static const void *RB_SetColor( const void *data ) {
 
 /*
 =============
-RB_Begin2D
+Deferred floating HUD
 
-Shared 3D->2D boundary idiom so bloom-on/off paths agree on when coronas draw.
+Keep the world billboard out of bloom and composite it after coronas.
 =============
 */
+typedef struct {
+	qboolean pending;
+	vec3_t origin, left, up;
+	color4ub_t color;
+	int fogNum;
+	Vk_Depth_Range depthRange;
+	viewParms_t view;
+	trRefEntity_t entity;
+	double floatTime;
+} deferredHud_t;
+static deferredHud_t deferredHud;
+
+void RB_ClearDeferredHud( void ) {
+	deferredHud.pending = qfalse;
+}
+
+qboolean RB_CaptureDeferredHud( const vec3_t origin, const vec3_t left,
+	const vec3_t up, color4ub_t color ) {
+	if ( !VK_XR_Drawing() || tess.shader != tr.hudShader ||
+		backEnd.viewParms.portalView != PV_NONE || vk_hud_recording() ||
+		vk.renderPassIndex == RENDER_PASS_SCREENMAP ) return qfalse;
+	VectorCopy( origin, deferredHud.origin );
+	VectorCopy( left, deferredHud.left );
+	VectorCopy( up, deferredHud.up );
+	deferredHud.color = color;
+	deferredHud.fogNum = tess.fogNum;
+	deferredHud.depthRange = tess.depthRange;
+	deferredHud.view = backEnd.viewParms;
+	deferredHud.entity = *backEnd.currentEntity;
+	deferredHud.floatTime = backEnd.refdef.floatTime;
+	deferredHud.pending = qtrue;
+	return qtrue;
+}
+
+/* The captured owning view keeps later HUD-icon/2D cameras out of the multiview matrices. */
+void RB_DrawDeferredHud( void ) {
+	viewParms_t savedView;
+	orientationr_t savedOrientation;
+	const trRefEntity_t *savedEntity;
+	qboolean saved2D;
+	double savedTime;
+	float savedMatrix[16];
+	Vk_Depth_Range savedDepth;
+	if ( !deferredHud.pending || vk_hud_recording() ||
+		vk.renderPassIndex == RENDER_PASS_SCREENMAP ||
+		vk.renderPassIndex == RENDER_PASS_DESKTOP ) return;
+	deferredHud.pending = qfalse;
+	if ( tess.numIndexes ) RB_EndSurface();
+	savedView = backEnd.viewParms;
+	savedOrientation = backEnd.or;
+	savedEntity = backEnd.currentEntity;
+	saved2D = backEnd.projection2D;
+	savedTime = backEnd.refdef.floatTime;
+	savedDepth = tess.depthRange;
+	Com_Memcpy( savedMatrix, vk_world.modelview_transform, sizeof( savedMatrix ) );
+	backEnd.viewParms = deferredHud.view;
+	backEnd.or = deferredHud.view.world;
+	backEnd.currentEntity = &deferredHud.entity;
+	backEnd.projection2D = qfalse;
+	backEnd.refdef.floatTime = deferredHud.floatTime;
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+	vk_update_mvp( deferredHud.view.world.modelMatrix );
+	RB_BeginSurface( tr.hudShader, deferredHud.fogNum );
+	tess.depthRange = deferredHud.depthRange;
+	RB_AddQuadStamp( deferredHud.origin, deferredHud.left, deferredHud.up, deferredHud.color );
+	RB_EndSurface();
+	tess.shader = NULL;
+	tess.depthRange = savedDepth;
+	backEnd.viewParms = savedView;
+	backEnd.or = savedOrientation;
+	backEnd.currentEntity = savedEntity;
+	backEnd.projection2D = saved2D;
+	backEnd.refdef.floatTime = savedTime;
+	Com_Memcpy( vk_world.modelview_transform, savedMatrix, sizeof( savedMatrix ) );
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+	vk_update_mvp( NULL );
+}
+
+// Shared 3D->2D boundary for bloom, coronas and the floating HUD.
 static void RB_Begin2D( void ) {
 #ifdef USE_VULKAN
+	if ( vk_hud_recording() || vk.renderPassIndex == RENDER_PASS_DESKTOP ) {
+		return;
+	}
 	if ( r_bloom->integer )
 		vk_bloom();
 	RB_RenderDeferredFlares();
+	RB_DrawDeferredHud();
 #endif
 }
 
@@ -1241,6 +1325,73 @@ static const void *RB_StretchPic( const void *data ) {
 	RB_AddQuadStamp2( cmd->x, cmd->y, cmd->w, cmd->h, cmd->s1, cmd->t1, cmd->s2, cmd->t2, backEnd.color2D );
 	return (const void *)(cmd + 1);
 }
+
+
+#ifdef USE_VULKAN
+/* Routing through RB_StretchPic honors the complete registered material:
+ * remaps, animation, texture transforms and all of its stages. */
+static void RB_DesktopPic( shader_t *shader, float x, float y, float w, float h,
+	float s1, float t1, float s2, float t2 ) {
+	stretchPicCommand_t cmd = {0};
+	float sx = (float)glConfig.vidWidth / gls.windowWidth;
+	float sy = (float)glConfig.vidHeight / gls.windowHeight;
+	cmd.shader = shader;
+	cmd.x = x * sx;
+	cmd.y = y * sy;
+	cmd.w = w * sx;
+	cmd.h = h * sy;
+	cmd.s1 = s1;
+	cmd.t1 = t1;
+	cmd.s2 = s2;
+	cmd.t2 = t2;
+	RB_StretchPic( &cmd );
+}
+
+void RB_DrawTrackingStatus( qhandle_t font, qhandle_t icon, float cell ) {
+	const char *text = "Waiting for headset tracking...";
+	const qboolean saved2D = backEnd.projection2D;
+	const trRefEntity_t *savedEntity = backEnd.currentEntity;
+	const color4ub_t savedColor = backEnd.color2D;
+	const int savedTime = backEnd.refdef.time;
+	const double savedFloatTime = backEnd.refdef.floatTime;
+	const backEndCounters_t savedCounters = backEnd.pc;
+	float size = floorf( cell * 2.0f / 3.0f );
+	float width = strlen( text ) * size + 4.0f * cell;
+	float x = floorf( (gls.windowWidth - width) * 0.5f );
+	float y = cell;
+	int i;
+
+	RB_EndSurface();
+	tess.shader = NULL;
+	backEnd.projection2D = qfalse;
+	backEnd.currentEntity = &backEnd.entity2D;
+	backEnd.color2D.rgba[0] = backEnd.color2D.rgba[1] = backEnd.color2D.rgba[2] = 6;
+	backEnd.color2D.rgba[3] = 255;
+	RB_DesktopPic( tr.whiteShader, x, y, width, 2 * cell, 0, 0, 1, 1 );
+	RB_EndSurface();
+	tess.shader = NULL;
+	backEnd.color2D.rgba[0] = backEnd.color2D.rgba[1] = backEnd.color2D.rgba[2] = 255;
+	if ( icon && !R_GetShaderByHandle( icon )->defaultShader )
+		RB_DesktopPic( R_GetShaderByHandle( icon ), x + cell, y + floorf( cell * 0.2f ),
+			floorf( cell * 1.6f ), floorf( cell * 1.6f ), 0, 0, 1, 1 );
+	for ( i = 0; text[i]; i++ ) {
+		int ch = (unsigned char)text[i];
+		float s = (ch & 15) / 16.0f, t = (ch >> 4) / 16.0f;
+		if ( ch == ' ' ) continue;
+		RB_DesktopPic( R_GetShaderByHandle( font ), x + 3 * cell + i * size,
+			y + floorf( (2 * cell - size) * 0.5f ), size, size,
+			s, t, s + 1.0f / 16.0f, t + 1.0f / 16.0f );
+	}
+	RB_EndSurface();
+	tess.shader = NULL;
+	backEnd.projection2D = saved2D;
+	backEnd.currentEntity = savedEntity;
+	backEnd.color2D = savedColor;
+	backEnd.refdef.time = savedTime;
+	backEnd.refdef.floatTime = savedFloatTime;
+	backEnd.pc = savedCounters;
+}
+#endif
 
 
 #ifdef USE_PMLIGHT
@@ -1449,6 +1600,9 @@ static const void *RB_DrawSurfs( const void *data ) {
 
 	// draw main system development information (surface outlines, etc)
 	RB_DebugGraphics();
+	if ( !(backEnd.refdef.rdflags & RDF_NOWORLDMODEL) && backEnd.viewParms.portalView == PV_NONE ) {
+		vk_draw_foveation_debug();
+	}
 
 #ifdef USE_VULKAN
 	if ( cmd->refdef.switchRenderPass ) {
@@ -1811,13 +1965,35 @@ static const void *RB_SwapBuffers( const void *data ) {
 }
 
 
+static const void *RB_HUDBuffer( const void *data ) {
+	const hudBufferCommand_t *cmd = data;
+	if ( tess.numIndexes ) {
+		RB_EndSurface();
+		tess.shader = NULL;
+	}
+	if ( cmd->start ) {
+		if ( cmd->overlay ) {
+			/* Keep first-person follow HUD at eye resolution in the scene. */
+			vk_hud_set_direct( VK_XR_Screen() == NULL );
+		} else {
+			vk_hud_begin( cmd->clear );
+		}
+	}
+	if ( !cmd->start ) {
+		vk_hud_end();
+		vk_hud_set_direct( qfalse );
+	}
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+	backEnd.projection2D = qfalse;
+	return cmd + 1;
+}
+
 /*
 ====================
 RB_ExecuteRenderCommands
 ====================
 */
 void RB_ExecuteRenderCommands( const void *data ) {
-
 	backEnd.pc.msec = ri.Milliseconds();
 
 	while ( 1 ) {
@@ -1850,6 +2026,9 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			break;
 		case RC_CLEARCOLOR:
 			data = RB_ClearColor(data);
+			break;
+		case RC_HUD_BUFFER:
+			data = RB_HUDBuffer( data );
 			break;
 		case RC_END_OF_LIST:
 		default:

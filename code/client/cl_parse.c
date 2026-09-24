@@ -498,6 +498,9 @@ static void CL_ParseServerInfo( void )
 		Info_ValueForKey(serverInfo, "sv_dlURL"),
 		sizeof(clc.sv_dlURL));
 
+	clc.serverSupportsVR = atoi( Info_ValueForKey( serverInfo, "vr_support" ) ) == 1;
+	clc.serverGametype = atoi( Info_ValueForKey( serverInfo, "g_gametype" ) );
+
 	/* remove ending slash in URLs */
 	len = strlen( clc.sv_dlURL );
 	if ( len > 0 &&  clc.sv_dlURL[len-1] == '/' )

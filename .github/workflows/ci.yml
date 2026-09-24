@@ -7,6 +7,47 @@ on:
     branches: [main]
 
 jobs:
+  build-windows:
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: base-devel git mingw-w64-x86_64-gcc mingw-w64-x86_64-make mingw-w64-x86_64-cmake jq
+          path-type: minimal
+
+      - name: Build
+        run: make -j$(nproc)
+
+      - name: Select native-module source
+        id: dependencies
+        run: |
+          revision=$(jq -r '.trinity_revision // empty' misc/release-dependencies.json)
+          echo "ref=${revision:-main}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          repository: ernie/trinity
+          ref: ${{ steps.dependencies.outputs.ref }}
+          path: build/trinity
+      - name: Build native modules and OpenXR loader
+        run: |
+          set -euo pipefail
+          revision=$(git -C build/trinity rev-parse HEAD)
+          loader=$(jq -r .openxr_revision misc/release-dependencies.json)
+          cmake -S misc/trinity-native -B build/release-native -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_SOURCE_DIR="$PWD/build/trinity" -DTRINITY_SOURCE_REVISION="$revision"
+          cmake --build build/release-native --config Release --target trinity-native --parallel 2
+          cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
+          cmake -S misc/openxr-loader -B build/release-loader -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION="$loader"
+          cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+          cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
+
   build-linux:
     runs-on: ubuntu-24.04
     steps:
@@ -17,10 +58,32 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get -qq update
-          sudo apt-get -y install build-essential libcurl4-openssl-dev libsdl2-dev libx11-dev
+          sudo apt-get -y install cmake jq build-essential libcurl4-openssl-dev libsdl2-dev libx11-dev
 
       - name: Build
         run: make -j$(nproc)
+
+      - name: Select native-module source
+        id: dependencies
+        run: |
+          revision=$(jq -r '.trinity_revision // empty' misc/release-dependencies.json)
+          echo "ref=${revision:-main}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          repository: ernie/trinity
+          ref: ${{ steps.dependencies.outputs.ref }}
+          path: build/trinity
+      - name: Build native modules and OpenXR loader
+        run: |
+          set -euo pipefail
+          revision=$(git -C build/trinity rev-parse HEAD)
+          loader=$(jq -r .openxr_revision misc/release-dependencies.json)
+          cmake -S misc/trinity-native -B build/release-native -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_SOURCE_DIR="$PWD/build/trinity" -DTRINITY_SOURCE_REVISION="$revision"
+          cmake --build build/release-native --config Release --target trinity-native --parallel 2
+          cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
+          cmake -S misc/openxr-loader -B build/release-loader -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION="$loader"
+          cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+          cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
 
   build-macos:
     # Mirrors the pre-signing steps of the release workflow's macos job so
@@ -74,3 +137,31 @@ jobs:
 
       - name: Build web engine
         run: make web
+
+  build-msvc:
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, ARM64]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: microsoft/setup-msbuild@v3
+      - name: Compile explicit release source lists
+        shell: pwsh
+        run: |
+          $version = git describe --tags --always --dirty
+          $env:CL = "/DTRINITY_ENGINE_VERSION=\`"$version\`""
+          foreach ($project in @('trinity-ded', 'renderer', 'renderervk', 'trinity')) {
+            msbuild "code/win32/msvc2017/$project.vcxproj" /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:PlatformToolset=v143 /p:UseWasapi=USE_WASAPI=0
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+  build-server-only:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Dedicated build has no runtime dependency
+        run: make -j2 BUILD_CLIENT=0 BUILD_SERVER=1 BUILD_OPENXR_LOADER=1 BUILD_TRINITY_NATIVE_FALLBACK=1

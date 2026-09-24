@@ -80,7 +80,7 @@ layout(location = 0) out vec4 out_color;
 #ifdef USE_EMISSIVE
 layout(location = 1) out vec4 out_emissive;
 #endif
-layout(push_constant) uniform FragPush { layout(offset = 64) float emissiveFactor; } pc;
+layout(push_constant) uniform FragPush { layout(offset = 64) float emissiveFactor; float desktopWhiteScale; float desktopOverbright; } pc;
 #endif
 
 #ifdef USE_ATEST
@@ -92,6 +92,8 @@ layout (constant_id = 2) const float depth_fragment = 0.85;
 #endif
 
 layout (constant_id = 3) const int alpha_to_coverage = 0;
+layout (constant_id = 11) const int hud_opaque_coverage = 0;
+layout (constant_id = 12) const int desktop_output = 0;
 //layout (constant_id = 4) const int color_mode = 0;
 //layout (constant_id = 5) const int abs_light = 0;
 #if defined (USE_TX1) || defined(USE_TX2)
@@ -517,6 +519,16 @@ void main() {
 
 	gl_FragDepth = gl_FragCoord.z;
 #else
+	// Alpha tests above retain cutout silhouettes. Texture/specular alpha is
+	// not transparency when this is an opaque material's replacement stage.
+	if (hud_opaque_coverage != 0) base.a = 1.0;
+	// Ordinary 2D materials can also target a linear desktop swapchain.
+	if (desktop_output != 0) base.rgb *= pc.desktopOverbright;
+	if (desktop_output == 2) {
+		vec3 linear = mix(base.rgb / 12.92, pow((max(base.rgb, vec3(0.0)) + 0.055) / 1.055, vec3(2.4)),
+			greaterThan(base.rgb, vec3(0.04045)));
+		base.rgb = linear * pc.desktopWhiteScale;
+	}
 	out_color = base;
 #ifdef USE_EMISSIVE
 #ifdef USE_OVERBRIGHT

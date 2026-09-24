@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl.input.c  -- builds an intended movement command to send to the server
 
 #include "client.h"
+#include "cl_vr.h"
+#include "cl_vr_input.h"
 
 static unsigned frame_msec;
 static int old_com_frameTime;
@@ -596,6 +598,10 @@ static usercmd_t CL_CreateCmd( void ) {
 	usercmd_t	cmd;
 	vec3_t		oldAngles;
 
+	if ( CL_VRInput_ApplyMove( &cmd ) ) {
+		return cmd;
+	}
+
 	VectorCopy( cl.viewangles, oldAngles );
 
 	// keyboard angle adjustment
@@ -758,6 +764,7 @@ void CL_WritePacket( int repeat ) {
 	int			packetNum;
 	int			oldPacketNum;
 	int			count, key;
+	int			buttonBits;
 
 	// don't send anything if playing back a demo
 	if ( clc.demoplaying || cls.state == CA_CINEMATIC ) {
@@ -827,11 +834,13 @@ void CL_WritePacket( int repeat ) {
 		// also use the last acknowledged server command in the key
 		key ^= MSG_HashKey(clc.serverCommands[ clc.serverCommandSequence & (MAX_RELIABLE_COMMANDS-1) ], 32);
 
+		buttonBits = CL_VR_UsercmdButtonBits();
+
 		// write all the commands, including the predicted command
 		for ( i = 0 ; i < count ; i++ ) {
 			j = (cl.cmdNumber - count + i + 1) & CMD_MASK;
 			cmd = &cl.cmds[j];
-			MSG_WriteDeltaUsercmdKey (&buf, key, oldcmd, cmd);
+			MSG_WriteDeltaUsercmdKey( &buf, key, oldcmd, cmd, buttonBits );
 			oldcmd = cmd;
 		}
 	}

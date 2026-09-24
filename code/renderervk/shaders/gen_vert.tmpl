@@ -8,10 +8,8 @@
 #define USE_CL1
 #endif
 
-// 64 bytes
-layout(push_constant) uniform Transform {
-	mat4 mvp;
-};
+#extension GL_GOOGLE_include_directive : require
+#include "view_transform.glsl"
 
 #if defined(USE_FOG) || defined(USE_ENV)
 layout(set = 0, binding = 0) uniform UBO {
@@ -94,7 +92,7 @@ out gl_PerVertex {
 };
 
 void main() {
-	gl_Position = mvp * vec4(in_position, 1.0);
+	gl_Position = transformPosition(in_position);
 
 
 #if defined (USE_CLX_IDENT) || defined (USE_FIXED_COLOR)

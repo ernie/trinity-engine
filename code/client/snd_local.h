@@ -214,6 +214,8 @@ extern cvar_t *s_muted;
 extern cvar_t *s_muteWhenUnfocused;
 extern cvar_t *s_muteWhenMinimized;
 
+qboolean S_ShouldMuteForFocus( void );
+
 extern cvar_t *s_testsound;
 
 qboolean S_LoadSound( sfx_t *sfx );

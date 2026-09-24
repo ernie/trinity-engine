@@ -19,6 +19,8 @@ along with Quake III Arena source code; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
+
+#include "../client/cl_renderer_recovery.h"
 /*
 ** WIN_GLIMP.C
 **
@@ -142,7 +144,7 @@ static int GLW_ChoosePFD( HDC hDC, PIXELFORMATDESCRIPTOR *pPFD )
 		maxPFD = DescribePixelFormat( hDC, 1, sizeof( PIXELFORMATDESCRIPTOR ), NULL );
 	}
 	__except ( EXCEPTION_EXECUTE_HANDLER ) {
-		Com_Error( ERR_FATAL, "DescribePixelFormat() crashed" );
+		CL_RendererError( ERR_FATAL, "DescribePixelFormat() crashed" );
 		return 0;
 	}
 #else
@@ -650,7 +652,7 @@ static qboolean GLW_CreateWindow( int width, int height, int colorbits, qboolean
 
 		if ( !RegisterClass( &wc ) )
 		{
-			Com_Error( ERR_FATAL, "%s: could not register window class", __func__ );
+			CL_RendererError( ERR_FATAL, "%s: could not register window class", __func__ );
 			return qfalse;
 		}
 		s_classRegistered = qtrue;
@@ -740,7 +742,7 @@ static qboolean GLW_CreateWindow( int width, int height, int colorbits, qboolean
 		if ( !g_wv.hWnd )
 		{
 			glw_state.cdsFullscreen = oldFullscreen;
-			Com_Error( ERR_FATAL, "GLW_CreateWindow() - Couldn't create window" );
+			CL_RendererError( ERR_FATAL, "GLW_CreateWindow() - Couldn't create window" );
 			return qfalse;
 		}
 
@@ -1277,7 +1279,7 @@ static void GLimp_SwapBuffers( void )
 {
 	if ( !SwapBuffers( glw_state.hDC ) )
 	{
-		Com_Error( ERR_FATAL, "GLimp_EndFrame() - SwapBuffers() failed!\n" );
+		CL_RendererError( ERR_FATAL, "GLimp_EndFrame() - SwapBuffers() failed!\n" );
 	}
 }
 
@@ -1325,7 +1327,7 @@ static qboolean GLW_StartOpenGL( void )
 			}
 		}
 
-		Com_Error( ERR_FATAL, "GLW_StartOpenGL() - could not load OpenGL subsystem\n" );
+		CL_RendererError( ERR_FATAL, "GLW_StartOpenGL() - could not load OpenGL subsystem\n" );
 		return qfalse;
 	}
 
@@ -1486,7 +1488,7 @@ static qboolean GLW_StartVulkan( void )
 	// load and initialize Vulkan driver
 	//
 	if ( !GLW_LoadVulkan() ) {
-		Com_Error( ERR_FATAL, "GLW_StartVulkan() - could not load Vulkan subsystem\n" );
+		CL_RendererError( ERR_FATAL, "GLW_StartVulkan() - could not load Vulkan subsystem\n" );
 		return qfalse;
 	}
 
@@ -1564,3 +1566,89 @@ void VKimp_Shutdown( qboolean unloadDLL )
 	QVK_Shutdown( unloadDLL );
 }
 #endif // USE_VULKAN_API
+
+/* Small native dialog template; no common-controls or runtime DLL dependency. */
+#include <windows.h>
+#include <stdint.h>
+#include <string.h>
+static WORD *Win_VRDialogText( WORD *out, const char *text ) {
+	do {
+		*out++ = (WORD)(unsigned char)*text;
+	} while ( *text++ );
+	return out;
+}
+static WORD *Win_VRDialogItem( WORD *out, WORD atom, WORD id, short x, short y, short width, short height, DWORD style, const char *text ) {
+	DLGITEMTEMPLATE item;
+
+	out = (WORD *)(((uintptr_t)out + 3) & ~(uintptr_t)3);
+	memset( &item, 0, sizeof( item ) );
+	item.style = WS_CHILD | WS_VISIBLE | style;
+	item.x = x;
+	item.y = y;
+	item.cx = width;
+	item.cy = height;
+	item.id = id;
+	memcpy( out, &item, sizeof( item ) );
+	out += sizeof( item ) / sizeof( WORD );
+	*out++ = 0xffff;
+	*out++ = atom;
+	out = Win_VRDialogText( out, text );
+	*out++ = 0;
+	return out;
+}
+/* storage must be DWORD aligned and have at least 1024 bytes. */
+static size_t Win_VRDialogTemplate( DWORD storage[256] ) {
+	DLGTEMPLATE dialog;
+	WORD *out;
+
+	memset( storage, 0, 1024 );
+	memset( &dialog, 0, sizeof( dialog ) );
+	dialog.style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_CENTER;
+	dialog.cdit = 4;
+	dialog.cx = 280;
+	dialog.cy = 112;
+	memcpy( storage, &dialog, sizeof( dialog ) );
+	out = (WORD *)((unsigned char *)storage + sizeof( dialog ));
+	*out++ = 0;
+	*out++ = 0;
+	out = Win_VRDialogText( out, "Trinity Engine - VR startup failed" );
+	out = Win_VRDialogItem( out, 0x82, 100, 10, 10, 260, 66, SS_LEFT, "" );
+	out = Win_VRDialogItem( out, 0x80, IDRETRY, 20, 87, 70, 16, WS_TABSTOP | BS_PUSHBUTTON, "Retry" );
+	out = Win_VRDialogItem( out, 0x80, IDIGNORE, 105, 87, 70, 16, WS_TABSTOP | BS_DEFPUSHBUTTON, "Flatscreen" );
+	out = Win_VRDialogItem( out, 0x80, IDABORT, 190, 87, 70, 16, WS_TABSTOP | BS_PUSHBUTTON, "Quit" );
+	return (size_t)((unsigned char *)out - (unsigned char *)storage);
+}
+static INT_PTR CALLBACK Win_VRDialogProc( HWND dialog, UINT message, WPARAM wparam, LPARAM lparam ) {
+	if ( message == WM_INITDIALOG ) {
+		SetDlgItemTextA( dialog, 100, (const char *)lparam );
+		SetFocus( GetDlgItem( dialog, IDIGNORE ) );
+		return FALSE;
+	}
+	if ( message == WM_CLOSE ) {
+		EndDialog( dialog, IDIGNORE );
+		return TRUE;
+	}
+	if ( message == WM_COMMAND ) {
+		int id = LOWORD( wparam );
+
+		if ( id == IDCANCEL ) {
+			id = IDIGNORE;
+		}
+		if ( id == IDRETRY || id == IDIGNORE || id == IDABORT ) {
+			EndDialog( dialog, id );
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+static int Win_VRFailureDialog( const char *reason ) {
+	DWORD storage[256];
+	INT_PTR result;
+
+	Win_VRDialogTemplate( storage );
+	result = DialogBoxIndirectParamW( GetModuleHandleW( NULL ), (const DLGTEMPLATE *)storage, NULL, Win_VRDialogProc, (LPARAM)(reason && *reason ? reason : "VR could not start.") );
+	return result == IDRETRY ? 1 : result == IDABORT ? 2 : 0;
+}
+int Sys_VRFailureDialog( const char *reason ) {
+	return Win_VRFailureDialog( reason );
+}

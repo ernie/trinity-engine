@@ -843,7 +843,8 @@ static void RB_SurfaceRailCore( void ) {
 	CrossProduct( v1, v2, right );
 	VectorNormalize( right );
 
-	DoRailCore( start, end, right, len, r_railCoreWidth->integer );
+	// Laser width is independent of the railgun trail setting.
+	DoRailCore( start, end, right, len, e->reType == RT_LASERSIGHT ? 1 : r_railCoreWidth->integer );
 }
 
 /*
@@ -1295,6 +1296,7 @@ static void RB_SurfaceEntity( const surfaceType_t *surfType ) {
 		RB_SurfaceBeam();
 		break;
 	case RT_RAIL_CORE:
+	case RT_LASERSIGHT:
 		RB_SurfaceRailCore();
 		break;
 	case RT_RAIL_RINGS:

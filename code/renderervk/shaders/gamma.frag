@@ -1,7 +1,10 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "../vk_xr_color.h"
+#include "postprocess_source.glsl"
 
-layout(set = 0, binding = 0) uniform sampler2D texture0;
-layout(set = 1, binding = 0) uniform sampler2D texture1; // emissive highlight layer
+layout(set = 0, binding = 0) uniform sceneSampler texture0;
+layout(set = 1, binding = 0) uniform sceneSampler texture1; // emissive highlight layer
 
 layout(location = 0) in vec2 frag_tex_coord;
 
@@ -16,6 +19,8 @@ layout(constant_id = 8) const int depth_r = 255;
 layout(constant_id = 9) const int depth_g = 255;
 layout(constant_id = 10) const int depth_b = 255;
 layout(constant_id = 11) const int hdrMode = 0;          // 0 - SDR, 1 - scRGB linear HDR
+layout(constant_id = 13) const int screenSource = 0; // 1: encoded composition, 2: linear menu capture
+layout(constant_id = 12) const int linearSDROutput = 0; // SRGB headset attachment
 
 layout(push_constant) uniform Push {
 	int hdrCalibrate;   // 1 = draw the peak-match calibration window
@@ -36,8 +41,6 @@ vec3 sRGBtoLinear(vec3 c) {
 	return mix(higher, lower, cutoff);
 }
 
-// === BEGIN shared HDR core: keep byte-identical with
-// trinity-vr code/renderervk/shaders/desktopmirror.frag (this is the canonical copy) ===
 // Reconstructs scRGB-linear HDR output from the SDR color buffer and the emissive
 // highlight layer. 1.0 == paper-white; result is scaled to scRGB (paper-white / 80).
 vec3 hdrReconstruct( vec3 base, vec3 emissive,
@@ -83,7 +86,6 @@ vec3 hdrReconstruct( vec3 base, vec3 emissive,
 
 	return lin * (paperWhite / 80.0);
 }
-// === END shared HDR core ===
 
 const int bayerSize = 8;
 const float bayerMatrix[bayerSize * bayerSize] = {
@@ -134,7 +136,16 @@ void main() {
 		}
 	}
 
-	vec3 base = texture(texture0, frag_tex_coord).rgb;
+	vec3 base = sceneSample(texture0, frag_tex_coord).rgb;
+	// Screen content already went through gamma/overbright before capture.
+	if (screenSource != 0) {
+		vec3 linear = screenSource == 2 ? base : sRGBtoLinear(base);
+		if (hdrMode == 1) out_color = vec4(linear * (push.paperWhite / 80.0), 1.0);
+		else if (linearSDROutput == 1) out_color = vec4(linear, 1.0);
+		else if (screenSource == 2) out_color = vec4(VKXR_SdrEncoded(base.r),VKXR_SdrEncoded(base.g),VKXR_SdrEncoded(base.b),1.0);
+		else out_color = vec4(base, 1.0);
+		return;
+	}
 
 	if ( greyscale == 1 )
 	{
@@ -148,7 +159,7 @@ void main() {
 
 	if ( hdrMode == 1 )
 	{
-		vec3 emissive = texture(texture1, frag_tex_coord).rgb;
+		vec3 emissive = sceneSample(texture1, frag_tex_coord).rgb;
 		out_color = vec4( hdrReconstruct( base, emissive, gamma, obScale,
 			push.paperWhite, push.hdrPeak, push.hdrHighlight, push.hdrSaturation,
 			push.hdrSaturationFull, push.hdrSoftKnee ), 1.0 );
@@ -166,5 +177,8 @@ void main() {
 
 	if ( ditherMode == 1 ) {
 		out_color.rgb = dither(out_color.rgb);
+	}
+	if ( linearSDROutput == 1 ) {
+		out_color.rgb=vec3(VKXR_SdrLinear(out_color.r),VKXR_SdrLinear(out_color.g),VKXR_SdrLinear(out_color.b));
 	}
 }

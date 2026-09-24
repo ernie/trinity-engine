@@ -20,6 +20,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "client.h"
+#include "cl_vr_input.h"
+#include "../vrcommon/vr_state.h"
+
+static qboolean vrKeyboardConsumed[MAX_KEYS];
 
 /*
 
@@ -552,6 +556,10 @@ static void CL_KeyDownEvent( int key, unsigned time )
 	if ( keys[key].repeats == 1 ) {
 		anykeydown++;
 	}
+	if ( VR_IsActiveMode() && VKeyboard_IsActive() && VKeyboard_HandleKey( key ) ) {
+		vrKeyboardConsumed[key] = qtrue;
+		return;
+	}
 
 #ifndef _WIN32
 	if ( keys[K_ALT].down && key == K_ENTER )
@@ -689,6 +697,10 @@ static void CL_KeyUpEvent( int key, unsigned time )
 	if ( --anykeydown < 0 ) {
 		anykeydown = 0;
 	}
+	if ( vrKeyboardConsumed[key] ) {
+		vrKeyboardConsumed[key] = qfalse;
+		return;
+	}
 
 	// don't process key-up events for the console key
 	if ( key == K_CONSOLE || ( key == K_ESCAPE && keys[K_SHIFT].down ) ) {
@@ -816,9 +828,22 @@ Key_SetCatcher
 */
 void Key_SetCatcher( int catcher )
 {
+	int textCatchers = KEYCATCH_CONSOLE | KEYCATCH_MESSAGE;
+	int previous = keyCatchers;
 	// If the catcher state is changing, clear all key states
 	if ( catcher != keyCatchers )
 		Key_ClearStates();
 
 	keyCatchers = catcher;
+	if ( !VR_IsActiveMode() )
+		return;
+	if ( (previous ^ catcher) & textCatchers ) {
+		if ( catcher & textCatchers )
+			VKeyboard_Show();
+		else
+			VKeyboard_Hide();
+	} else if ( (previous & KEYCATCH_UI) && !(catcher & (KEYCATCH_UI | textCatchers)) ) {
+		// The UI's fields own the keyboard; with no text catcher left, nothing does.
+		VKeyboard_Hide();
+	}
 }

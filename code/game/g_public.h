@@ -398,6 +398,7 @@ typedef enum {
 
 	// engine extensions
 	G_CVAR_SETDESCRIPTION,
+	G_VR_REGISTERSTATE,
 	G_TRAP_GETVALUE = COM_TRAP_GETVALUE
 
 } gameImport_t;

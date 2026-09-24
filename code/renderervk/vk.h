@@ -4,6 +4,7 @@
 #include "tr_common.h"
 
 #define MAX_SWAPCHAIN_IMAGES 8
+#define VK_XR_DIRECT_MAX_IMAGES 32
 #define MIN_SWAPCHAIN_IMAGES_IMM 3
 #define MIN_SWAPCHAIN_IMAGES_FIFO   3
 #define MIN_SWAPCHAIN_IMAGES_FIFO_0 4
@@ -33,7 +34,8 @@
 #define USE_DEDICATED_ALLOCATION
 #endif
 //#define MIN_IMAGE_ALIGN (128*1024)
-#define MAX_ATTACHMENTS_IN_POOL (10+VK_NUM_BLOOM_PASSES*2) // depth + msaa + msaa-resolve + depth-resolve + screenmap.msaa + screenmap.resolve + screenmap.depth + bloom_extract + emissive-resolve + emissive-msaa + blur pairs
+#define MAX_ATTACHMENTS_IN_POOL \
+	(11 + VK_NUM_BLOOM_PASSES * 2) // scene/capture attachments + XR SDR output + blur pairs
 
 #define VK_DESC_STORAGE      0
 #define VK_DESC_UNIFORM      0
@@ -60,6 +62,8 @@ typedef enum {
 	TYPE_SINGLE_TEXTURE_LIGHTING_OVERBRIGHT,
 
 	TYPE_SINGLE_TEXTURE_DF,
+	TYPE_VR_FLOOR_GRID,
+	TYPE_VR_SCREEN,
 
 	TYPE_GENERIC_BEGIN, // start of non-env/env shader pairs
 	TYPE_SINGLE_TEXTURE = TYPE_GENERIC_BEGIN,
@@ -165,12 +169,25 @@ typedef struct {
 	qboolean noAnisotropy;
 } Vk_Sampler_Def;
 
-typedef enum {
-	RENDER_PASS_MAIN = 0,
-	RENDER_PASS_SCREENMAP,
-	RENDER_PASS_POST_BLOOM,
-	RENDER_PASS_COUNT
-} renderPass_t;
+#include "vk_pass.h"
+
+/* Mono screen sources reuse XR array images; only their compatible pass,
+ * framebuffer and pipeline handles differ. vk.c owns this target lifetime. */
+typedef struct {
+	qboolean sourceActive;
+	struct {
+		VkRenderPass main, post_bloom, bloom_extract, output;
+		VkRenderPass blur[VK_NUM_BLOOM_PASSES * 2];
+	} pass;
+	struct {
+		VkFramebuffer main, bloom_extract, output;
+		VkFramebuffer blur[VK_NUM_BLOOM_PASSES * 2];
+	} framebuffer;
+	struct {
+		VkPipeline bloom_extract, bloom_blend, output;
+		VkPipeline blur[VK_NUM_BLOOM_PASSES * 2];
+	} pipeline;
+} vkMonoTargets_t;
 
 typedef struct {
 	Vk_Shader_Type shader_type;
@@ -184,6 +201,7 @@ typedef struct {
 	int fog_stage; // off, fog-in / fog-out
 	int abs_light;
 	int allow_discard;
+	int hud_coverage; // 0: material alpha, 1: opaque coverage, 2: preserve coverage
 	int stencil_mark; // mark entity pixels with stencil bit 0x80
 	int acff; // none, rgb, rgba, alpha
 	struct {
@@ -266,7 +284,22 @@ void vk_destroy_samplers( void );
 uint32_t vk_find_pipeline_ext( uint32_t base, const Vk_Pipeline_Def *def, qboolean use );
 void vk_get_pipeline_def( uint32_t pipeline, Vk_Pipeline_Def *def );
 
-void vk_create_post_process_pipeline( int program_index, uint32_t width, uint32_t height );
+typedef enum {
+	VK_POST_GAMMA,
+	VK_POST_BLOOM_EXTRACT,
+	VK_POST_BLOOM_BLEND,
+	VK_POST_CAPTURE,
+	VK_POST_XR_OUTPUT,
+	VK_POST_SCREEN_OUTPUT,
+	VK_POST_SCREEN_MONO,
+	VK_POST_SCREEN_CAPTURE,
+	VK_POST_EYE_LEFT,
+	VK_POST_EYE_RIGHT,
+	VK_POST_SCREEN_LEFT,
+	VK_POST_SCREEN_RIGHT
+} vkPostProgram_t;
+
+void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t width, uint32_t height );
 void vk_create_pipelines( void );
 
 //
@@ -274,6 +307,8 @@ void vk_create_pipelines( void );
 //
 
 void vk_clear_color( const vec4_t color );
+void vk_hud_set_direct( qboolean enabled );
+image_t *vk_screen_image( void );
 void vk_clear_depth( qboolean clear_stencil );
 void vk_begin_frame( void );
 void vk_end_frame( void );
@@ -288,6 +323,7 @@ void vk_bind_index_ext( const int numIndexes, const uint32_t*indexes );
 void vk_bind_geometry( uint32_t flags );
 void vk_bind_lighting( int stage, int bundle );
 void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed );
+void vk_draw_foveation_debug( void );
 void vk_draw_dot( uint32_t storage_offset );
 
 void vk_read_pixels( byte* buffer, uint32_t width, uint32_t height ); // screenshots
@@ -313,8 +349,20 @@ void VBO_PrepareQueues( void );
 void VBO_RenderIBOItems( void );
 void VBO_ClearQueue( void );
 
+typedef struct {
+	VkShaderModule gen[3][2][2][2];	   // tx[0,1,2], cl[0,1] env0[0,1] fog[0,1]
+	VkShaderModule ident1[2][2][2];	   // tx[0,1], env0[0,1] fog[0,1]
+	VkShaderModule fixed[2][2][2];	   // tx[0,1], env0[0,1] fog[0,1]
+	VkShaderModule light[2];		   // fog[0,1]
+	VkShaderModule overbright_vert[2]; // fog[0,1]
+} vkVertexModules_t;
+
 typedef struct vk_tess_s {
 	VkCommandBuffer command_buffer;
+	VkCommandBuffer hud_command_buffer;
+	qboolean hud_begun;
+	qboolean gpu_time_armed, gpu_time_pending, gpu_time_mirror;
+	unsigned gpu_time_generation;
 
 	VkSemaphore image_acquired;
 	uint32_t	swapchain_image_index;
@@ -330,6 +378,10 @@ typedef struct vk_tess_s {
 	uint32_t vertex_buffer_offset; // VkDeviceSize
 
 	VkDescriptorSet uniform_descriptor;
+	VkDescriptorSet storage_descriptor;
+	uint32_t view_offset;
+	qboolean view_valid;
+	float view_matrices[2][16];
 	uint32_t		uniform_read_offset;
 	VkDeviceSize	buf_offset[8];
 	VkDeviceSize	vbo_offset[8];
@@ -350,7 +402,6 @@ typedef struct vk_tess_s {
 
 	float		emissive_factor;	// fragment push constant: 1.0 for additive 3D stages, else 0.0
 
-	VkRect2D scissor_rect;
 } vk_tess_t;
 
 
@@ -358,10 +409,14 @@ typedef struct vk_tess_s {
 // This structure is initialized/deinitialized by vk_initialize/vk_shutdown functions correspondingly.
 typedef struct {
 	VkPhysicalDevice physical_device;
+	/* Immutable for this device; refreshed by vk_initialize after every creation. */
+	VkPhysicalDeviceLimits deviceLimits;
+	VkFormatProperties screenFormatProperties;
 	VkSurfaceFormatKHR base_format;
 	VkSurfaceFormatKHR present_format;
 
 	uint32_t queue_family_index;
+	uint32_t timestampValidBits;
 	VkDevice device;
 	VkQueue queue;
 
@@ -390,8 +445,11 @@ typedef struct {
 		VkRenderPass blur[VK_NUM_BLOOM_PASSES*2]; // horizontal-vertical pairs
 		VkRenderPass post_bloom;
 	} render_pass;
+	vkMonoTargets_t mono;
 
 	VkDescriptorPool descriptor_pool;
+	VkDescriptorPool target_descriptor_pool; /* never contains game image sets */
+	qboolean multiview;
 	VkDescriptorSetLayout set_layout_sampler;	// combined image sampler
 	VkDescriptorSetLayout set_layout_uniform;	// dynamic uniform buffer
 	VkDescriptorSetLayout set_layout_storage;	// feedback buffer
@@ -406,6 +464,28 @@ typedef struct {
 
 	VkImage color_image;
 	VkImageView color_image_view;
+	struct {
+		VkImage image;
+		VkImageView view;
+		VkRenderPass pass;
+		VkFramebuffer framebuffer;
+		VkPipeline pipeline;
+		VkPipeline screen_pipeline, screen_mono_pipeline, screen_capture_pipeline;
+		VkPipeline screen_mirror_eye[2];
+	} xr_output;
+	// Direct mode: one target per XR swapchain image; idle stands in while none is acquired.
+	struct {
+		VkFormat imageFormat;
+		VkFormat viewFormat;
+		VkFormatProperties imageFormatProperties;
+		uint32_t count;
+		struct vkXRDirectTarget_s {
+			VkImage image;
+			VkImageView view;
+			VkFramebuffer main, mono, screen;
+			VkDescriptorSet descriptor;
+		} target[VK_XR_DIRECT_MAX_IMAGES], idle;
+	} xr_direct;
 
 	VkImage emissive_image;
 	VkImageView emissive_image_view;
@@ -492,13 +572,7 @@ typedef struct {
 	// Shader modules.
 	//
 	struct {
-		struct {
-			VkShaderModule gen[3][2][2][2]; // tx[0,1,2], cl[0,1] env0[0,1] fog[0,1]
-			VkShaderModule ident1[2][2][2]; // tx[0,1], env0[0,1] fog[0,1]
-			VkShaderModule fixed[2][2][2];  // tx[0,1], env0[0,1] fog[0,1]
-			VkShaderModule light[2];        // fog[0,1]
-			VkShaderModule overbright_vert[2]; // fog[0,1]
-		} vert;
+		vkVertexModules_t vert, vert_mv;
 		struct {
 			// em index: [0] writes the location-1 emissive output, [1] omits it
 			// (passes without the emissive attachment). fog stays the last
@@ -512,8 +586,12 @@ typedef struct {
 			VkShaderModule overbright_frag[2][2]; // em[0,1] fog[0,1]
 		} frag;
 
+		VkShaderModule floor_grid_fs;
+		VkShaderModule virtualscreen_fs;
 		VkShaderModule color_fs;
 		VkShaderModule color_vs;
+		VkShaderModule color_vs_mv, fog_vs_mv, dot_vs_mv, dot_fs_mv;
+		VkShaderModule bloom_fs_mv, blur_fs_mv, blend_fs_mv, gamma_fs_mv, gamma_fs_array;
 
 		VkShaderModule bloom_fs;
 		VkShaderModule blur_fs;
@@ -584,6 +662,7 @@ typedef struct {
 	uint32_t dot_pipeline;
 
 	VkPipeline gamma_pipeline;
+	VkPipeline gamma_pipeline_eye[2];
 	VkPipeline capture_pipeline;
 	VkPipeline bloom_extract_pipeline;
 	VkPipeline blur_pipeline[VK_NUM_BLOOM_PASSES*2]; // horizontal & vertical pairs
@@ -602,6 +681,7 @@ typedef struct {
 	float maxLod;
 
 	VkFormat color_format;
+	VkFormat mainColorFormat; // main pass color: color_format, or the XR image view's format in direct mode
 	VkFormat capture_format;
 	VkFormat depth_format;
 	VkFormat bloom_format;
@@ -610,6 +690,7 @@ typedef struct {
 
 	qboolean clearAttachment;		// requires VK_IMAGE_USAGE_TRANSFER_DST_BIT for swapchains
 	qboolean fboActive;
+	qboolean xrDirect; // VR with the scene pass on the XR swapchain image
 	qboolean blitEnabled;
 	qboolean hdrColorspaceExt;	// VK_EXT_swapchain_colorspace enabled at instance creation
 	qboolean hdrActive;		// scRGB FP16 HDR swapchain selected and in use
@@ -625,6 +706,7 @@ typedef struct {
 
 	uint32_t renderWidth;
 	uint32_t renderHeight;
+	uint32_t sceneWidth, sceneHeight; /* per-eye physical extent in XR, single-view extent in flat */
 
 	float renderScaleX;
 	float renderScaleY;
@@ -702,3 +784,5 @@ typedef struct {
 
 extern Vk_Instance	vk;				// shouldn't be cleared during ref re-init
 extern Vk_World		vk_world;		// this data is cleared during ref re-init
+
+struct vkXRDirectTarget_s *vk_xr_direct_target( void );

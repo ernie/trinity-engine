@@ -264,15 +264,18 @@ static void RB_ClipSkyPolygons( const shaderCommands_t *input )
 
 	ClearSkyBox();
 
+	// A near opening can reveal sky regions invisible from the center camera.
+	// Keep the center rays as well: sky geometry itself is centered there.
 	for ( i = 0; i < input->numIndexes; i += 3 )
 	{
-		for (j = 0 ; j < 3 ; j++) 
-		{
-			VectorSubtract( input->xyz[input->indexes[i+j]],
-							backEnd.viewParms.or.origin, 
-							p[j] );
+		int view, viewCount = backEnd.viewParms.xrMultiview ? 3 : 1;
+		for ( view = 0; view < viewCount; view++ ) {
+			const float *origin = view ? backEnd.viewParms.eyeOrigin[view-1] : backEnd.viewParms.or.origin;
+			for ( j = 0; j < 3; j++ ) {
+				VectorSubtract( input->xyz[input->indexes[i+j]], origin, p[j] );
+			}
+			ClipSkyPolygon( 3, p[0], 0 );
 		}
-		ClipSkyPolygon( 3, p[0], 0 );
 	}
 }
 

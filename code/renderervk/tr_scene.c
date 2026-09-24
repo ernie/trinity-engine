@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "tr_local.h"
+#include "vk_xr.h"
 
 static int			r_firstSceneDrawSurf;
 #ifdef USE_PMLIGHT
@@ -341,6 +342,12 @@ void RE_AddRefEntityToScene( const refEntity_t *ent, qboolean intShaderTime ) {
 
 	backEndData->entities[r_numentities].e = *ent;
 	backEndData->entities[r_numentities].lightingCalculated = qfalse;
+	backEndData->entities[r_numentities].reflected = qfalse;
+	if ( ent->reType == RT_MODEL ) {
+		vec3_t cross;
+		CrossProduct( ent->axis[0], ent->axis[1], cross );
+		backEndData->entities[r_numentities].reflected = DotProduct( cross, ent->axis[2] ) < 0;
+	}
 	backEndData->entities[r_numentities].intShaderTime = intShaderTime;
 
 	r_numentities++;
@@ -495,6 +502,11 @@ void RE_RenderScene( const refdef_t *fd ) {
 #endif
 	viewParms_t		parms;
 	int				startTime;
+	refdef_t xrView;
+	xrView = *fd;
+	Com_Memset( &parms, 0, sizeof( parms ) );
+	VK_XR_SetupView( &xrView, &parms );
+	fd = &xrView;
 
 	if ( !tr.registered ) {
 		return;
@@ -592,7 +604,6 @@ void RE_RenderScene( const refdef_t *fd ) {
 	// The refdef takes 0-at-the-top y coordinates, so
 	// convert to GL's 0-at-the-bottom space
 	//
-	Com_Memset( &parms, 0, sizeof( parms ) );
 	parms.viewportX = tr.refdef.x;
 	parms.viewportY = glConfig.vidHeight - ( tr.refdef.y + tr.refdef.height );
 	parms.viewportWidth = tr.refdef.width;
@@ -612,8 +623,8 @@ void RE_RenderScene( const refdef_t *fd ) {
 
 	parms.fovX = tr.refdef.fov_x;
 	parms.fovY = tr.refdef.fov_y;
-	
-	parms.stereoFrame = tr.refdef.stereoFrame;
+
+	parms.stereoFrame = VK_XR_Drawing() ? STEREO_CENTER : tr.refdef.stereoFrame;
 
 	VectorCopy( fd->vieworg, parms.or.origin );
 	VectorCopy( fd->viewaxis[0], parms.or.axis[0] );

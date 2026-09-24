@@ -20,6 +20,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "tr_local.h"
+#include "vk_xr.h"
+qboolean tr_hudDrawing;
+qboolean tr_hudScreenDrawing;
 
 /*
 =====================
@@ -86,7 +89,8 @@ static void R_IssueRenderCommands( void ) {
 	cmdList->used = 0;
 
 	if ( backEnd.screenshotMask == 0 ) {
-		if ( ri.CL_IsMinimized() )
+		// The headset needs frames while the mirror is minimized.
+		if ( ri.CL_IsMinimized() && !VK_XR_Drawing() )
 			return; // skip backend when minimized
 		if ( backEnd.throttle )
 			return; // or throttled on demand
@@ -434,6 +438,15 @@ void RE_TakeVideoFrame( int width, int height,
 		return;
 	}
 
+#ifdef USE_VULKAN
+	if ( vk.xrDirect ) {
+		// ending the recording on its first frame keeps this to one line per \video
+		ri.Printf( PRINT_WARNING, "Video capture reads the scene framebuffer; set \\r_fbo 1 and \\vid_restart to record\n" );
+		ri.Cmd_ExecuteText( EXEC_APPEND, "stopvideo\n" );
+		return;
+	}
+#endif
+
 	backEnd.screenshotMask |= SCREENSHOT_AVI;
 
 	cmd = &backEnd.vcmd;
@@ -468,6 +481,31 @@ void RE_FinishBloom( void )
 	}
 
 	cmd->commandId = RC_FINISHBLOOM;
+}
+
+void RE_HUDBufferStart( qboolean clear ) {
+	hudBufferCommand_t *cmd;
+	if ( !tr.registered ) { return; }
+	cmd = R_GetCommandBufferReserved( sizeof( *cmd ), 0 );
+	if ( !cmd ) { return; }
+	cmd->commandId = RC_HUD_BUFFER;
+	cmd->start = qtrue;
+	cmd->clear = clear;
+	cmd->overlay = ri.Cvar_VariableIntegerValue( "vr_currentHudDrawStatus" ) == 2;
+	/* First-person follow overlays belong in the native-resolution screen
+	 * source; only the floating HUD uses the HUD texture. */
+	tr_hudScreenDrawing = cmd->overlay && VK_XR_Screen() != NULL;
+	tr_hudDrawing = !tr_hudScreenDrawing;
+}
+void RE_HUDBufferEnd( void ) {
+	hudBufferCommand_t *cmd;
+	if ( !tr.registered ) { return; }
+	cmd = R_GetCommandBufferReserved( sizeof( *cmd ), 0 );
+	if ( !cmd ) { return; }
+	cmd->commandId = RC_HUD_BUFFER;
+	cmd->start = cmd->clear = cmd->overlay = qfalse;
+	tr_hudDrawing = qfalse;
+	tr_hudScreenDrawing = qfalse;
 }
 
 

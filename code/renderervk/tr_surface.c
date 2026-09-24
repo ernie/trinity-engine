@@ -277,9 +277,22 @@ static void RB_SurfaceSprite( void ) {
 	vec3_t		axisLeft, axisUp;
 	vec3_t		left, up;
 	float		radius;
+	float       radiusY;
 
 	// calculate the xyz locations for the four corners
 	radius = backEnd.currentEntity->e.radius;
+	radiusY = tess.shader == tr.hudShader ? radius * 0.75f : radius;
+	if ( backEnd.currentEntity->e.renderfx & RF_WORLD_ORIENTED ) {
+		VectorScale( backEnd.currentEntity->e.axis[1], radius, left );
+		VectorScale( backEnd.currentEntity->e.axis[2], radiusY, up );
+		if ( backEnd.viewParms.portalView == PV_MIRROR ) {
+			VectorInverse( left );
+		}
+		if ( RB_CaptureDeferredHud( backEnd.currentEntity->e.origin, left, up,
+			backEnd.currentEntity->e.shader ) ) return;
+		RB_AddQuadStamp( backEnd.currentEntity->e.origin, left, up, backEnd.currentEntity->e.shader );
+		return;
+	}
 
 	// Default tier is eye-facing and horizon-locked so sprites hold their
 	// world orientation under camera motion; RF_VIEW_ORIENTED opts back
@@ -293,7 +306,7 @@ static void RB_SurfaceSprite( void ) {
 
 	if ( backEnd.currentEntity->e.rotation == 0.0 ) {
 		VectorScale( axisLeft, radius, left );
-		VectorScale( axisUp, radius, up );
+		VectorScale( axisUp, radiusY, up );
 	} else {
 		float	s, c;
 		float	ang;
@@ -303,9 +316,9 @@ static void RB_SurfaceSprite( void ) {
 		c = cos( ang );
 
 		VectorScale( axisLeft, c * radius, left );
-		VectorMA( left, -s * radius, axisUp, left );
+		VectorMA( left, -s * radiusY, axisUp, left );
 
-		VectorScale( axisUp, c * radius, up );
+		VectorScale( axisUp, c * radiusY, up );
 		VectorMA( up, s * radius, axisLeft, up );
 	}
 
@@ -313,6 +326,8 @@ static void RB_SurfaceSprite( void ) {
 		VectorSubtract( vec3_origin, left, left );
 	}
 
+	if ( RB_CaptureDeferredHud( backEnd.currentEntity->e.origin, left, up,
+		backEnd.currentEntity->e.shader ) ) return;
 	RB_AddQuadStamp( backEnd.currentEntity->e.origin, left, up, backEnd.currentEntity->e.shader );
 }
 
@@ -758,7 +773,8 @@ static void RB_SurfaceRailCore( void ) {
 	CrossProduct( v1, v2, right );
 	VectorNormalize( right );
 
-	DoRailCore( start, end, right, len, r_railCoreWidth->integer );
+	// Laser width is independent of the railgun cvar.
+	DoRailCore( start, end, right, len, e->reType == RT_LASERSIGHT ? 1 : r_railCoreWidth->integer );
 }
 
 
@@ -1508,6 +1524,7 @@ static void RB_SurfaceEntity( const surfaceType_t *surfType ) {
 		RB_SurfaceBeam();
 		break;
 	case RT_RAIL_CORE:
+	case RT_LASERSIGHT:
 		RB_SurfaceRailCore();
 		break;
 	case RT_RAIL_RINGS:

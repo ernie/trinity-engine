@@ -1,0 +1,23 @@
+#ifndef CL_VR_INPUT_H
+#define CL_VR_INPUT_H
+#include "../vrcommon/vr_clientinfo.h"
+#include "../vrcommon/vr_cvars.h"
+extern vr_clientinfo_t vr;
+/* Include after client.h (refXRFrame_t/usercmd_t). */
+void CL_VRInput_Init( void );
+void CL_VRInput_Shutdown( void );
+void CL_VRInput_Reset( void );
+void CL_VRInput_Frame( const refXRFrame_t *frame );
+qboolean CL_VRInput_ApplyMove( usercmd_t *cmd );
+void CL_VRInput_QuaternionAngles( const float quaternion[4], float gripPitch, vec3_t angles );
+float CL_VRInput_StickCurve( float value, float deadzone );
+const char *CL_VRInput_MenuSkipName( void );
+const char *CL_VRInput_MenuCancelName( void );
+void CL_VRInput_HapticEvent( const char *event, int position, int flags, int intensity, float angle, float height );
+void VKeyboard_Show( void );
+void VKeyboard_Hide( void );
+qboolean VKeyboard_IsActive( void );
+void VKeyboard_Draw( void );
+qboolean VKeyboard_HandleKey( int key );
+void VKeyboard_HandleOffhandKey( qboolean down );
+#endif

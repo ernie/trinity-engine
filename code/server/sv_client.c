@@ -2222,6 +2222,10 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 		MSG_ReadDeltaUsercmdKey( msg, key, oldcmd, cmd, cl->isVR ? 32 : 16 );
 		oldcmd = cmd;
 	}
+	// Do not apply commands from a truncated packet.
+	if ( msg->readcount > msg->cursize ) {
+		return;
+	}
 
 	// save time for ping calculation
 	if ( cl->frames[ cl->messageAcknowledge & PACKET_MASK ].messageAcked == 0 ) {
@@ -2258,6 +2262,10 @@ static void SV_UserMove( client_t *cl, msg_t *msg, qboolean delta ) {
 	// of ones we have previously received, but the servertimes
 	// in the commands will cause them to be immediately discarded
 	for ( i = 0; i < cmdCount; i++ ) {
+		// SV_ClientThink below can drop the client during this batch.
+		if ( cl->state != CS_ACTIVE ) {
+			return;
+		}
 		// if this is a cmd from before a map_restart ignore it
 		if ( cmds[i].serverTime - cmds[cmdCount-1].serverTime > 0 ) {
 			continue;

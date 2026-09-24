@@ -21,6 +21,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
 #include "client.h"
+#include "cl_vr_input.h"
+#include "cl_vr_modules.h"
+#include "../qcommon/vm_vr.h"
+#include "../vrcommon/vr_state.h"
+#include "cl_vr.h"
 
 #include "../botlib/botlib.h"
 
@@ -808,6 +813,33 @@ static void *VM_ArgPtr( intptr_t intValue ) {
 
 static qboolean UI_GetValue( char* value, int valueSize, const char* key ) {
 
+	if ( !Q_stricmp( key, "trap_HapticEvent" ) ) {
+		Com_sprintf( value, valueSize, "%i", UI_HAPTICEVENT );
+		return qtrue;
+	}
+	if ( !Q_stricmp( key, "trap_VKeyboard_Show" ) ) {
+		Com_sprintf( value, valueSize, "%i", UI_VKEYBOARD_SHOW );
+		return qtrue;
+	}
+	if ( !Q_stricmp( key, "trap_VKeyboard_Hide" ) ) {
+		Com_sprintf( value, valueSize, "%i", UI_VKEYBOARD_HIDE );
+		return qtrue;
+	}
+	if ( !Q_stricmp( key, "trap_VKeyboard_IsActive" ) ) {
+		Com_sprintf( value, valueSize, "%i", UI_VKEYBOARD_ISACTIVE );
+		return qtrue;
+	}
+	if ( !Q_stricmp( key, "trap_VKeyboard_HandleKey" ) ) {
+		Com_sprintf( value, valueSize, "%i", UI_VKEYBOARD_HANDLEKEY );
+		return qtrue;
+	}
+
+	if ( ( VR_IsActiveMode() || CL_VR_RestartWantsVR() ) &&
+		!Q_stricmp( key, "trap_VR_RegisterState" ) ) {
+		Com_sprintf( value, valueSize, "%i", UI_VR_REGISTERSTATE );
+		return qtrue;
+	}
+
 	if ( !Q_stricmp( key, "trap_R_AddRefEntityToScene2" ) ) {
 		Com_sprintf( value, valueSize, "%i", UI_R_ADDREFENTITYTOSCENE2 );
 		return qtrue;
@@ -820,6 +852,15 @@ static qboolean UI_GetValue( char* value, int valueSize, const char* key ) {
 
 	if ( !Q_stricmp( key, "trap_Cvar_SetDescription_Q3E" ) ) {
 		Com_sprintf( value, valueSize, "%i", UI_CVAR_SETDESCRIPTION );
+		return qtrue;
+	}
+
+	if ( VR_IsActiveMode() && !Q_stricmp( key, "vr_menu_skip_button" ) ) {
+		Q_strncpyz( value, CL_VRInput_MenuSkipName(), valueSize );
+		return qtrue;
+	}
+	if ( VR_IsActiveMode() && !Q_stricmp( key, "vr_menu_cancel_button" ) ) {
+		Q_strncpyz( value, CL_VRInput_MenuCancelName(), valueSize );
 		return qtrue;
 	}
 
@@ -1225,6 +1266,25 @@ static intptr_t CL_UISystemCalls( intptr_t *args ) {
 		Cvar_SetDescription2( (const char*)VMA(1), (const char*)VMA(2) );
 		return 0;
 
+	case UI_HAPTICEVENT:
+		CL_VRInput_HapticEvent( VMA(1), args[2], args[3], args[4], VMF(5), VMF(6) );
+		return 0;
+	case UI_VKEYBOARD_SHOW:
+		if ( VR_IsActiveMode() ) {
+			VKeyboard_Show();
+		}
+		return 0;
+	case UI_VKEYBOARD_HIDE:
+		VKeyboard_Hide();
+		return 0;
+	case UI_VKEYBOARD_ISACTIVE:
+		return VR_IsActiveMode() && VKeyboard_IsActive();
+	case UI_VKEYBOARD_HANDLEKEY:
+		return VR_IsActiveMode() && VKeyboard_HandleKey( args[1] );
+	case UI_VR_REGISTERSTATE:
+		VM_RegisterVRShared( uivm, VR_WRITER_UI, args[1], args[2], args[3], args[4] );
+		return 0;
+
 	case UI_TRAP_GETVALUE:
 		VM_CHECKBOUNDS( uivm, args[1], args[2] );
 		return UI_GetValue( VMA(1), args[2], VMA(3) );
@@ -1290,6 +1350,7 @@ CL_InitUI
 void CL_InitUI( void ) {
 	int		v;
 	vmInterpret_t		interpret;
+	CL_VRModulesValidateContext();
 
 	// disallow vl.collapse for UI elements
 	re.VertexLighting( qfalse );

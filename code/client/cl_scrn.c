@@ -22,6 +22,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_scrn.c -- master for refresh, status bar, console, chat, notify, etc
 
 #include "client.h"
+#include "cl_vr.h"
+#include "cl_vr_input.h"
+#include "../vrcommon/vr_state.h"
+#include "../vrcommon/vr_screen_geometry.h"
 
 static qboolean	scr_initialized;		// ready to draw
 
@@ -59,6 +63,33 @@ Adjusted for resolution and screen aspect ratio
 void SCR_AdjustFrom640( float *x, float *y, float *w, float *h ) {
 	float	xscale;
 	float	yscale;
+	if ( VR_IsActiveMode() && vr.virtual_screen ) {
+		static int rect[4], width, height;
+		static float up, down;
+		if ( width != cls.glconfig.vidWidth || height != cls.glconfig.vidHeight ||
+			up != vr.fov_angle_up || down != vr.fov_angle_down ) {
+			width = cls.glconfig.vidWidth;
+			height = cls.glconfig.vidHeight;
+			up = vr.fov_angle_up;
+			down = vr.fov_angle_down;
+			VR_ScreenCaptureRect( width, height, width, height, up, down, rect );
+		}
+		xscale = (rect[2] - rect[0]) / 640.0f;
+		yscale = (rect[3] - rect[1]) / 480.0f;
+		if ( x ) {
+			*x = *x * xscale + rect[0];
+		}
+		if ( y ) {
+			*y = *y * yscale + rect[1];
+		}
+		if ( w ) {
+			*w *= xscale;
+		}
+		if ( h ) {
+			*h *= yscale;
+		}
+		return;
+	}
 
 #if 0
 		// adjust for wide screens
@@ -519,6 +550,23 @@ SCR_DrawScreenField
 This will be called twice if rendering in stereo mode
 ==================
 */
+static void SCR_DrawTrackingStatus( void ) {
+	const float background[4] = { 0.025f, 0.025f, 0.025f, 1 };
+	const float white[4] = { 1, 1, 1, 1 };
+	const char *text = "Waiting for headset tracking...";
+	const float width = strlen( text ) * 8 + 48;
+	const float x = 320 - width * 0.5f;
+
+	if ( VR_IsActiveMode() || !CL_VR_WaitingForTracking() ) {
+		return;
+	}
+	SCR_FillRect( x, 12, width, 24, background );
+	re.SetColor( white );
+	SCR_DrawPic( x + 12, 14, 19, 19, cls.vrTrackingIcon );
+	SCR_DrawStringExt( x + 36, 20, 8, text, white, qtrue, qfalse );
+	re.SetColor( NULL );
+}
+
 static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 	qboolean uiFullscreen;
 
@@ -539,8 +587,11 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 		}
 	}
 
-	// if the menu is going to cover the entire screen, we
-	// don't need to render anything under it
+	// Keep snapshots/commands current under a fullscreen menu without drawing
+	// the covered scene. Stereo menus only need one cgame update per frame.
+	if ( VR_IsActiveMode() && uiFullscreen && stereoFrame != STEREO_RIGHT ) {
+		CL_CGameUpdate();
+	}
 	if ( uivm && !uiFullscreen ) {
 		switch( cls.state ) {
 		default:
@@ -587,11 +638,24 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 
 	// the menu draws next
 	if ( Key_GetCatcher( ) & KEYCATCH_UI && uivm ) {
+		// SP postgame UI belongs on the world-locked podium HUD sprite.
+		qboolean captureUI = VR_IsActiveMode() && cls.state == CA_ACTIVE &&
+			cl.snap.ps.pm_type == PM_INTERMISSION &&
+			CL_VR_Gametype() == GT_SINGLE_PLAYER &&
+			re.HUDBufferStart && re.HUDBufferEnd;
+		if ( captureUI ) re.HUDBufferStart( qtrue );
 		VM_Call( uivm, 1, UI_REFRESH, cls.realtime );
+		if ( captureUI ) re.HUDBufferEnd();
 	}
 
 	// console draws next
 	Con_DrawConsole ();
+	// Include the keyboard in each eye's UI capture.
+	if ( VR_IsActiveMode() ) {
+		VKeyboard_Draw();
+	}
+
+	SCR_DrawTrackingStatus();
 
 	// debug graph can be drawn on top of anything
 	if ( cl_debuggraph->integer || cl_timegraph->integer || cl_debugMove->integer ) {
@@ -612,11 +676,33 @@ void SCR_UpdateScreen( void ) {
 	static int recursive;
 	static int framecount;
 	static int next_frametime;
+	qboolean loadingFrame;
 
 	if ( !scr_initialized )
 		return; // not initialized yet
 
-	if ( framecount == cls.framecount ) {
+	/* Loading pacifiers outside CL_Frame own their XR frame. Calls made inside
+	 * an existing frame must neither acquire another image nor end that frame. */
+	loadingFrame = CL_VR_BeginLoadingFrame();
+	if ( re.DesktopTrackingStatus ) {
+		re.DesktopTrackingStatus( VR_IsActiveMode() && CL_VR_WaitingForTracking(), cls.charSetShader, cls.vrTrackingIcon );
+	}
+	if ( CL_VR_RenderingBlocked() ) {
+		/* A desktop-only frame while XR says not to render: no UI/cgame calls,
+		 * stereo scene commands, or headset image submission. */
+		if ( CL_VR_DesktopWaitingFrame() && re.DesktopTrackingStatus ) {
+			re.BeginFrame( STEREO_CENTER );
+			re.EndFrame( NULL, NULL );
+		}
+		if ( loadingFrame ) {
+			CL_VR_EndFrame();
+		}
+		return;
+	}
+
+	// OpenXR paces its own frames. Discarding an acquired XR frame here would
+	// submit no image layer and blank the loading screen between updates.
+	if ( !CL_VR_RenderStereo() && framecount == cls.framecount ) {
 		int ms = Sys_Milliseconds();
 		if ( next_frametime && ms - next_frametime < 0 ) {
 			re.ThrottleBackend();
@@ -639,8 +725,10 @@ void SCR_UpdateScreen( void ) {
 	{
 		// XXX
 		int in_anaglyphMode = Cvar_VariableIntegerValue("r_anaglyphMode");
-		// if running in stereo, we need to draw the frame twice
-		if ( cls.glconfig.stereoEnabled || in_anaglyphMode) {
+		if ( CL_VR_RenderStereo() ) {
+			// One cgame/UI submission builds the shared list for both image layers.
+			SCR_DrawScreenField( STEREO_CENTER );
+		} else if ( cls.glconfig.stereoEnabled || in_anaglyphMode ) {
 			SCR_DrawScreenField( STEREO_LEFT );
 			SCR_DrawScreenField( STEREO_RIGHT );
 		} else {
@@ -654,5 +742,6 @@ void SCR_UpdateScreen( void ) {
 		}
 	}
 
+	if (loadingFrame) CL_VR_EndFrame();
 	recursive = 0;
 }

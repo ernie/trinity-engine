@@ -1,9 +1,7 @@
 #version 450
 
-// 64 bytes
-layout(push_constant) uniform Transform {
-	mat4 mvp;
-};
+#extension GL_GOOGLE_include_directive : require
+#include "view_transform.glsl"
 
 layout(set = 0, binding = 0) uniform UBO {
 	// light/env parameters:
@@ -37,7 +35,7 @@ out gl_PerVertex {
 };
 
 void main() {
-	gl_Position = mvp * vec4(in_position, 1.0);
+	gl_Position = transformPosition(in_position);
 
 	//frag_color = in_color;
 	//frag_tex_coord0 = in_tex_coord0;

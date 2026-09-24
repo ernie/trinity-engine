@@ -20,6 +20,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 
+#include "../client/cl_renderer_recovery.h"
+
 #ifdef USE_LOCAL_HEADERS
 #	include "SDL.h"
 #ifdef USE_VULKAN_API
@@ -33,9 +35,14 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 
 #include "../client/client.h"
+#include "../client/cl_vr.h"
+#include "../vrcommon/vr_cvars.h"
 #include "../renderercommon/tr_public.h"
 #include "sdl_glw.h"
 #include "sdl_icon.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 typedef enum {
 	RSERR_OK,
@@ -179,6 +186,47 @@ static int FindNearestDisplay( int *x, int *y, int w, int h )
 }
 
 
+/* Publish desktop sizes for UI modules, independently of the XR eye extent.
+ * Refresh on every window creation so vid_restart cannot carry over another
+ * display's modes. SDL lists refresh rates separately; the UI needs sizes. */
+static void GLimp_DetectAvailableModes( void )
+{
+	char modes[ MAX_STRING_CHARS ] = { 0 };
+	int display, count, i;
+	size_t used = 0;
+
+	Cvar_Get( "r_availableModes", "", CVAR_ROM );
+	Cvar_Set( "r_availableModes", "" );
+	display = SDL_GetWindowDisplayIndex( SDL_window );
+	if ( display < 0 )
+		return;
+	count = SDL_GetNumDisplayModes( display );
+	for ( i = 0; i < count; i++ )
+	{
+		SDL_DisplayMode mode;
+		char entry[ 32 ];
+		const char *match;
+		size_t length;
+
+		if ( SDL_GetDisplayMode( display, i, &mode ) < 0 || mode.w <= 0 || mode.h <= 0 )
+			continue;
+		Com_sprintf( entry, sizeof( entry ), "%dx%d ", mode.w, mode.h );
+		match = strstr( modes, entry );
+		while ( match && match != modes && match[-1] != ' ' )
+			match = strstr( match + 1, entry );
+		if ( match )
+			continue;
+		length = strlen( entry );
+		if ( used + length >= sizeof( modes ) )
+			break;
+		memcpy( modes + used, entry, length + 1 );
+		used += length;
+	}
+	if ( used )
+		modes[ used - 1 ] = '\0';
+	Cvar_Set( "r_availableModes", modes );
+}
+
 static SDL_HitTestResult SDL_HitTestFunc( SDL_Window *win, const SDL_Point *area, void *data )
 {
 	if ( Key_GetCatcher() & KEYCATCH_CONSOLE && keys[ K_ALT ].down )
@@ -204,6 +252,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	int x;
 	int y;
 	Uint32 flags = SDL_WINDOW_SHOWN;
+	qboolean mirror = vulkan && CL_VR_RestartWantsVR();
 
 #ifdef USE_VULKAN_API
 	if ( vulkan ) {
@@ -253,7 +302,11 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 
 	Com_Printf( "...setting mode %d:", mode );
 
-	if ( !CL_GetModeInfo( &config->vidWidth, &config->vidHeight, &config->windowAspect, mode, modeFS, glw_state.desktop_width, glw_state.desktop_height, fullscreen ) )
+	if ( mirror ) {
+		config->vidWidth = fullscreen ? glw_state.desktop_width : vr_mirrorWidth->integer;
+		config->vidHeight = fullscreen ? glw_state.desktop_height : vr_mirrorHeight->integer;
+		config->windowAspect = (float)config->vidWidth / config->vidHeight;
+	} else if ( !CL_GetModeInfo( &config->vidWidth, &config->vidHeight, &config->windowAspect, mode, modeFS, glw_state.desktop_width, glw_state.desktop_height, fullscreen ) )
 	{
 		Com_Printf( " invalid mode\n" );
 		return RSERR_INVALID_MODE;
@@ -281,11 +334,15 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 
 	if ( fullscreen )
 	{
+		if ( mirror ) {
+			flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+		} else {
 #ifdef MACOS_X
-		flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+			flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 #else
-		flags |= SDL_WINDOW_FULLSCREEN;
+			flags |= SDL_WINDOW_FULLSCREEN;
 #endif
+		}
 	}
 	else if ( r_noborder->integer )
 	{
@@ -435,7 +492,15 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			continue;
 		}
 
-		if ( fullscreen )
+		if ( mirror && vr_mirrorEnabled && !vr_mirrorEnabled->integer )
+		{
+			// A disabled mirror keeps no window on the desktop. HIDDEN marks the
+			// window minimized, so the renderer skips the swapchain while the
+			// headset keeps drawing.
+			SDL_HideWindow( SDL_window );
+		}
+
+		if ( fullscreen && !mirror )
 		{
 			SDL_DisplayMode mode;
 
@@ -549,6 +614,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	glw_state.window_height = config->vidHeight;
 
 	SDL_WarpMouseInWindow( SDL_window, glw_state.window_width / 2, glw_state.window_height / 2 );
+	GLimp_DetectAvailableModes();
 
 	return RSERR_OK;
 }
@@ -566,8 +632,12 @@ static rserr_t GLimp_StartDriverAndSetMode( int mode, const char *modeFS, qboole
 	if ( fullscreen && in_nograb->integer )
 	{
 		Com_Printf( "Fullscreen not allowed with \\in_nograb 1\n");
-		Cvar_Set( "r_fullscreen", "0" );
-		r_fullscreen->modified = qfalse;
+		if ( vulkan && CL_VR_RestartWantsVR() ) {
+			Cvar_Set2( "vr_mirrorFullscreen", "0", qtrue );
+		} else {
+			Cvar_Set( "r_fullscreen", "0" );
+			r_fullscreen->modified = qfalse;
+		}
 		fullscreen = qfalse;
 	}
 
@@ -639,7 +709,7 @@ void GLimp_Init( glconfig_t *config )
 	{
 		if ( err == RSERR_FATAL_ERROR )
 		{
-			Com_Error( ERR_FATAL, "GLimp_Init() - could not load OpenGL subsystem" );
+			CL_RendererError( ERR_FATAL, "GLimp_Init() - could not load OpenGL subsystem" );
 			return;
 		}
 
@@ -649,7 +719,7 @@ void GLimp_Init( glconfig_t *config )
 			if ( GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer, qfalse ) != RSERR_OK )
 			{
 				// Nothing worked, give up
-				Com_Error( ERR_FATAL, "GLimp_Init() - could not load OpenGL subsystem" );
+				CL_RendererError( ERR_FATAL, "GLimp_Init() - could not load OpenGL subsystem" );
 				return;
 			}
 		}
@@ -710,6 +780,7 @@ of Vulkan
 void VKimp_Init( glconfig_t *config )
 {
 	rserr_t err;
+	qboolean fullscreen;
 
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 	InitSig();
@@ -736,23 +807,26 @@ void VKimp_Init( glconfig_t *config )
 	// feedback to renderer configuration
 	glw_state.config = config;
 
+	// Apply the mirror's latched settings without changing flatscreen cvars.
+	VR_InitMirrorCvars();
+	fullscreen = CL_VR_RestartWantsVR() ? vr_mirrorFullscreen->integer : r_fullscreen->integer;
 	// Create the window and set up the context
-	err = GLimp_StartDriverAndSetMode( r_mode->integer, r_modeFullscreen->string, r_fullscreen->integer, qtrue /* Vulkan */ );
+	err = GLimp_StartDriverAndSetMode( r_mode->integer, r_modeFullscreen->string, fullscreen, qtrue /* Vulkan */ );
 	if ( err != RSERR_OK )
 	{
 		if ( err == RSERR_FATAL_ERROR )
 		{
-			Com_Error( ERR_FATAL, "VKimp_Init() - could not load Vulkan subsystem" );
+			CL_RendererError( ERR_FATAL, "VKimp_Init() - could not load Vulkan subsystem" );
 			return;
 		}
 
 		Com_Printf( "Setting r_mode %d failed, falling back on r_mode %d\n", r_mode->integer, 3 );
 
-		err = GLimp_StartDriverAndSetMode( 3, "", r_fullscreen->integer, qtrue /* Vulkan */ );
+		err = GLimp_StartDriverAndSetMode( 3, "", fullscreen, qtrue /* Vulkan */ );
 		if( err != RSERR_OK )
 		{
 			// Nothing worked, give up
-			Com_Error( ERR_FATAL, "VKimp_Init() - could not load Vulkan subsystem" );
+			CL_RendererError( ERR_FATAL, "VKimp_Init() - could not load Vulkan subsystem" );
 			return;
 		}
 	}
@@ -762,7 +836,7 @@ void VKimp_Init( glconfig_t *config )
 	if ( qvkGetInstanceProcAddr == NULL )
 	{
 		SDL_QuitSubSystem( SDL_INIT_VIDEO );
-		Com_Error( ERR_FATAL, "VKimp_Init: qvkGetInstanceProcAddr is NULL" );
+		CL_RendererError( ERR_FATAL, "VKimp_Init: qvkGetInstanceProcAddr is NULL" );
 	}
 
 	// These values force the UI to disable driver selection
@@ -923,4 +997,26 @@ void Sys_SetClipboardBitmap( const byte *bitmap, int length )
 	}
 	CloseClipboard();
 #endif
+}
+
+
+int Sys_VRFailureDialog( const char *reason ) {
+	const SDL_MessageBoxButtonData buttons[] = {
+		{ 0, 1, "Retry" },
+		{ SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT | SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 0, "Flatscreen" },
+		{ 0, 2, "Quit" }
+	};
+	SDL_MessageBoxData box;
+	int selected = 0;
+
+	Com_Memset( &box, 0, sizeof( box ) );
+	box.flags = SDL_MESSAGEBOX_WARNING;
+	box.title = "Trinity Engine - VR startup failed";
+	box.message = reason && *reason ? reason : "VR could not start.";
+	box.numbuttons = 3;
+	box.buttons = buttons;
+	if ( SDL_ShowMessageBox( &box, &selected ) < 0 ) {
+		return 0;
+	}
+	return selected == 1 ? 1 : selected == 2 ? 2 : 0;
 }

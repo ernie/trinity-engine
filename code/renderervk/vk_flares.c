@@ -65,6 +65,7 @@ typedef struct flare_s {
 
 	portalView_t portalView;
 	int			frameSceneNum;
+	stereoFrame_t stereoFrame;
 	void		*surface;
 	int			fogNum;
 
@@ -75,17 +76,71 @@ typedef struct flare_s {
 	float		deferredIntensity;	// drawIntensity captured at own-view test; later PV_NONE views zero drawIntensity before the deferred draw
 
 	int			windowX, windowY;
+	int viewportX, viewportY, viewportHeight;
 	int			viewportWidth;		// owning view's viewport width, for corona sizing at deferred draw time
 	float		eyeZ;
 	float		drawZ;
 
 	vec3_t		origin;
 	vec3_t		color;
+	qboolean multiview;
+	viewParms_t owningView;
+	vec3_t billboardLeft, billboardUp;
+	qboolean sourceVisible[2], testedSource[2];
+	int eyeFadeTime[2];
+	float eyeIntensity[2];
+	uint64_t generation;
+	uint32_t result[2];
 } flare_t;
 
 static flare_t	r_flareStructs[ MAX_FLARES ];
 static flare_t	*r_activeFlares, *r_inactiveFlares;
 
+typedef struct {
+	flare_t *flare;
+	uint64_t generation;
+	qboolean sourceVisible[2];
+} flareProbe_t;
+static flareProbe_t r_flareProbes[NUM_COMMAND_BUFFERS][MAX_FLARES];
+static uint32_t r_flareProbeCount[NUM_COMMAND_BUFFERS];
+static uint64_t r_flareGeneration;
+
+/* Called only after this command slot's fence. Other slots may be in flight:
+ * never read or clear their storage, even for a recycled flare. */
+void RB_BeginFlareFrame( qboolean completed ) {
+	uint32_t slot = vk.cmd_index, i;
+	byte *base;
+	if ( !vk.storage.buffer_ptr )
+		return;
+	base = vk.storage.buffer_ptr + slot * MAX_FLARES * vk.storage_alignment;
+	if ( completed )
+		for ( i = 0; i < r_flareProbeCount[slot]; i++ ) {
+			flareProbe_t *probe = &r_flareProbes[slot][i];
+			flare_t *f = probe->flare;
+			if ( f->generation == probe->generation ) {
+				memcpy( f->result, base + i * vk.storage_alignment, sizeof( f->result ) );
+				memcpy( f->testedSource, probe->sourceVisible, sizeof( f->testedSource ) );
+				f->testCount = 1;
+			}
+		}
+	r_flareProbeCount[slot] = 0;
+}
+
+/* Unique within a recording even if a later view recycles the same flare. */
+static uint32_t RB_ReserveFlareProbe( flare_t *f ) {
+	uint32_t slot = vk.cmd_index, index = r_flareProbeCount[slot];
+	flareProbe_t *probe;
+	if ( index == MAX_FLARES )
+		return UINT32_MAX;
+	memset( vk.storage.buffer_ptr + (slot * MAX_FLARES + index) * vk.storage_alignment, 0,
+			sizeof( f->result ) );
+	r_flareProbeCount[slot]++;
+	probe = &r_flareProbes[slot][index];
+	probe->flare = f;
+	probe->generation = f->generation;
+	memcpy( probe->sourceVisible, f->sourceVisible, sizeof( probe->sourceVisible ) );
+	return (slot * MAX_FLARES + index) * vk.storage_alignment;
+}
 
 /*
 ==================
@@ -99,6 +154,7 @@ void R_ClearFlares( void ) {
 		return;
 
 	Com_Memset( r_flareStructs, 0, sizeof( r_flareStructs ) );
+	Com_Memset( r_flareProbeCount, 0, sizeof( r_flareProbeCount ) );
 	r_activeFlares = NULL;
 	r_inactiveFlares = NULL;
 
@@ -108,6 +164,34 @@ void R_ClearFlares( void ) {
 	}
 }
 
+static float RB_FlareRadius( float distance, float sizeSetting, float projectionScale ) {
+	if ( distance < 1 )
+		distance = 1;
+	return 2 * distance * (sizeSetting / 640.0f + 8 / distance) / projectionScale;
+}
+
+static qboolean RB_FlareSourceVisible( const vec4_t clip ) {
+	return clip[3] > 0 && fabsf( clip[0] ) < clip[3] && fabsf( clip[1] ) < clip[3] && clip[2] > 0 &&
+		   clip[2] < clip[3];
+}
+
+/* Clip-space corner bounds retain a halo overlapping either eye's edge. */
+static qboolean RB_FlareBoundsVisible( const vec4_t clip, const vec4_t left, const vec4_t up ) {
+	int axis;
+	if ( clip[3] + fabsf( left[3] ) + fabsf( up[3] ) <= 0 )
+		return qfalse;
+	for ( axis = 0; axis < 3; axis++ ) {
+		float a = clip[axis] - clip[3], da = left[axis] - left[3], db = up[axis] - up[3];
+		if ( a - fabsf( da ) - fabsf( db ) > 0 )
+			return qfalse;
+		a = axis == 2 ? -clip[axis] : -clip[axis] - clip[3];
+		da = axis == 2 ? -left[axis] : -left[axis] - left[3];
+		db = axis == 2 ? -up[axis] : -up[axis] - up[3];
+		if ( a - fabsf( da ) - fabsf( db ) > 0 )
+			return qfalse;
+	}
+	return qtrue;
+}
 
 static flare_t *R_SearchFlare( void *surface )
 {
@@ -115,7 +199,9 @@ static flare_t *R_SearchFlare( void *surface )
 
 	// see if a flare with a matching surface, scene, and view exists
 	for ( f = r_activeFlares ; f ; f = f->next ) {
-		if ( f->surface == surface && f->frameSceneNum == backEnd.viewParms.frameSceneNum && f->portalView == backEnd.viewParms.portalView ) {
+		if ( f->surface == surface && f->stereoFrame == backEnd.refdef.stereoFrame &&
+			f->frameSceneNum == backEnd.viewParms.frameSceneNum &&
+			f->portalView == backEnd.viewParms.portalView ) {
 			return f;
 		}
 	}
@@ -137,34 +223,110 @@ void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, vec3_t 
 	vec3_t			local;
 	float			d = 1;
 	vec4_t			eye, clip, normalized, window;
+	vec3_t worldPoint = {0}, left = {0}, up = {0};
+	qboolean sourceVisible[2] = {qfalse, qfalse};
 
 	backEnd.pc.c_flareAdds++;
 
 	if ( normal && (normal[0] || normal[1] || normal[2] ) )	{
-		VectorSubtract( backEnd.viewParms.or.origin, point, local );
-		VectorNormalizeFast( local );
-		d = DotProduct( local, normal );
+		if ( backEnd.viewParms.xrMultiview ) {
+			int e, k;
+			d = -1;
+			for ( e = 0; e < 2; e++ ) {
+				vec3_t delta;
+				float facing;
+				VectorSubtract( backEnd.viewParms.eyeOrigin[e], backEnd.or.origin, delta );
+				/* Surface point/normal are model-local, including scaled entities. */
+				for ( k = 0; k < 3; k++ ) {
+					float lengthSquared = DotProduct( backEnd.or.axis[k], backEnd.or.axis[k] );
+					local[k] =
+						(lengthSquared > 0 ? DotProduct( delta, backEnd.or.axis[k] ) / lengthSquared : 0) -
+						point[k];
+				}
+				VectorNormalizeFast( local );
+				facing = DotProduct( local, normal );
+				if ( facing > d )
+					d = facing;
+			}
+		} else {
+			VectorSubtract( backEnd.viewParms.or.origin, point, local );
+			VectorNormalizeFast( local );
+			d = DotProduct( local, normal );
+		}
 		// If the viewer is behind the flare don't add it.
 		if ( d < 0 ) {
 			return;
 		}
 	}
 
-	// if the point is off the screen, don't bother adding it
-	// calculate screen coordinates and depth
-	R_TransformModelToClip( point, backEnd.or.modelMatrix, backEnd.viewParms.projectionMatrix, eye, clip );
-
-	// check to see if the point is completely off screen
-	for ( i = 0 ; i < 3 ; i++ ) {
-		if ( clip[i] >= clip[3] || clip[i] <= -clip[3] ) {
+	if ( backEnd.viewParms.xrMultiview ) {
+		vec3_t direction, corner;
+		float radius, distance, scale;
+		qboolean overlaps = qfalse;
+		int e, k;
+		for ( k = 0; k < 3; k++ )
+			worldPoint[k] = backEnd.or.origin[k] + point[0] * backEnd.or
+										  .axis[0][k] + point[1] * backEnd.or
+										  .axis[1][k] + point[2] * backEnd.or.axis[2][k];
+		VectorSubtract( worldPoint, backEnd.viewParms.or.origin, direction );
+		distance = VectorLength( direction );
+		if ( distance < .001f )
 			return;
+		VectorScale( direction, 1 / distance, direction );
+		CrossProduct( backEnd.viewParms.or.axis[2], direction, left );
+		if ( VectorLength( left ) < .001f )
+			VectorCopy( backEnd.viewParms.or.axis[1], left );
+		VectorNormalizeFast( left );
+		CrossProduct( direction, left, up );
+		/* Derive angular size from eye optics, never desktop viewport aspect. */
+		scale = fabsf( backEnd.viewParms.eyeProjection[0][0] );
+		if ( scale < .001f )
+			return;
+		radius = RB_FlareRadius( distance, r_flareSize->value, scale );
+		VectorScale( left, radius, left );
+		VectorScale( up, radius, up );
+		for ( e = 0; e < 2; e++ ) {
+			vec4_t l, u, c;
+			R_TransformModelToClip( worldPoint, backEnd.viewParms.world.modelMatrix,
+									backEnd.viewParms.eyeProjection[e], eye, c );
+			sourceVisible[e] = RB_FlareSourceVisible( c );
+			VectorAdd( worldPoint, left, corner );
+			R_TransformModelToClip( corner, backEnd.viewParms.world.modelMatrix,
+									backEnd.viewParms.eyeProjection[e], eye, l );
+			VectorAdd( worldPoint, up, corner );
+			R_TransformModelToClip( corner, backEnd.viewParms.world.modelMatrix,
+									backEnd.viewParms.eyeProjection[e], eye, u );
+			for ( k = 0; k < 4; k++ ) {
+				l[k] -= c[k];
+				u[k] -= c[k];
+			}
+			if ( RB_FlareBoundsVisible( c, l, u ) )
+				overlaps = qtrue;
 		}
-	}
+		if ( !overlaps )
+			return;
+		memset( window, 0, sizeof( window ) );
+		eye[2] = -distance;
+		clip[3] = 1;
+		clip[2] = 0;
+	} else {
+		// if the point is off the screen, don't bother adding it
+		// calculate screen coordinates and depth
+		R_TransformModelToClip( point, backEnd.or.modelMatrix, backEnd.viewParms.projectionMatrix, eye, clip );
 
-	R_TransformClipToWindow( clip, &backEnd.viewParms, normalized, window );
+		// check to see if the point is completely off screen
+		for ( i = 0; i < 3; i++ ) {
+			if ( clip[i] >= clip[3] || clip[i] <= -clip[3] ) {
+				return;
+			}
+		}
 
-	if ( window[0] < 0 || window[0] >= backEnd.viewParms.viewportWidth || window[1] < 0 || window[1] >= backEnd.viewParms.viewportHeight ) {
-		return;	// shouldn't happen, since we check the clip[] above, except for FP rounding
+		R_TransformClipToWindow( clip, &backEnd.viewParms, normalized, window );
+
+		if ( window[0] < 0 || window[0] >= backEnd.viewParms.viewportWidth || window[1] < 0 ||
+			window[1] >= backEnd.viewParms.viewportHeight ) {
+			return; // shouldn't happen, since we check the clip[] above, except for FP rounding
+		}
 	}
 
 	f = R_SearchFlare( surface );
@@ -182,18 +344,34 @@ void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, vec3_t 
 
 		f->surface = surface;
 		f->frameSceneNum = backEnd.viewParms.frameSceneNum;
+		f->stereoFrame = backEnd.refdef.stereoFrame;
 		f->portalView = backEnd.viewParms.portalView;
 		f->visible = qfalse;
 		f->fadeTime = backEnd.refdef.time - 2000;
 		f->testCount = 0;
-	} else {
-		++f->testCount;
+		f->generation = ++r_flareGeneration;
+		memset( f->result, 0, sizeof( f->result ) );
+		for ( i = 0; i < 2; i++ ) {
+			f->testedSource[i] = qfalse;
+			f->eyeIntensity[i] = 0;
+			f->eyeFadeTime[i] = backEnd.refdef.time - 2000;
+		}
 	}
 
 	f->addedFrame = backEnd.viewParms.frameCount;
 	f->fogNum = fogNum;
 
 	VectorCopy( point, f->origin );
+	f->multiview = backEnd.viewParms.xrMultiview;
+	if ( f->multiview ) {
+		f->owningView = backEnd.viewParms;
+		VectorCopy( worldPoint, f->origin );
+		VectorCopy( left, f->billboardLeft );
+		VectorCopy( up, f->billboardUp );
+		if ( f->portalView == PV_MIRROR )
+			VectorScale( f->billboardLeft, -1, f->billboardLeft );
+		memcpy( f->sourceVisible, sourceVisible, sizeof( sourceVisible ) );
+	}
 	VectorCopy( color, f->color );
 
 	// fade the intensity of the flare down as the
@@ -205,6 +383,9 @@ void RB_AddFlare( void *surface, int fogNum, vec3_t point, vec3_t color, vec3_t 
 	f->windowY = backEnd.viewParms.viewportY + window[1];
 	// captured now (own view) so the deferred draw doesn't size off whatever view is last at the 2D boundary
 	f->viewportWidth = backEnd.viewParms.viewportWidth;
+	f->viewportX = backEnd.viewParms.viewportX;
+	f->viewportY = backEnd.viewParms.viewportY;
+	f->viewportHeight = backEnd.viewParms.viewportHeight;
 
 	f->eyeZ = eye[2];
 
@@ -295,35 +476,91 @@ static float *vk_ortho( float x1, float x2,
 RB_TestFlare
 ==================
 */
+static void RB_TestMultiviewFlare( flare_t *f ) {
+	uint32_t offset;
+	vec3_t center, direction, left, up;
+	static const int corners[6][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, -1}, {1, 1}, {-1, 1}};
+	float distance = -f->eyeZ, radius, scale;
+	int e, i, k;
+	backEnd.pc.c_flareTests++;
+	for ( e = 0; e < 2; e++ ) {
+		qboolean visible = f->testCount && f->testedSource[e] && f->sourceVisible[e] && f->result[e];
+		float step = (backEnd.refdef.time - f->eyeFadeTime[e]) * .001f;
+		/* An untestable center is occluded, never promoted by the other eye. */
+		f->eyeFadeTime[e] = backEnd.refdef.time;
+		if ( step < 0 )
+			step = 0;
+		else if ( step > .25f )
+			step = .25f;
+		step *= r_flareFade->value;
+		f->eyeIntensity[e] += visible ? step : -step;
+		if ( f->eyeIntensity[e] < 0 )
+			f->eyeIntensity[e] = 0;
+		else if ( f->eyeIntensity[e] > 1 )
+			f->eyeIntensity[e] = 1;
+	}
+	f->drawIntensity = f->eyeIntensity[0] > f->eyeIntensity[1] ? f->eyeIntensity[0] : f->eyeIntensity[1];
+	offset = RB_ReserveFlareProbe( f );
+	if ( offset == UINT32_MAX )
+		return;
+	/* Tiny world-space triangles avoid the NVIDIA ViewIndex/PointSize hang.
+	 * Move the probe toward its captured camera to avoid fixture z fighting. */
+	VectorSubtract( f->owningView.or.origin, f->origin, direction );
+	VectorNormalizeFast( direction );
+	VectorMA( f->origin, .1f, direction, center );
+	scale = fabsf( f->owningView.eyeProjection[0][0] );
+	radius = 2 * (distance < 1 ? 1 : distance) / (scale * (vk.sceneWidth ? vk.sceneWidth : 1));
+	VectorCopy( f->billboardLeft, left );
+	VectorCopy( f->billboardUp, up );
+	VectorNormalizeFast( left );
+	VectorNormalizeFast( up );
+	for ( i = 0; i < 6; i++ )
+		for ( k = 0; k < 3; k++ )
+			tess.xyz[i][k] = center[k] + radius * (corners[i][0] * left[k] + corners[i][1] * up[k]);
+	tess.numVertexes = 6;
+#ifdef USE_VBO
+	tess.vboIndex = 0;
+#endif
+	backEnd.viewParms = f->owningView;
+	vk_update_mvp( f->owningView.world.modelMatrix );
+	for ( i = 0; i < VK_DESC_COUNT; i++ )
+		vk_reset_descriptor( i );
+	vk_bind_pipeline( vk.dot_pipeline );
+	vk_bind_geometry( TESS_XYZ );
+	vk_draw_dot( offset );
+}
+
 static void RB_TestFlare( flare_t *f ) {
 	qboolean		visible;
 	float			fade;
 	float			*m;
 	uint32_t		offset;
 	int				i;
+	if ( f->multiview ) {
+		RB_TestMultiviewFlare( f );
+		return;
+	}
 
 	backEnd.pc.c_flareTests++;
 
-/*
-	We don't have equivalent of glReadPixels() in vulkan
-	and explicit depth buffer reading may be very slow and require surface conversion.
+	/*
+		We don't have equivalent of glReadPixels() in vulkan
+		and explicit depth buffer reading may be very slow and require surface conversion.
 
-	So we will use storage buffer and exploit early depth tests by
-	rendering test dot in orthographic projection at projected flare coordinates
-	window-x, window-y and world-z: if test dot is not covered by
-	any world geometry - it will invoke fragment shader which will
-	fill storage buffer at desired location, then we discard fragment.
-	In next frame we read storage buffer: if there is a non-zero value
-	then our flare WAS visible (as we're working with 1-frame delay),
-	multisampled image will cause multiple fragment shader invocations.
-*/
+		So we will use storage buffer and exploit early depth tests by
+		rendering test dot in orthographic projection at projected flare coordinates
+		window-x, window-y and world-z: if test dot is not covered by
+		any world geometry - it will invoke fragment shader which will
+		fill storage buffer at desired location, then we discard fragment.
+		When the owning command slot fence completes we read its storage region: a non-zero value means
+		our flare showed in that submitted frame;
+		multisampled image will cause multiple fragment shader invocations.
+	*/
 
-	// we neeed only single uint32_t but take care of alignment
-	offset = (f - r_flareStructs) * vk.storage_alignment;
+	offset = RB_ReserveFlareProbe( f );
 
 	if ( f->testCount ) {
-		uint32_t *cnt = (uint32_t*)(vk.storage.buffer_ptr + offset);
-		if ( *cnt )
+		if ( f->result[0] )
 			visible = qtrue;
 		else
 			visible = qfalse;
@@ -333,17 +570,28 @@ static void RB_TestFlare( flare_t *f ) {
 		visible = qfalse;
 	}
 
-	// reset test result in storage buffer
-	// *((uint32_t*)(vk.storage.buffer_ptr + offset)) = 0x00;
+	if ( offset != UINT32_MAX ) {
+		m = vk_ortho( backEnd.viewParms.viewportX,
+					  backEnd.viewParms.viewportX + backEnd.viewParms.viewportWidth,
+					  backEnd.viewParms.viewportY,
+					  backEnd.viewParms.viewportY + backEnd.viewParms.viewportHeight, 0, 1 );
+		vk_update_mvp( m );
 
-	m = vk_ortho( backEnd.viewParms.viewportX, backEnd.viewParms.viewportX + backEnd.viewParms.viewportWidth,
-		backEnd.viewParms.viewportY, backEnd.viewParms.viewportY + backEnd.viewParms.viewportHeight, 0, 1 );
-	vk_update_mvp( m );
-
-	tess.xyz[0][0] = f->windowX;
-	tess.xyz[0][1] = f->windowY;
-	tess.xyz[0][2] = -f->drawZ;
-	tess.numVertexes = 1;
+		tess.xyz[0][0] = f->windowX;
+		tess.xyz[0][1] = f->windowY;
+		tess.xyz[0][2] = -f->drawZ;
+		tess.numVertexes = 1;
+		if ( VK_FlareProbeTriangles( vk.multiview, vk.renderPassIndex ) ) {
+			static const int corners[6][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, -1}, {1, 1}, {-1, 1}};
+			/* The camera is mono, but the array-view dot shader consumes triangles.
+			 * One screen pixel per side gives the same footprint as a point probe. */
+			for ( i = 0; i < 6; i++ ) {
+				tess.xyz[i][0] = f->windowX + 0.5f + corners[i][0] * 0.5f;
+				tess.xyz[i][1] = f->windowY + 0.5f + corners[i][1] * 0.5f;
+				tess.xyz[i][2] = -f->drawZ;
+			}
+			tess.numVertexes = 6;
+		}
 
 #ifdef USE_VBO
 	tess.vboIndex = 0;
@@ -356,6 +604,7 @@ static void RB_TestFlare( flare_t *f ) {
 	vk_bind_pipeline( vk.dot_pipeline );
 	vk_bind_geometry( TESS_XYZ );
 	vk_draw_dot( offset );
+	}
 
 	//Com_Memcpy( vk_world.modelview_transform, modelMatrix_original, sizeof( modelMatrix_original ) );
 	//vk_update_mvp( NULL );
@@ -451,16 +700,38 @@ static void RB_RenderFlare( flare_t *f ) {
 			return;
 	}
 
-	RB_BeginSurface( tr.flareShader, f->fogNum );
-
 	c.rgba[0] = color[0] * fogFactors[0];
 	c.rgba[1] = color[1] * fogFactors[1];
 	c.rgba[2] = color[2] * fogFactors[2];
 	c.rgba[3] = 255;
 
-	RB_AddQuadStamp2( f->windowX - size, f->windowY - size, size * 2, size * 2, 0, 0, 1, 1, c );
-
-	RB_EndSurface();
+	if ( f->multiview ) {
+		viewParms_t saved = backEnd.viewParms;
+		int e, k;
+		for ( e = 0; e < 2; e++ )
+			if ( f->eyeIntensity[e] > 0 ) {
+				float *hidden;
+				backEnd.viewParms = f->owningView;
+				/* Independent fading: clip the opposite layer so each eye keeps its own
+				 * depth answer and color. */
+				hidden = backEnd.viewParms.eyeProjection[1 - e];
+				memset( hidden, 0, 16 * sizeof( float ) );
+				hidden[14] = 2;
+				hidden[15] = 1;
+				vk_update_mvp( f->owningView.world.modelMatrix );
+				for ( k = 0; k < 3; k++ )
+					c.rgba[k] = f->color[k] * f->eyeIntensity[e] * intensity * fogFactors[k];
+				RB_BeginSurface( tr.flareShader, f->fogNum );
+				RB_AddQuadStamp( f->origin, f->billboardLeft, f->billboardUp, c );
+				RB_EndSurface();
+			}
+		backEnd.viewParms = saved;
+		vk_update_mvp( saved.world.modelMatrix );
+	} else {
+		RB_BeginSurface( tr.flareShader, f->fogNum );
+		RB_AddQuadStamp2( f->windowX - size, f->windowY - size, size * 2, size * 2, 0, 0, 1, 1, c );
+		RB_EndSurface();
+	}
 }
 
 
@@ -509,6 +780,10 @@ void RB_RenderFlares( void ) {
 	draw = qfalse;
 	prev = &r_activeFlares;
 	while ( ( f = *prev ) != NULL ) {
+		if ( f->stereoFrame != backEnd.refdef.stereoFrame ) {
+			prev = &f->next;
+			continue;
+		}
 		// throw out any flares that weren't added last frame
 		if ( backEnd.viewParms.frameCount - f->addedFrame > 0 && f->portalView == backEnd.viewParms.portalView ) {
 			*prev = f->next;
@@ -524,7 +799,7 @@ void RB_RenderFlares( void ) {
 			// deferred draw runs after later PV_NONE views (3D HUD icons) zero drawIntensity; preserve it here
 			f->deferredIntensity = f->drawIntensity;
 			if ( f->testCount == 0 ) {
-				// recently added, wait 1 frame for test result
+				// Recently added: wait until its first command-slot readback completes.
 			} else if ( f->drawIntensity ) {
 				draw = qtrue;
 			} else {
@@ -557,10 +832,12 @@ void RB_RenderFlares( void ) {
 		backEnd.viewParms.viewportY, backEnd.viewParms.viewportY + backEnd.viewParms.viewportHeight, 0.0, 1.0 );
 #endif
 
-	vk_update_mvp( m );
+	vk_update_mvp( backEnd.viewParms.xrMultiview ? backEnd.viewParms.world.modelMatrix : m );
 
 	for ( f = r_activeFlares ; f ; f = f->next ) {
-		if ( f->frameSceneNum == backEnd.viewParms.frameSceneNum && f->portalView == backEnd.viewParms.portalView && f->drawIntensity ) {
+		if ( f->stereoFrame == backEnd.refdef.stereoFrame &&
+			f->frameSceneNum == backEnd.viewParms.frameSceneNum &&
+			f->portalView == backEnd.viewParms.portalView && f->drawIntensity ) {
 			RB_RenderFlare( f );
 		}
 	}
@@ -582,6 +859,9 @@ void RB_RenderDeferredFlares( void ) {
 	flare_t				*f;
 	float				*m;
 	const trRefEntity_t	*savedEntity;
+	viewParms_t savedView;
+	orientationr_t savedOrientation;
+	qboolean savedProjection2D;
 
 	if ( !r_flares->integer || backEnd.doneFlares )
 		return;
@@ -599,27 +879,49 @@ void RB_RenderDeferredFlares( void ) {
 
 	// save/restore currentEntity so the following 2D batch flushes with the entity the caller expects
 	savedEntity = backEnd.currentEntity;
+	savedView = backEnd.viewParms;
+	savedOrientation = backEnd.or ;
+	savedProjection2D = backEnd.projection2D;
 	backEnd.currentEntity = &tr.worldEntity;
-
-	// full-window ortho; stored windowX/Y already include viewport offsets
-#ifdef USE_REVERSED_DEPTH
-	m = vk_ortho( 0, glConfig.vidWidth, 0, glConfig.vidHeight, 1.0, 0.0 );
-#else
-	m = vk_ortho( 0, glConfig.vidWidth, 0, glConfig.vidHeight, 0.0, 1.0 );
-#endif
-	vk_update_mvp( m );
+	backEnd.projection2D = qfalse;
 
 	for ( f = r_activeFlares ; f ; f = f->next ) {
 		if ( f->portalView == PV_NONE && f->addedFrame == backEnd.viewParms.frameCount ) {
 			// restore intensity zeroed by later PV_NONE (3D HUD icon) views since this flare's own test
 			f->drawIntensity = f->deferredIntensity;
-			if ( f->drawIntensity )
+			if ( f->drawIntensity ) {
+				if ( f->multiview ) {
+					backEnd.viewParms = f->owningView;
+					backEnd.or = f->owningView.world;
+					vk_update_mvp( f->owningView.world.modelMatrix );
+					vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+					RB_RenderFlare( f );
+					continue;
+				}
+				backEnd.viewParms.viewportX = f->viewportX;
+				backEnd.viewParms.viewportY = f->viewportY;
+				backEnd.viewParms.viewportWidth = f->viewportWidth;
+				backEnd.viewParms.viewportHeight = f->viewportHeight;
+				backEnd.viewParms.portalView = PV_NONE;
+#ifdef USE_REVERSED_DEPTH
+				m = vk_ortho( f->viewportX, f->viewportX + f->viewportWidth, f->viewportY,
+							  f->viewportY + f->viewportHeight, 1.0, 0.0 );
+#else
+				m = vk_ortho( f->viewportX, f->viewportX + f->viewportWidth, f->viewportY,
+							  f->viewportY + f->viewportHeight, 0.0, 1.0 );
+#endif
+				vk_update_mvp( m );
+				vk.cmd->depth_range = DEPTH_RANGE_COUNT;
 				RB_RenderFlare( f );
+			}
 		}
 	}
 
-	// Restore 2D MVP: the second RB_SetGL2D() early-returns (projection2D already true) and won't
-	// re-push it, so without this the flipped-Y flare ortho leaks into subsequent 2D rendering.
-	vk_update_mvp( NULL );
+	// Reached from the 3D boundary and from the end-of-frame fallback.
+	backEnd.viewParms = savedView;
+	backEnd.or = savedOrientation;
+	backEnd.projection2D = savedProjection2D;
 	backEnd.currentEntity = savedEntity;
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+	vk_update_mvp( NULL );
 }

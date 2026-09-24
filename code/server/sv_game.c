@@ -22,6 +22,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // sv_game.c -- interface to the game dll
 
 #include "server.h"
+#include "../qcommon/vm_vr.h"
+#include "../vrcommon/vr_state.h"
 
 #include "../botlib/botlib.h"
 
@@ -353,6 +355,10 @@ void *GVM_ArgPtr( intptr_t intValue )
 
 static qboolean SV_GetValue( char* value, int valueSize, const char* key )
 {
+	if ( !Q_stricmp( key, "trap_VR_RegisterState" ) ) {
+		Com_sprintf( value, valueSize, "%i", G_VR_REGISTERSTATE );
+		return qtrue;
+	}
 	if ( !Q_stricmp( key, "SVF_SELF_PORTAL2_Q3E" ) )
 	{
 		Com_sprintf( value, valueSize, "%i", SVF_SELF_PORTAL2 );
@@ -987,6 +993,10 @@ static intptr_t SV_GameSystemCalls( intptr_t *args ) {
 
 	case G_CVAR_SETDESCRIPTION:
 		Cvar_SetDescription2( (const char*)VMA(1), (const char*)VMA(2) );
+		return 0;
+
+	case G_VR_REGISTERSTATE:
+		VM_RegisterVRShared( gvm, VR_WRITER_GAME, args[1], args[2], args[3], args[4] );
 		return 0;
 
 	case G_TRAP_GETVALUE:

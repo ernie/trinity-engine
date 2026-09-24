@@ -1,9 +1,11 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "postprocess_source.glsl"
 
-layout(set = 0, binding = 0) uniform sampler2D texture0;
-layout(set = 1, binding = 0) uniform sampler2D texture1;
-layout(set = 2, binding = 0) uniform sampler2D texture2;
-layout(set = 3, binding = 0) uniform sampler2D texture3;
+layout(set = 0, binding = 0) uniform sceneSampler texture0;
+layout(set = 1, binding = 0) uniform sceneSampler texture1;
+layout(set = 2, binding = 0) uniform sceneSampler texture2;
+layout(set = 3, binding = 0) uniform sceneSampler texture3;
 
 layout(location = 0) in vec2 tex_coord;
 
@@ -19,7 +21,7 @@ layout(constant_id = 4) const float factor = 0.5;
 
 void main()
 {
-	vec3 base = texture(texture0, tex_coord).rgb + texture(texture1, tex_coord).rgb + texture(texture2, tex_coord).rgb + texture(texture3, tex_coord).rgb;
+	vec3 base = sceneSample(texture0, tex_coord).rgb + sceneSample(texture1, tex_coord).rgb + sceneSample(texture2, tex_coord).rgb + sceneSample(texture3, tex_coord).rgb;
 
 	if ( dot(base,base) == 0.0 )
 	{

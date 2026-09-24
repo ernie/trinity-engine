@@ -301,6 +301,7 @@
     <ClCompile Include="..\..\client\snd_mem.c" />
     <ClCompile Include="..\..\client\snd_mix.c" />
     <ClCompile Include="..\..\client\snd_wavelet.c" />
+    <ClCompile Include="..\..\qcommon\autoupdate.c" />
     <ClCompile Include="..\..\qcommon\cmd.c" />
     <ClCompile Include="..\..\qcommon\cm_load.c" />
     <ClCompile Include="..\..\qcommon\cm_patch.c" />
@@ -448,6 +449,18 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">true</ExcludedFromBuild>
     </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\qcommon\vm_vr_state.c" />
+    <ClCompile Include="..\..\vrcommon\vr_shared_sync.c" />
+    <ClCompile Include="..\..\client\cl_vr.c" />
+    <ClCompile Include="..\..\client\cl_vr_modules.c" />
+    <ClCompile Include="..\..\client\cl_vr_input.c" />
+    <ClCompile Include="..\..\client\cl_bhaptics.c" />
+    <ClCompile Include="..\..\client\cl_keyboard.c" />
+    <ClCompile Include="..\..\client\cl_renderer_recovery.c" />
+    <ClCompile Include="..\..\vrcommon\vr_cvars.c" />
+    <ClCompile Include="..\..\vrcommon\xr_loader.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -2233,6 +2233,97 @@ void S_AL_MusicUpdate( void )
 static ALCdevice *alDevice;
 static ALCcontext *alContext;
 
+/* Follow default output changes without invalidating sources or sound handles.
+ * A named s_alDevice stays pinned; drivers without the extension stay put.
+ * https://openal-soft.org/openal-extensions/SOFT_reopen_device.txt */
+typedef ALCboolean (ALC_APIENTRY *sndReopenDevice_t)(ALCdevice *, const ALCchar *, const ALCint *);
+static sndReopenDevice_t alReopenDevice;
+static char alDefaultOutput[1024];
+static unsigned alOutputChecked, alOutputInterval;
+
+#define ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT 0x19D6
+#define ALC_PLAYBACK_DEVICE_SOFT 0x19D4
+typedef void (ALC_APIENTRY *sndEventProc_t)(ALCenum eventType, ALCenum deviceType, ALCdevice *device,
+	ALCsizei length, const ALCchar *message, void *userParam);
+typedef ALCboolean (ALC_APIENTRY *sndEventControl_t)(ALCsizei count, const ALCenum *events, ALCboolean enable);
+typedef void (ALC_APIENTRY *sndEventCallback_t)(sndEventProc_t callback, void *userParam);
+static sndEventControl_t alEventControl;
+static sndEventCallback_t alEventCallback;
+static volatile int alOutputChanged; // written from the runtime's event thread, read on the main thread
+static qboolean alOutputEvents;
+
+static void ALC_APIENTRY S_AL_OutputEvent( ALCenum eventType, ALCenum deviceType, ALCdevice *device,
+	ALCsizei length, const ALCchar *message, void *userParam )
+{
+	if ( eventType == ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT && deviceType == ALC_PLAYBACK_DEVICE_SOFT )
+		alOutputChanged = 1;
+}
+
+static const char *S_AL_DefaultOutput(void)
+{
+	/* OpenAL Soft's default-name query reads the cached enumeration. Refresh
+	 * it first or a headset connected after startup is never discovered. */
+	if (enumeration_all_ext) qalcGetString(NULL, ALC_ALL_DEVICES_SPECIFIER);
+	return qalcGetString(NULL, enumeration_all_ext ?
+		ALC_DEFAULT_ALL_DEVICES_SPECIFIER : ALC_DEFAULT_DEVICE_SPECIFIER);
+}
+
+static void S_AL_InitOutputTracking(void)
+{
+	const char *name;
+	alReopenDevice = NULL;
+	alOutputEvents = qfalse;
+	alOutputChanged = 0;
+	alEventControl = NULL;
+	alEventCallback = NULL;
+	alDefaultOutput[0] = '\0';
+	alOutputChecked = Sys_Milliseconds();
+	alOutputInterval = 1000;
+	if (s_alDevice->string[0] || !qalcIsExtensionPresent(alDevice, "ALC_SOFT_reopen_device"))
+		return;
+	alReopenDevice = (sndReopenDevice_t)qalcGetProcAddress(alDevice, "alcReopenDeviceSOFT");
+	if ( qalcIsExtensionPresent( alDevice, "ALC_SOFT_system_events" ) ) {
+		const ALCenum events[1] = { ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT };
+		alEventControl = (sndEventControl_t)qalcGetProcAddress( alDevice, "alcEventControlSOFT" );
+		alEventCallback = (sndEventCallback_t)qalcGetProcAddress( alDevice, "alcEventCallbackSOFT" );
+		if ( alEventControl && alEventCallback && alEventControl( 1, events, ALC_TRUE ) ) {
+			alEventCallback( S_AL_OutputEvent, NULL );
+			alOutputEvents = qtrue;
+		}
+	}
+	alOutputInterval = alOutputEvents ? 0 : 15000;
+	name = S_AL_DefaultOutput();
+	if (name) Q_strncpyz(alDefaultOutput, name, sizeof(alDefaultOutput));
+}
+
+static void S_AL_UpdateOutput(void)
+{
+	unsigned now;
+	const char *name;
+	char requested[sizeof(alDefaultOutput)];
+	if (!alReopenDevice || s_alDevice->string[0]) return;
+	if (alOutputEvents) {
+		if (!alOutputChanged) return;
+		alOutputChanged = 0;
+	} else {
+		now = Sys_Milliseconds();
+		if (now - alOutputChecked < alOutputInterval) return;
+		alOutputChecked = now;
+	}
+	name = S_AL_DefaultOutput();
+	if (!name || !*name || !strcmp(name, alDefaultOutput)) return;
+	Q_strncpyz(requested, name, sizeof(requested));
+	if (alReopenDevice(alDevice, requested, NULL)) {
+		Q_strncpyz(alDefaultOutput, requested, sizeof(alDefaultOutput));
+		if (!alOutputEvents) alOutputInterval = 15000;
+		Com_Printf("OpenAL output changed to: %s\n", requested);
+	} else {
+		if (!alOutputEvents) alOutputInterval = 30000;
+		Com_Printf("OpenAL output change failed (%d); keeping current output and retrying\n",
+			qalcGetError(alDevice));
+	}
+}
+
 #ifdef USE_VOIP
 static ALCdevice *alCaptureDevice;
 static cvar_t *s_alCapture;
@@ -2304,6 +2395,7 @@ static
 void S_AL_Update( int msec )
 {
 	int i;
+	S_AL_UpdateOutput();
 
 	if(s_muted->modified)
 	{
@@ -2500,6 +2592,7 @@ void S_AL_Shutdown( void )
 	S_AL_SrcShutdown( );
 	S_AL_BufferShutdown( );
 
+	if ( alOutputEvents && alEventCallback ) alEventCallback( NULL, NULL );
 	qalcDestroyContext(alContext);
 	qalcCloseDevice(alDevice);
 
@@ -2661,6 +2754,7 @@ qboolean S_AL_Init( soundInterface_t *si )
 		return qfalse;
 	}
 	qalcMakeContextCurrent( alContext );
+	S_AL_InitOutputTracking();
 
 	// Initialize sources, buffers, music
 	S_AL_BufferInit( );

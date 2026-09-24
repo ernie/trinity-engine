@@ -835,8 +835,70 @@ endif
 default: release
 all: debug release
 
+# Native fallback requires an explicit local checkout or immutable revision.
+BUILD_TRINITY_NATIVE_FALLBACK ?= 0
+TRINITY_SOURCE_DIR ?=
+TRINITY_SOURCE_REVISION ?=
+TRINITY_NATIVE_CMAKE ?= cmake
+TRINITY_NATIVE_CMAKE_ARGS ?=
+TRINITY_NATIVE_TOOLCHAIN_FILE ?=
+TRINITY_NATIVE_GENERATOR ?= $(if $(MINGW),MSYS Makefiles,Unix Makefiles)
+TRINITY_NATIVE_C_FLAGS ?= $(if $(filter x86,$(ARCH)),-m32,)
+TRINITY_NATIVE_CONFIG ?= Release
+TRINITY_NATIVE_JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
+TRINITY_RELEASE_BUILD ?= OFF
+TRINITY_OPENXR_REVISION ?= $(shell sed -n 's/.*"openxr_revision": "\([a-f0-9]*\)".*/\1/p' misc/release-dependencies.json)
+TRINITY_NATIVE_BINDIR = $(if $(B),$(B),$(BR))
+TRINITY_NATIVE_BUILD_DIR = $(TRINITY_NATIVE_BINDIR)/native-build
+
+# Loader packaging uses the pinned Khronos source revision.
+BUILD_OPENXR_LOADER ?= 0
+TRINITY_OPENXR_SOURCE_DIR ?=
+TRINITY_OPENXR_TOOLCHAIN_FILE ?=
+TRINITY_OPENXR_CMAKE_ARGS ?=
+TRINITY_OPENXR_BUILD_DIR = $(TRINITY_NATIVE_BINDIR)/openxr-build
+
+.PHONY: openxr-loader
+openxr-loader:
+ifeq ($(CROSS_COMPILING),1)
+ifneq ($(PLATFORM),darwin)
+ifneq ($(PLATFORM)-$(ARCH),$(COMPILE_PLATFORM)-x86)
+	@test -n "$(TRINITY_OPENXR_TOOLCHAIN_FILE)" || { echo "OpenXR loader cross builds require TRINITY_OPENXR_TOOLCHAIN_FILE"; exit 1; }
+endif
+endif
+endif
+	$(TRINITY_NATIVE_CMAKE) -S misc/openxr-loader -B "$(TRINITY_OPENXR_BUILD_DIR)" -G "$(TRINITY_NATIVE_GENERATOR)" \
+		-DCMAKE_BUILD_TYPE=$(TRINITY_NATIVE_CONFIG) -DCMAKE_C_COMPILER="$(lastword $(CC))" \
+		-DCMAKE_C_FLAGS="$(TRINITY_NATIVE_C_FLAGS)" -DCMAKE_CXX_FLAGS="$(TRINITY_NATIVE_C_FLAGS)" \
+		$(if $(TRINITY_OPENXR_TOOLCHAIN_FILE),-DCMAKE_TOOLCHAIN_FILE="$(TRINITY_OPENXR_TOOLCHAIN_FILE)",) \
+		$(if $(filter darwin,$(PLATFORM)),-DCMAKE_OSX_ARCHITECTURES=$(if $(filter aarch64,$(ARCH)),arm64,$(ARCH)),) \
+		-DTRINITY_OPENXR_SOURCE_DIR="$(TRINITY_OPENXR_SOURCE_DIR)" -DTRINITY_OPENXR_REVISION="$(TRINITY_OPENXR_REVISION)" -DTRINITY_RELEASE_BUILD=$(TRINITY_RELEASE_BUILD) \
+		-DTRINITY_OPENXR_OUTPUT_DIR="$(abspath $(TRINITY_NATIVE_BINDIR))" $(TRINITY_OPENXR_CMAKE_ARGS)
+# An inherited jobserver conflicts with --parallel.
+	+MAKEFLAGS= MFLAGS= $(TRINITY_NATIVE_CMAKE) --build "$(TRINITY_OPENXR_BUILD_DIR)" --config $(TRINITY_NATIVE_CONFIG) --target openxr_loader --parallel $(TRINITY_NATIVE_JOBS)
+	$(TRINITY_NATIVE_CMAKE) --install "$(TRINITY_OPENXR_BUILD_DIR)" --component TrinityOpenXRLoader --prefix "$(abspath $(TRINITY_NATIVE_BINDIR))"
+
+.PHONY: trinity-native
+trinity-native:
+ifeq ($(CROSS_COMPILING),1)
+ifneq ($(PLATFORM),darwin)
+ifneq ($(PLATFORM)-$(ARCH),$(COMPILE_PLATFORM)-x86)
+	@test -n "$(TRINITY_NATIVE_TOOLCHAIN_FILE)" || { echo "Native fallback cross builds require TRINITY_NATIVE_TOOLCHAIN_FILE"; exit 1; }
+endif
+endif
+endif
+	$(TRINITY_NATIVE_CMAKE) -S misc/trinity-native -B "$(TRINITY_NATIVE_BUILD_DIR)" -G "$(TRINITY_NATIVE_GENERATOR)" \
+		-DCMAKE_BUILD_TYPE=$(TRINITY_NATIVE_CONFIG) -DCMAKE_C_COMPILER="$(lastword $(CC))" \
+		-DCMAKE_C_FLAGS="$(TRINITY_NATIVE_C_FLAGS)" \
+		$(if $(TRINITY_NATIVE_TOOLCHAIN_FILE),-DCMAKE_TOOLCHAIN_FILE="$(TRINITY_NATIVE_TOOLCHAIN_FILE)",) \
+		$(if $(filter darwin,$(PLATFORM)),-DCMAKE_OSX_ARCHITECTURES=$(if $(filter aarch64,$(ARCH)),arm64,$(ARCH)),) \
+		-DTRINITY_SOURCE_DIR="$(TRINITY_SOURCE_DIR)" -DTRINITY_SOURCE_REVISION="$(TRINITY_SOURCE_REVISION)" -DTRINITY_RELEASE_BUILD=$(TRINITY_RELEASE_BUILD) \
+		-DTRINITY_NATIVE_OUTPUT_DIR="$(abspath $(TRINITY_NATIVE_BINDIR))" $(TRINITY_NATIVE_CMAKE_ARGS)
+# An inherited jobserver conflicts with --parallel.
+	+MAKEFLAGS= MFLAGS= $(TRINITY_NATIVE_CMAKE) --build "$(TRINITY_NATIVE_BUILD_DIR)" --config $(TRINITY_NATIVE_CONFIG) --target trinity-native --parallel $(TRINITY_NATIVE_JOBS)
+
 debug:
-	@$(MAKE) targets B=$(BD) CFLAGS="$(CFLAGS) $(DEBUG_CFLAGS)" LDFLAGS="$(LDFLAGS) $(DEBUG_LDFLAGS)" V=$(V)
+	@$(MAKE) targets B=$(BD) TRINITY_NATIVE_CONFIG=Debug CFLAGS="$(CFLAGS) $(DEBUG_CFLAGS)" LDFLAGS="$(LDFLAGS) $(DEBUG_LDFLAGS)" V=$(V)
 
 release:
 	@$(MAKE) targets B=$(BR) CFLAGS="$(CFLAGS) $(RELEASE_CFLAGS)" V=$(V)
@@ -893,6 +955,16 @@ endif
 	@echo ""
 ifneq ($(TARGETS),)
 	@$(MAKE) $(TARGETS) V=$(V)
+endif
+ifeq ($(BUILD_TRINITY_NATIVE_FALLBACK),1)
+ifneq ($(BUILD_CLIENT),0)
+	@$(MAKE) trinity-native
+endif
+endif
+ifeq ($(BUILD_OPENXR_LOADER),1)
+ifneq ($(BUILD_CLIENT),0)
+	@$(MAKE) openxr-loader
+endif
 endif
 
 makedirs:
@@ -1072,11 +1144,20 @@ Q3RENDVOBJ = \
   $(B)/rendv/tr_surface.o \
   $(B)/rendv/tr_world.o \
   $(B)/rendv/vk.o \
+  $(B)/rendv/vk_xr.o \
+  $(B)/rendv/vk_foveation_math.o \
+  $(B)/rendv/vk_foveation.o \
+  $(B)/rendv/vk_xr_live.o \
+  $(B)/rendv/vk_xr_vulkan.o \
+  $(B)/rendv/vk_xr_input.o \
+  $(B)/rendv/vk_xr_refresh.o \
+  $(B)/rendv/vk_xr_gaze.o \
   $(B)/rendv/vk_flares.o \
   $(B)/rendv/vk_vbo.o \
 
 ifneq ($(USE_RENDERER_DLOPEN), 0)
   Q3RENDVOBJ += \
+    $(B)/rendv/xr_loader.o \
     $(B)/rendv/q_shared.o \
     $(B)/rendv/puff.o \
     $(B)/rendv/q_math.o
@@ -1174,6 +1255,14 @@ Q3OBJ = \
   $(B)/client/cl_input.o \
   $(B)/client/cl_keys.o \
   $(B)/client/cl_main.o \
+  $(B)/client/cl_vr.o \
+  $(B)/client/cl_vr_modules.o \
+  $(B)/client/cl_vr_input.o \
+  $(B)/client/cl_bhaptics.o \
+  $(B)/client/cl_keyboard.o \
+  $(B)/client/vr_cvars.o \
+  $(B)/client/xr_loader.o \
+  $(B)/client/cl_renderer_recovery.o \
   $(B)/client/cl_net_chan.o \
   $(B)/client/cl_parse.o \
   $(B)/client/cl_scrn.o \
@@ -1318,7 +1407,9 @@ endif
 Q3OBJ += \
   $(B)/client/qvm/vm.o \
   $(B)/client/qvm/vm_interpreted.o \
-  $(B)/client/qvm/vm_vr.o
+  $(B)/client/qvm/vm_vr.o \
+  $(B)/client/qvm/vm_vr_state.o \
+  $(B)/client/vr_shared_sync.o
 
 ifeq ($(HAVE_VM_COMPILED),true)
   ifeq ($(ARCH),x86)
@@ -1536,7 +1627,9 @@ endif
   Q3DOBJ += \
   $(B)/ded/qvm/vm.o \
   $(B)/ded/qvm/vm_interpreted.o \
-  $(B)/ded/qvm/vm_vr.o
+  $(B)/ded/qvm/vm_vr.o \
+  $(B)/ded/qvm/vm_vr_state.o \
+  $(B)/ded/vr_shared_sync.o
 
 ifeq ($(HAVE_VM_COMPILED),true)
   ifeq ($(ARCH),x86)
@@ -1575,6 +1668,9 @@ $(B)/client/%.o: $(CDIR)/%.c
 	$(DO_CC)
 
 $(B)/client/%.o: $(SDIR)/%.c
+	$(DO_CC)
+
+$(B)/client/%.o: code/vrcommon/%.c
 	$(DO_CC)
 
 $(B)/client/%.o: $(CMDIR)/%.c
@@ -1638,7 +1734,7 @@ $(B)/rend2/%.o: $(CMDIR)/%.c
 # --- Vulkan SPIR-V shader generation ---------------------------------------
 SHADER_DIR  = $(RVDIR)/shaders
 SHADER_DATA = $(SHADER_DIR)/spirv/shader_data.c
-SHADER_SRC  = $(wildcard $(SHADER_DIR)/*.vert $(SHADER_DIR)/*.frag $(SHADER_DIR)/*.tmpl)
+SHADER_SRC  = $(wildcard $(SHADER_DIR)/*.vert $(SHADER_DIR)/*.frag $(SHADER_DIR)/*.tmpl $(SHADER_DIR)/*.glsl) $(RVDIR)/vk_xr_color.h
 
 # Detect the glslang front-end (modern "glslang", legacy "glslangValidator"),
 # on PATH first, then under the Vulkan SDK.
@@ -1656,7 +1752,7 @@ $(BIN2HEX): $(RVDIR)/shaders/bin2hex.c
 # When glslang is available, regenerate shader_data.c from the shader sources
 # and make vk.o (which #includes it) depend on it.
 ifneq ($(GLSLANG),)
-$(SHADER_DATA): $(SHADER_SRC) $(BIN2HEX) $(SHADER_DIR)/compile.sh
+$(SHADER_DATA): $(SHADER_SRC) $(BIN2HEX) $(SHADER_DIR)/compile.sh $(SHADER_DIR)/shaders.list
 	$(DO_SHADERS)
 
 $(B)/rendv/vk.o: $(SHADER_DATA)
@@ -1666,6 +1762,9 @@ $(B)/rendv/%.o: $(RVDIR)/%.c
 	$(DO_REND_CC)
 
 $(B)/rendv/%.o: $(RCDIR)/%.c
+	$(DO_REND_CC)
+
+$(B)/rendv/%.o: code/vrcommon/%.c
 	$(DO_REND_CC)
 
 $(B)/rendv/%.o: $(CMDIR)/%.c
@@ -1684,6 +1783,9 @@ $(B)/ded/%.o: $(ADIR)/%.s
 	$(DO_AS)
 
 $(B)/ded/%.o: $(SDIR)/%.c
+	$(DO_DED_CC)
+
+$(B)/ded/%.o: code/vrcommon/%.c
 	$(DO_DED_CC)
 
 $(B)/ded/%.o: $(CMDIR)/%.c
@@ -1737,6 +1839,17 @@ install: release
 			$(STRIP) "$(DESTDIR)$$i"; \
 		fi \
 	done
+ifeq ($(BUILD_TRINITY_NATIVE_FALLBACK),1)
+ifneq ($(BUILD_CLIENT),0)
+	@mkdir -p "$(DESTDIR)"
+	@cp -R "$(BR)/trinity-native" "$(DESTDIR)/"
+endif
+endif
+ifeq ($(BUILD_OPENXR_LOADER),1)
+ifneq ($(BUILD_CLIENT),0)
+	$(TRINITY_NATIVE_CMAKE) --install "$(BR)/openxr-build" --component TrinityOpenXRLoader --prefix "$(abspath $(DESTDIR))"
+endif
+endif
 
 clean: clean-debug clean-release
 

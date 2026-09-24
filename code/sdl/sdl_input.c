@@ -27,6 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 
 #include "../client/client.h"
+#include "../vrcommon/vr_state.h"
 #include "sdl_glw.h"
 
 static cvar_t *in_keyboardDebug;
@@ -1165,7 +1166,7 @@ void HandleEvents( void )
 				key = IN_TranslateSDLToQ3Key( &e.key.keysym, qtrue );
 
 				if ( key == K_ENTER && keys[K_ALT].down ) {
-					Cvar_SetIntegerValue( "r_fullscreen", glw_state.isFullscreen ? 0 : 1 );
+					Cvar_SetIntegerValue( VR_IsActiveMode() ? "vr_mirrorFullscreen" : "r_fullscreen", glw_state.isFullscreen ? 0 : 1 );
 					Cbuf_AddText( "vid_restart\n" );
 					break;
 				}

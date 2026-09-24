@@ -22,11 +22,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_cgame.c  -- client system interaction with client game
 
 #include "client.h"
+#include "cl_vr.h"
+#include "cl_vr_input.h"
+#include "cl_vr_modules.h"
+#include "../qcommon/vm_vr.h"
+#include "../vrcommon/vr_state.h"
 #include "cl_trinity_rconset.h"
 
 #include "../botlib/botlib.h"
 
 extern	botlib_export_t	*botlib_export;
+
+static qboolean cgameUpdateOnly;
 
 //extern qboolean loadCamera(const char *name);
 //extern void startCamera(int time);
@@ -436,6 +443,7 @@ CL_ShutdonwCGame
 ====================
 */
 void CL_ShutdownCGame( void ) {
+	cgameUpdateOnly = qfalse;
 
 	Key_SetCatcher( Key_GetCatcher( ) & ~KEYCATCH_CGAME );
 	cls.cgameStarted = qfalse;
@@ -485,6 +493,29 @@ static void CL_BuildVoipHexMask( const byte *mask, char *hex, int hexSize ) {
 #endif
 
 static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
+
+	if ( !Q_stricmp( key, "trap_R_SceneComplete" ) ) {
+		Com_sprintf( value, valueSize, "%i", CG_R_SCENE_COMPLETE );
+		return qtrue;
+	}
+	if ( !Q_stricmp( key, "trap_R_HUDBufferStart" ) ) {
+		Com_sprintf( value, valueSize, "%i", CG_R_HUDBUFFER_START );
+		return qtrue;
+	}
+	if ( !Q_stricmp( key, "trap_R_HUDBufferEnd" ) ) {
+		Com_sprintf( value, valueSize, "%i", CG_R_HUDBUFFER_END );
+		return qtrue;
+	}
+	if ( !Q_stricmp( key, "trap_HapticEvent" ) ) {
+		Com_sprintf( value, valueSize, "%i", CG_HAPTICEVENT );
+		return qtrue;
+	}
+
+	if ( ( VR_IsActiveMode() || CL_VR_RestartWantsVR() ) &&
+		!Q_stricmp( key, "trap_VR_RegisterState" ) ) {
+		Com_sprintf( value, valueSize, "%i", CG_VR_REGISTERSTATE );
+		return qtrue;
+	}
 
 	if ( !Q_stricmp( key, "trap_R_AddRefEntityToScene2" ) ) {
 		Com_sprintf( value, valueSize, "%i", CG_R_ADDREFENTITYTOSCENE2 );
@@ -620,6 +651,34 @@ static void CL_ForceFixedDlights( void ) {
 	}
 }
 
+/* Preserve the existing QVM frame entry point when no image can be drawn.
+ * Queries, asset registration, sound and server-command processing continue;
+ * only per-frame drawing is discarded, before it reaches any renderer. */
+static qboolean CL_CGameDrawCall( int call ) {
+	switch ( call ) {
+	case CG_UPDATESCREEN:
+	case CG_R_CLEARSCENE:
+	case CG_R_ADDREFENTITYTOSCENE:
+	case CG_R_ADDREFENTITYTOSCENE2:
+	case CG_R_ADDPOLYTOSCENE:
+	case CG_R_ADDPOLYSTOSCENE:
+	case CG_R_ADDPOLYSTOSCENE2:
+	case CG_R_ADDSPRITEPOLYTOSCENE:
+	case CG_R_ADDLIGHTTOSCENE:
+	case CG_R_ADDADDITIVELIGHTTOSCENE:
+	case CG_R_ADDLINEARLIGHTTOSCENE:
+	case CG_R_RENDERSCENE:
+	case CG_R_SETCOLOR:
+	case CG_R_DRAWSTRETCHPIC:
+	case CG_R_SCENE_COMPLETE:
+	case CG_R_HUDBUFFER_START:
+	case CG_R_HUDBUFFER_END:
+	case CG_CIN_DRAWCINEMATIC:
+		return qtrue;
+	default:
+		return qfalse;
+	}
+}
 
 /*
 ====================
@@ -629,6 +688,9 @@ The cgame module is making a system call
 ====================
 */
 static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
+	if ( cgameUpdateOnly && CL_CGameDrawCall( args[0] ) ) {
+		return 0;
+	}
 	switch( args[0] ) {
 	case CG_PRINT:
 		Com_Printf( "%s", (const char*)VMA(1) );
@@ -941,6 +1003,7 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return re.inPVS( VMA(1), VMA(2) );
 
 	// engine extensions
+
 	case CG_R_ADDREFENTITYTOSCENE2:
 		re.AddRefEntityToScene( VMA(1), qtrue );
 		return 0;
@@ -962,6 +1025,28 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 
 	case CG_KEY_CAPSLOCK_ON:
 		return Key_CapsLockOn();
+
+	case CG_R_SCENE_COMPLETE:
+		if ( VR_IsActiveMode() && re.SceneComplete ) {
+			re.SceneComplete();
+		}
+		return 0;
+	case CG_R_HUDBUFFER_START:
+		if ( VR_IsActiveMode() && re.HUDBufferStart ) {
+			re.HUDBufferStart( args[1] );
+		}
+		return 0;
+	case CG_R_HUDBUFFER_END:
+		if ( VR_IsActiveMode() && re.HUDBufferEnd ) {
+			re.HUDBufferEnd();
+		}
+		return 0;
+	case CG_HAPTICEVENT:
+		CL_VRInput_HapticEvent( VMA(1), args[2], args[3], args[4], VMF(5), VMF(6) );
+		return 0;
+	case CG_VR_REGISTERSTATE:
+		VM_RegisterVRShared( cgvm, VR_WRITER_CGAME, args[1], args[2], args[3], args[4] );
+		return 0;
 
 	case CG_TRAP_GETVALUE:
 		VM_CHECKBOUNDS( cgvm, args[1], args[2] );
@@ -1023,6 +1108,8 @@ void CL_InitCGame( void ) {
 	int					t1, t2;
 	vmInterpret_t		interpret;
 
+	cgameUpdateOnly = qfalse;
+	CL_VRModulesValidateContext();
 	Cbuf_NestedReset();
 
 	t1 = Sys_Milliseconds();
@@ -1052,11 +1139,22 @@ void CL_InitCGame( void ) {
 		Com_Error( ERR_DROP, "VM_Create on cgame failed" );
 	}
 	cls.state = CA_LOADING;
+	CL_VR_CGameLoading();
+	// CG_INIT registers its VR mirror before nested loading-screen updates.
+	// Establish screen mode first so those updates use the correct coordinates.
+	vr.virtual_screen = VR_IsActiveMode();
+	vr.first_person_following = qfalse;
 
 	// init for this gamestate
 	// use the lastExecutedServerCommand instead of the serverCommandSequence
 	// otherwise server commands sent just before a gamestate are dropped
-	VM_Call( cgvm, 3, CG_INIT, clc.serverMessageSequence, clc.lastExecutedServerCommand, clc.clientNum );
+	VM_Call( cgvm, 3, CG_INIT,
+		clc.serverMessageSequence,
+		clc.lastExecutedServerCommand, clc.clientNum );
+	/* CG_INIT may have registered a compatible QVM. If it did not, the
+	 * renderer has already loaded this world; the native replacement must
+	 * start through ordinary vid_restart, which reconstructs the renderer. */
+	CL_VRModulesPrepareForCGame();
 
 	// reset any CVAR_CHEAT cvars registered by cgame
 	if ( !clc.demoplaying && !cl_connectedToCheatServer )
@@ -1085,6 +1183,7 @@ void CL_InitCGame( void ) {
 	// do not allow vid_restart for first time
 	cls.lastVidRestart = Sys_Milliseconds();
 }
+
 
 
 /*
@@ -1116,10 +1215,20 @@ CL_CGameRendering
 =====================
 */
 void CL_CGameRendering( stereoFrame_t stereo ) {
+	cgameUpdateOnly = qfalse;
 	VM_Call( cgvm, 3, CG_DRAW_ACTIVE_FRAME, cl.serverTime, stereo, clc.demoplaying );
 #ifdef DEBUG
 	VM_Debug( 0 );
 #endif
+}
+
+void CL_CGameUpdate( void ) {
+	if ( cls.state != CA_ACTIVE || !cgvm ) {
+		return;
+	}
+	cgameUpdateOnly = qtrue;
+	VM_Call( cgvm, 3, CG_DRAW_ACTIVE_FRAME, cl.serverTime, STEREO_CENTER, clc.demoplaying );
+	cgameUpdateOnly = qfalse;
 }
 
 

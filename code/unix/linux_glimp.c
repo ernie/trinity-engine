@@ -19,6 +19,8 @@ along with Quake III Arena source code; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
+
+#include "../client/cl_renderer_recovery.h"
 /*
 ** GLW_IMP.C
 **
@@ -1679,7 +1681,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 
 		if ( ctx == NULL )
 		{
-			Com_Error( ERR_FATAL, "Error creating GLX context" );
+			CL_RendererError( ERR_FATAL, "Error creating GLX context" );
 		}
 
 		/* GH: Free the visinfo after we're done with it */
@@ -1687,7 +1689,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 
 		if ( !qglXMakeCurrent( dpy, win, ctx ) )
 		{
-			Com_Error( ERR_FATAL, "Error setting GLX context" );
+			CL_RendererError( ERR_FATAL, "Error setting GLX context" );
 		}
 	}
 	else
@@ -1848,7 +1850,7 @@ static qboolean GLW_StartOpenGL( void )
 			}
 		}
 
-		Com_Error( ERR_FATAL, "GLW_StartOpenGL() - could not load OpenGL subsystem\n" );
+		CL_RendererError( ERR_FATAL, "GLW_StartOpenGL() - could not load OpenGL subsystem\n" );
 		return qfalse;
 	}
 
@@ -1977,7 +1979,7 @@ static qboolean GLW_StartVulkan( void )
 	//
 	if ( !GLW_LoadVulkan() )
 	{
-		Com_Error( ERR_FATAL, "GLW_StartVulkan() - could not load Vulkan subsystem\n" );
+		CL_RendererError( ERR_FATAL, "GLW_StartVulkan() - could not load Vulkan subsystem\n" );
 		return qfalse;
 	}
 
@@ -2191,3 +2193,10 @@ void IN_StartupJoystick( void ) {}
 void IN_JoyMove( void ) {}
 #endif
 #endif
+
+
+int Sys_VRFailureDialog( const char *reason ) {
+	Com_Printf( "VR startup failed: %s\nUse set vr_enabled 1; vid_restart to retry, or quit to exit. Continuing in flatscreen (graphical chooser requires SDL).\n",
+		reason && *reason ? reason : "XR backend unavailable" );
+	return 0;
+}

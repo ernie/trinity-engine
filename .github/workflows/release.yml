@@ -6,7 +6,47 @@ on:
       - 'v*'
 
 jobs:
+  dependency-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      msys32_revision: ${{ steps.pins.outputs.msys32_revision }}
+      trinity_revision: ${{ steps.pins.outputs.trinity_revision }}
+      openxr_revision: ${{ steps.pins.outputs.openxr_revision }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate pins and download matching mod assets
+        id: pins
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          manifest=misc/release-dependencies.json
+          jq -e '
+            ([.openxr_revision, .trinity_revision, .msys32_revision] |
+              all(.[]; test("^[0-9a-fA-F]{40}$"))) and
+            (.trinity_release | test("^v[0-9A-Za-z._-]+$")) and
+            ([.assets["pak8t.pk3"], .assets["pak3t.pk3"], .assets["zzz-trinity-announcer.pk3"]] |
+              all(.[]; test("^[0-9a-fA-F]{64}$")))
+          ' "$manifest"
+          jq -r 'to_entries[] | select(.key | endswith("_revision")) | "\(.key)=\(.value)"' "$manifest" >> "$GITHUB_OUTPUT"
+          tag=$(jq -r .trinity_release "$manifest")
+          revision=$(jq -r .trinity_revision "$manifest")
+          test "$(gh api "repos/ernie/trinity/commits/$tag" --jq .sha)" = "$revision"
+          mkdir -p trinity-assets
+          for asset in pak8t.pk3 pak3t.pk3 zzz-trinity-announcer.pk3; do
+            gh release download "$tag" --repo ernie/trinity --pattern "$asset" --dir trinity-assets
+            hash=$(jq -r --arg asset "$asset" '.assets[$asset]' "$manifest")
+            echo "$hash  trinity-assets/$asset" | sha256sum --check --strict
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: trinity-assets
+          path: trinity-assets
+          if-no-files-found: error
+          retention-days: 5
+
   windows-msys:
+    needs: dependency-gate
     name: Release Windows-${{ matrix.cc }} ${{ matrix.arch }}
     runs-on: windows-2022
     strategy:
@@ -31,7 +71,7 @@ jobs:
 
     - uses: msys2/setup-msys2@v2
       with:
-        install: base-devel ${{ matrix.prefix }}-binutils ${{ matrix.prefix }}-make ${{ matrix.prefix }}-${{ matrix.cc }}
+        install: base-devel git ${{ matrix.prefix }}-cmake ${{ matrix.prefix }}-binutils ${{ matrix.prefix }}-make ${{ matrix.prefix }}-${{ matrix.cc }}
         msystem: ${{ matrix.msystem }}
         path-type: minimal
         release: false
@@ -47,6 +87,19 @@ jobs:
       run: |
         make install -j$(nproc) ARCH=${{ matrix.arch }} COMPILE_ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin
 
+    - name: Build pinned runtime dependencies
+      shell: msys2 {0}
+      run: |
+        set -euo pipefail
+        bits=64; if [ "${{ matrix.arch }}" = x86 ]; then bits=32; fi
+        cmake -S misc/trinity-native -B build/release-native -G "MSYS Makefiles" "-DCMAKE_C_FLAGS=-m$bits" "-DCMAKE_CXX_FLAGS=-m$bits" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_SOURCE_REVISION=${{ needs.dependency-gate.outputs.trinity_revision }}
+        cmake --build build/release-native --config Release --target trinity-native --parallel 2
+        cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
+        cmake -S misc/openxr-loader -B build/release-loader -G "MSYS Makefiles" "-DCMAKE_C_FLAGS=-m$bits" "-DCMAKE_CXX_FLAGS=-m$bits" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
+        cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+        cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
+        cp misc/release-dependencies.json bin/
+
     - uses: actions/upload-artifact@v7
       with:
         name: windows-${{ matrix.cc }}-${{ matrix.arch }}
@@ -55,6 +108,7 @@ jobs:
         retention-days: 5
 
   windows-msys32:
+    needs: dependency-gate
     name: Release Windows-msys32 ${{ matrix.arch }}
     runs-on: windows-latest
     strategy:
@@ -70,6 +124,7 @@ jobs:
       uses: actions/checkout@v6
       with:
         repository: ec-/msys32
+        ref: ${{ needs.dependency-gate.outputs.msys32_revision }}
         path: msys
 
     - name: Extract msys32.7z
@@ -77,15 +132,44 @@ jobs:
         7z x %GITHUB_WORKSPACE%/msys/msys32.7z -o%GITHUB_WORKSPACE%/msys
       shell: cmd
 
-    - name: Prepend msys/bin to PATH
+    - name: Add the msys32 toolchain ahead of the runner tools
+      shell: pwsh
       run: |
-           echo "PATH=$GITHUB_WORKSPACE/msys/mingw/bin;$GITHUB_WORKSPACE/msys/bin;$GITHUB_WORKSPACE/msys" >> $GITHUB_ENV
-      shell: bash
+        @("$env:GITHUB_WORKSPACE/msys/mingw/bin",
+          "$env:GITHUB_WORKSPACE/msys/bin",
+          "$env:GITHUB_WORKSPACE/msys") | Add-Content -LiteralPath $env:GITHUB_PATH
+
+    - name: Verify release dependency tools
+      shell: pwsh
+      run: |
+        Get-Command cmake -ErrorAction Stop
+        Get-Command mingw32-make -ErrorAction Stop
+        Get-Command gcc -ErrorAction Stop
+        Get-Command g++ -ErrorAction Stop
+        Get-Command git -ErrorAction Stop
 
     - name: Build
       shell: cmd
       run: |
         make install ARCH=${{ matrix.arch }} DESTDIR=bin
+
+    - name: Build pinned runtime dependencies
+      shell: pwsh
+      run: |
+        $bits = if ("${{ matrix.arch }}" -eq "x86") { 32 } else { 64 }
+        cmake -S misc/trinity-native -B build/release-native -G "MinGW Makefiles" -DCMAKE_SH=CMAKE_SH-NOTFOUND "-DCMAKE_C_FLAGS=-m$bits" "-DCMAKE_CXX_FLAGS=-m$bits" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_SOURCE_REVISION=${{ needs.dependency-gate.outputs.trinity_revision }}
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake --build build/release-native --config Release --target trinity-native --parallel 2
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake -S misc/openxr-loader -B build/release-loader -G "MinGW Makefiles" -DCMAKE_SH=CMAKE_SH-NOTFOUND "-DCMAKE_C_FLAGS=-m$bits" "-DCMAKE_CXX_FLAGS=-m$bits" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Copy-Item misc/release-dependencies.json bin/
 
     - uses: actions/upload-artifact@v7
       with:
@@ -95,6 +179,7 @@ jobs:
         retention-days: 5
 
   windows-msvc:
+    needs: dependency-gate
     name: Release Windows-MSVC arm64
     runs-on: windows-2022
 
@@ -115,16 +200,37 @@ jobs:
         $env:CL = "/DTRINITY_ENGINE_VERSION=\`"$version\`""
 
         msbuild code\win32\msvc2017\trinity-ded.vcxproj -p:TargetName=trinity.ded,Configuration=Release,Platform=ARM64 /p:PlatformToolset=v143
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         copy code\win32\msvc2017\output\trinity.ded.exe bin\trinity.ded.exe
 
         msbuild code\win32\msvc2017\renderer.vcxproj -p:Configuration=Release,Platform=ARM64 /p:PlatformToolset=v143
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         copy code\win32\msvc2017\output\trinity_opengl_arm64.dll bin\
 
         msbuild code\win32\msvc2017\renderervk.vcxproj -p:Configuration=Release,Platform=ARM64 /p:PlatformToolset=v143
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         copy code\win32\msvc2017\output\trinity_vulkan_arm64.dll bin\
 
         msbuild code\win32\msvc2017\trinity.vcxproj -p:TargetName=trinity,Configuration=Release,Platform=ARM64,UseWasapi=USE_WASAPI=0 /p:PlatformToolset=v143
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         copy code\win32\msvc2017\output\trinity.exe bin\trinity.exe
+
+    - name: Build pinned runtime dependencies
+      shell: pwsh
+      run: |
+        cmake -S misc/trinity-native -B build/release-native -G "Visual Studio 17 2022" -A ARM64 -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_SOURCE_REVISION=${{ needs.dependency-gate.outputs.trinity_revision }}
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake --build build/release-native --config Release --target trinity-native --parallel 2
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake -S misc/openxr-loader -B build/release-loader -G "Visual Studio 17 2022" -A ARM64 -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Copy-Item misc/release-dependencies.json bin/
 
     - uses: actions/upload-artifact@v7
       with:
@@ -134,6 +240,7 @@ jobs:
         retention-days: 5
 
   ubuntu-x86:
+    needs: dependency-gate
     name: Release Ubuntu ${{ matrix.arch }}
     runs-on: ubuntu-24.04
     strategy:
@@ -157,10 +264,10 @@ jobs:
         if [ ${{ matrix.arch }} == "x86" ]; then
           sudo dpkg --add-architecture i386
           sudo apt-get -qq update
-          sudo apt-get -y install gcc-multilib libcurl4-openssl-dev:i386 mesa-common-dev:i386 libxxf86dga-dev:i386 libxrandr-dev:i386 libxxf86vm-dev:i386 libasound-dev:i386
+          sudo apt-get -y install cmake g++-multilib gcc-multilib libcurl4-openssl-dev:i386 mesa-common-dev:i386 libxxf86dga-dev:i386 libxrandr-dev:i386 libxxf86vm-dev:i386 libasound-dev:i386
         else
           sudo apt-get -qq update
-          sudo apt-get -y install libcurl4-openssl-dev mesa-common-dev libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev libsdl2-dev
+          sudo apt-get -y install cmake g++ libcurl4-openssl-dev mesa-common-dev libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev libsdl2-dev
         fi
 
     - uses: actions/checkout@v6
@@ -172,6 +279,19 @@ jobs:
       run: |
         make install -j$(nproc) ARCH=${{ matrix.arch }} COMPILE_ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin ${{ matrix.use_sdl }} ${{ matrix.use_voip }}
 
+    - name: Build pinned runtime dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        bits=64; if [ "${{ matrix.arch }}" = x86 ]; then bits=32; fi
+        cmake -S misc/trinity-native -B build/release-native "-DCMAKE_C_FLAGS=-m$bits" "-DCMAKE_CXX_FLAGS=-m$bits" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_SOURCE_REVISION=${{ needs.dependency-gate.outputs.trinity_revision }}
+        cmake --build build/release-native --config Release --target trinity-native --parallel 2
+        cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
+        cmake -S misc/openxr-loader -B build/release-loader "-DCMAKE_C_FLAGS=-m$bits" "-DCMAKE_CXX_FLAGS=-m$bits" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
+        cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+        cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
+        cp misc/release-dependencies.json bin/
+
     - uses: actions/upload-artifact@v7
       with:
         name: linux-${{ matrix.arch }}
@@ -180,6 +300,7 @@ jobs:
         retention-days: 5
 
   ubuntu-arm64:
+    needs: dependency-gate
     name: Release Ubuntu arm64
     runs-on: ubuntu-22.04-arm
     strategy:
@@ -194,7 +315,7 @@ jobs:
       run: |
         sudo apt-get -qq update
         sudo apt-get install -y make gcc g++
-        sudo apt-get -y install libcurl4-openssl-dev mesa-common-dev libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev libsdl2-dev
+        sudo apt-get -y install cmake g++ libcurl4-openssl-dev mesa-common-dev libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev libsdl2-dev
 
     - uses: actions/checkout@v6
       with:
@@ -205,6 +326,17 @@ jobs:
       run: |
           make install -j$(nproc) ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin
 
+    - name: Build pinned runtime dependencies
+      shell: bash
+      run: |
+        cmake -S misc/trinity-native -B build/release-native -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_SOURCE_REVISION=${{ needs.dependency-gate.outputs.trinity_revision }}
+        cmake --build build/release-native --config Release --target trinity-native --parallel 2
+        cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
+        cmake -S misc/openxr-loader -B build/release-loader -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
+        cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+        cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
+        cp misc/release-dependencies.json bin/
+
     - uses: actions/upload-artifact@v7
       with:
         name: linux-${{ matrix.arch }}
@@ -213,13 +345,14 @@ jobs:
         retention-days: 5
 
   build-armv7:
+    needs: dependency-gate
     name: Release Linux armv7
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-  
+
 
       - name: Install cross-compiler
         run: |
@@ -231,10 +364,21 @@ jobs:
           deb [arch=armhf] http://ports.ubuntu.com/ubuntu-ports noble-security main universe
           EOF'
           sudo apt-get -qq update
-          sudo apt-get -y install gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libcurl4-openssl-dev:armhf mesa-common-dev:armhf libxxf86dga-dev:armhf libxrandr-dev:armhf libxxf86vm-dev:armhf libasound-dev:armhf
+          sudo apt-get -y install cmake gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libcurl4-openssl-dev:armhf mesa-common-dev:armhf libxxf86dga-dev:armhf libxrandr-dev:armhf libxxf86vm-dev:armhf libasound-dev:armhf
 
       - name: Build
         run: make install -j$(nproc) ARCH=arm CC=arm-linux-gnueabihf-gcc HOST_CC=cc STRIP=arm-linux-gnueabihf-strip DESTDIR=bin USE_SDL=0 USE_VOIP=0
+
+      - name: Build pinned runtime dependencies
+        shell: bash
+        run: |
+          cmake -S misc/trinity-native -B build/release-native -DCMAKE_TOOLCHAIN_FILE="$PWD/misc/trinity-native/linux-armv7.cmake" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_SOURCE_REVISION=${{ needs.dependency-gate.outputs.trinity_revision }}
+          cmake --build build/release-native --config Release --target trinity-native --parallel 2
+          cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
+          cmake -S misc/openxr-loader -B build/release-loader -DCMAKE_TOOLCHAIN_FILE="$PWD/misc/trinity-native/linux-armv7.cmake" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
+          cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+          cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
+          cp misc/release-dependencies.json bin/
 
       - uses: actions/upload-artifact@v7
         with:
@@ -244,6 +388,7 @@ jobs:
           retention-days: 5
 
   macos:
+    needs: dependency-gate
     name: Release macOS universal2
     runs-on: macos-14
     environment: release
@@ -258,15 +403,10 @@ jobs:
         submodules: recursive
 
 
-    - name: Download Trinity mod paks
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        set -euo pipefail
-        mkdir -p trinity-assets
-        gh release download --repo ernie/trinity --pattern 'pak8t.pk3'                --dir trinity-assets
-        gh release download --repo ernie/trinity --pattern 'pak3t.pk3'                --dir trinity-assets
-        gh release download --repo ernie/trinity --pattern 'zzz-trinity-announcer.pk3' --dir trinity-assets
+    - uses: actions/download-artifact@v8
+      with:
+        name: trinity-assets
+        path: trinity-assets
 
     - name: Build universal2 app bundle (with mod paks bundled)
       env:
@@ -378,6 +518,8 @@ jobs:
     needs: [windows-msys, windows-msys32, windows-msvc, ubuntu-x86, ubuntu-arm64, build-armv7, macos, web]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+
       - name: Download build artifacts
         uses: actions/download-artifact@v8
 
@@ -397,15 +539,6 @@ jobs:
         # on mount.
         run: mv macos-universal2/trinity-macos-universal2.dmg .
 
-      - name: Download Trinity assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p trinity-assets
-          gh release download --repo ernie/trinity --pattern 'pak8t.pk3' --dir trinity-assets
-          gh release download --repo ernie/trinity --pattern 'pak3t.pk3' --dir trinity-assets
-          gh release download --repo ernie/trinity --pattern 'zzz-trinity-announcer.pk3' --dir trinity-assets
-
       - name: Bundle game data into platform artifacts
         run: |
           PLATFORM_DIRS=(
@@ -413,6 +546,8 @@ jobs:
             linux-x86_64
             linux-arm64
             linux-armv7
+            windows-gcc-x86
+            windows-gcc-x86_64
             windows-mingw-x86
             windows-mingw-x86_64
             windows-msvc-arm64
@@ -444,6 +579,8 @@ jobs:
           zip -r -y trinity-linux-x86_64.zip         ./linux-x86_64/
           zip -r -y trinity-linux-arm64.zip          ./linux-arm64/
           zip -r -y trinity-linux-armv7.zip          ./linux-armv7/
+          7z a -r trinity-windows-gcc-x86.zip ./windows-gcc-x86/*
+          7z a -r trinity-windows-gcc-x86_64.zip ./windows-gcc-x86_64/*
           7z a -r trinity-windows-mingw-x86.zip    ./windows-mingw-x86/*
           7z a -r trinity-windows-mingw-x86_64.zip ./windows-mingw-x86_64/*
           7z a -r trinity-windows-msvc-arm64.zip   ./windows-msvc-arm64/*

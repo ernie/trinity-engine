@@ -1,10 +1,12 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+#include "postprocess_source.glsl"
 
 // 3-tap gaussian blur 
 // exploiting linear filtering with -1.2 0 +1.2 texture offsets and 5 6 5 weighting
 // to emulate 5-tap blur
 
-layout(set = 0, binding = 0) uniform sampler2D texture0;
+layout(set = 0, binding = 0) uniform sceneSampler texture0;
 
 layout(location = 0) in vec2 tex_coord0;
 
@@ -24,9 +26,9 @@ void main()
 	tex_coord2.x -= texoffset_x;
 	tex_coord2.y -= texoffset_y;
 
-	vec3 base = texture(texture0, tex_coord0).rgb * (6.0 / 16.0)
-		+ texture(texture0, tex_coord1).rgb * (5.0 / 16.0)
-		+ texture(texture0, tex_coord2).rgb * (5.0 / 16.0);
+	vec3 base = sceneSample(texture0, tex_coord0).rgb * (6.0 / 16.0)
+		+ sceneSample(texture0, tex_coord1).rgb * (5.0 / 16.0)
+		+ sceneSample(texture0, tex_coord2).rgb * (5.0 / 16.0);
 
 	out_color = vec4( base, 1.0 );
 }

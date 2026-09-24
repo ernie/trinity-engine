@@ -22,6 +22,70 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // tr_main.c -- main control flow for each frame
 
 #include "tr_local.h"
+#include "vk_xr.h"
+#include <math.h>
+
+/* Conservative four-sided enclosure in center-camera coordinates. Every
+ * corner ray and both origins lie inside each halfspace. If a ray crosses
+ * the center horizon, disable culling rather than inventing a finite bound. */
+static void VK_MultiviewPlanes( const float center[3][3], const float origins[2][3],
+								const float axes[2][3][3], const float fov[2][4], float planes[5][4] ) {
+	float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
+	int e, x, y, k, j, p, wide = 0;
+	for ( e = 0; e < 2; e++ )
+		for ( x = 0; x < 2; x++ )
+			for ( y = 0; y < 2; y++ ) {
+				float ray[3], v[3] = {0, 0, 0};
+				for ( k = 0; k < 3; k++ )
+					ray[k] = axes[e][0][k] - tanf( fov[e][x] ) * axes[e][1][k] +
+							 tanf( fov[e][y ? 2 : 3] ) * axes[e][2][k];
+				for ( j = 0; j < 3; j++ )
+					for ( k = 0; k < 3; k++ )
+						v[j] += ray[k] * center[j][k];
+				if ( v[0] <= .00001f ) {
+					wide = 1;
+					continue;
+				}
+				for ( j = 0; j < 2; j++ ) {
+					float slope = v[j + 1] / v[0];
+					if ( slope < lo[j] )
+						lo[j] = slope;
+					if ( slope > hi[j] )
+						hi[j] = slope;
+				}
+			}
+	for ( p = 0; p < 5; p++ ) {
+		float n[3] = {0, 0, 0}, len = 0, dist[2] = {0, 0};
+		if ( wide ) {
+			for ( k = 0; k < 3; k++ )
+				planes[p][k] = 0;
+			planes[p][3] = -1;
+			continue;
+		}
+		if ( p == 4 )
+			n[0] = 1;
+		else {
+			j = p / 2 + 1;
+			n[0] = (p & 1) ? hi[j - 1] : -lo[j - 1];
+			n[j] = (p & 1) ? -1 : 1;
+		}
+		for ( k = 0; k < 3; k++ ) {
+			planes[p][k] = 0;
+			for ( j = 0; j < 3; j++ )
+				planes[p][k] += n[j] * center[j][k];
+			len += planes[p][k] * planes[p][k];
+		}
+		len = sqrtf( len );
+		for ( k = 0; k < 3; k++ ) {
+			planes[p][k] /= len;
+			for ( e = 0; e < 2; e++ )
+				dist[e] += planes[p][k] * origins[e][k];
+		}
+		/* Near culling at the nearest origin is intentionally loose: cant means a
+		   center-space zNear plane need not enclose either eye's near rectangle. */
+		planes[p][3] = (dist[0] < dist[1] ? dist[0] : dist[1]) - .001f;
+	}
+}
 
 #include <string.h> // memcpy
 
@@ -496,6 +560,19 @@ static void R_SetFarClip( void )
 	}
 
 	tr.viewParms.zFar = sqrt( farthestCornerDistance );
+	if ( tr.viewParms.xrMultiview ) {
+		int e;
+		float separation = 0;
+		for ( e = 0; e < 2; e++ ) {
+			vec3_t offset;
+			float distance;
+			VectorSubtract( tr.viewParms.eyeOrigin[e], tr.viewParms.or.origin, offset );
+			distance = VectorLength( offset );
+			if ( distance > separation )
+				separation = distance;
+		}
+		tr.viewParms.zFar += separation;
+	}
 }
 
 
@@ -577,7 +654,7 @@ R_SetupProjection
 void R_SetupProjection( viewParms_t *dest, float zProj, qboolean computeFrustum )
 {
 	float	xmin, xmax, ymin, ymax;
-	float	width, height, stereoSep = r_stereoSeparation->value;
+	float width, height, stereoSep = VK_XR_Drawing() ? 0 : r_stereoSeparation->value;
 
 	/*
 	 * offset the view origin of the viewer for stereo rendering 
@@ -599,6 +676,13 @@ void R_SetupProjection( viewParms_t *dest, float zProj, qboolean computeFrustum 
 
 	xmax = zProj * tan(dest->fovX * M_PI / 360.0f);
 	xmin = -xmax;
+	if ( dest->xrProjection ) {
+		stereoSep = 0;
+		xmin = zProj * tan( dest->xrFov[0] );
+		xmax = zProj * tan( dest->xrFov[1] );
+		ymax = zProj * tan( dest->xrFov[2] );
+		ymin = zProj * tan( dest->xrFov[3] );
+	}
 
 	width = xmax - xmin;
 	height = ymax - ymin;
@@ -619,8 +703,39 @@ void R_SetupProjection( viewParms_t *dest, float zProj, qboolean computeFrustum 
 	dest->projectionMatrix[15] = 0;
 	
 	// Now that we have all the data for the projection matrix we can also setup the view frustum.
-	if ( computeFrustum )
-		R_SetupFrustum( dest, xmin, xmax, ymax, zProj, stereoSep );
+	if ( computeFrustum ) {
+		if ( dest->xrMultiview ) {
+			float planes[5][4];
+			int plane;
+			VK_MultiviewPlanes( dest->or.axis, dest->eyeOrigin, dest->eyeAxis, dest->eyeFov, planes );
+			for ( plane = 0; plane < 5; plane++ ) {
+				VectorCopy( planes[plane], dest->frustum[plane].normal );
+				dest->frustum[plane].dist = planes[plane][3];
+				dest->frustum[plane].type = PLANE_NON_AXIAL;
+				SetPlaneSignbits( &dest->frustum[plane] );
+			}
+		} else if ( dest->xrProjection ) {
+			int plane;
+			const float extent[4] = {xmax, -xmin, ymax, -ymin};
+			for ( plane = 0; plane < 4; plane++ ) {
+				VectorScale( dest->or.axis[0], extent[plane], dest->frustum[plane].normal );
+				VectorMA( dest->frustum[plane].normal, ((plane == 1 || plane == 2) ? -zProj : zProj),
+						  dest->or.axis[plane < 2 ? 1 : 2], dest->frustum[plane].normal );
+				VectorNormalize( dest->frustum[plane].normal );
+			}
+			VectorCopy( dest->or.axis[0], dest->frustum[4].normal );
+			for ( plane = 0; plane < 5; plane++ ) {
+				dest->frustum[plane].type = PLANE_NON_AXIAL;
+				dest->frustum[plane].dist = DotProduct( dest->or.origin, dest->frustum[plane].normal );
+				if ( plane == 4 ) {
+					dest->frustum[plane].dist += r_znear->value;
+				}
+				SetPlaneSignbits( &dest->frustum[plane] );
+			}
+		} else {
+			R_SetupFrustum( dest, xmin, xmax, ymax, zProj, stereoSep );
+		}
+	}
 }
 
 
@@ -702,6 +817,38 @@ static void R_SetupProjectionZ( viewParms_t *dest )
 		dest->projectionMatrix[10] = -(dest->projectionMatrix[10] + 1.0);
 		dest->projectionMatrix[14] = -dest->projectionMatrix[14];
 #endif
+	}
+	if ( dest->xrMultiview ) {
+		int e, i, j, k;
+		const int axis[3] = {1, 2, 0};
+		const float sign[3] = {-1, 1, -1};
+		for ( e = 0; e < 2; e++ ) {
+			viewParms_t eye = *dest;
+			float relative[16] = {0};
+			vec3_t offset;
+			eye.xrMultiview = qfalse;
+			eye.xrProjection = qtrue;
+			VectorCopy( dest->eyeOrigin[e], eye.or.origin );
+			Com_Memcpy( eye.or.axis, dest->eyeAxis[e], sizeof( eye.or.axis ) );
+			Com_Memcpy( eye.xrFov, dest->eyeFov[e], sizeof( eye.xrFov ) );
+			R_SetupProjection( &eye, r_zproj->value, qfalse );
+			R_SetupProjectionZ( &eye );
+			VectorSubtract( dest->or.origin, eye.or.origin, offset );
+			for ( i = 0; i < 3; i++ ) {
+				for ( j = 0; j < 3; j++ )
+					relative[j * 4 + i] =
+						sign[i] * sign[j] * DotProduct( eye.or.axis[axis[i]], dest->or.axis[axis[j]] );
+				relative[12 + i] = sign[i] * DotProduct( eye.or.axis[axis[i]], offset );
+			}
+			relative[15] = 1;
+			for ( j = 0; j < 4; j++ )
+				for ( i = 0; i < 4; i++ ) {
+					float value = 0;
+					for ( k = 0; k < 4; k++ )
+						value += eye.projectionMatrix[k * 4 + i] * relative[j * 4 + k];
+					dest->eyeProjection[e][j * 4 + i] = value;
+				}
+		}
 	}
 }
 
@@ -982,9 +1129,10 @@ static qboolean IsMirror( const drawSurf_t *drawSurf, int entityNum )
 ** Determines if a surface is completely offscreen.
 */
 static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, qboolean *isMirror ) {
-	float shortest = 100000000;
+	float shortest[2] = {100000000, 100000000};
 	int entityNum;
-	int numTriangles;
+	int numTriangles[2] = {0, 0};
+	int eyeIndex, numEyes = tr.viewParms.xrMultiview ? 2 : 1;
 	shader_t *shader;
 	int		fogNum;
 	int dlighted;
@@ -1027,9 +1175,9 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, qboolean *isMirror 
 		pointAnd &= pointFlags;
 	}
 
-	// trivially reject
-	if ( pointAnd )
-	{
+	// The center projection does not bound canted stereo eyes. World traversal
+	// already culled against their conservative enclosure.
+	if ( pointAnd && !tr.viewParms.xrMultiview ) {
 		tess.numIndexes = 0;
 		return qtrue;
 	}
@@ -1039,29 +1187,26 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, qboolean *isMirror 
 	// based on vertex distance isn't 100% correct (we should be checking for
 	// range to the surface), but it's good enough for the types of portals
 	// we have in the game right now.
-	numTriangles = tess.numIndexes / 3;
+	for ( eyeIndex = 0; eyeIndex < numEyes; eyeIndex++ ) {
+		const float *origin =
+			tr.viewParms.xrMultiview ? tr.viewParms.eyeOrigin[eyeIndex] : tr.viewParms.or.origin;
+		numTriangles[eyeIndex] = tess.numIndexes / 3;
+		for ( i = 0; i < tess.numIndexes; i += 3 ) {
+			vec3_t normal;
+			float len;
 
-	for ( i = 0; i < tess.numIndexes; i += 3 )
-	{
-		vec3_t normal;
-		float len;
-
-		VectorSubtract( tess.xyz[tess.indexes[i]], tr.viewParms.or.origin, normal );
-
-		len = VectorLengthSquared( normal );			// lose the sqrt
-		if ( len < shortest )
-		{
-			shortest = len;
-		}
-
-		if ( DotProduct( normal, tess.normal[tess.indexes[i]] ) >= 0 )
-		{
-			numTriangles--;
+			VectorSubtract( tess.xyz[tess.indexes[i]], origin, normal );
+			len = VectorLengthSquared( normal );
+			if ( len < shortest[eyeIndex] ) {
+				shortest[eyeIndex] = len;
+			}
+			if ( DotProduct( normal, tess.normal[tess.indexes[i]] ) >= 0 ) {
+				numTriangles[eyeIndex]--;
+			}
 		}
 	}
 	tess.numIndexes = 0;
-	if ( !numTriangles )
-	{
+	if ( !numTriangles[0] && !numTriangles[1] ) {
 		return qtrue;
 	}
 
@@ -1073,12 +1218,16 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, qboolean *isMirror 
 		return qfalse;
 	}
 
-	if ( shortest > (tess.shader->portalRange*tess.shader->portalRange) )
-	{
-		return qtrue;
+	// Retain a portal if either eye can see its front within range. Do not let
+	// a close back-facing eye satisfy the range test for the other eye.
+	for ( eyeIndex = 0; eyeIndex < numEyes; eyeIndex++ ) {
+		if ( numTriangles[eyeIndex] &&
+			shortest[eyeIndex] <= (tess.shader->portalRange * tess.shader->portalRange) ) {
+			return qfalse;
+		}
 	}
 
-	return qfalse;
+	return qtrue;
 }
 
 
@@ -1207,9 +1356,9 @@ static qboolean R_MirrorViewBySurface( const drawSurf_t *drawSurf, int entityNum
 #endif
 
 #if defined (USE_VULKAN) && !defined (USE_BUFFER_CLEAR)
-	if ( tess.numVertexes > 2 && r_fastsky->integer && vk.clearAttachment ) {
+	if ( !newParms.xrMultiview && tess.numVertexes > 2 && r_fastsky->integer && vk.clearAttachment ) {
 #else
-	if ( tess.numVertexes > 2 && r_fastsky->integer ) {
+	if ( !newParms.xrMultiview && tess.numVertexes > 2 && r_fastsky->integer ) {
 #endif
 		int mins[2], maxs[2];
 		R_GetModelViewBounds( mins, maxs );
@@ -1227,6 +1376,19 @@ static qboolean R_MirrorViewBySurface( const drawSurf_t *drawSurf, int entityNum
 	R_MirrorVector (oldParms.or.axis[0], &surface, &camera, newParms.or.axis[0]);
 	R_MirrorVector (oldParms.or.axis[1], &surface, &camera, newParms.or.axis[1]);
 	R_MirrorVector (oldParms.or.axis[2], &surface, &camera, newParms.or.axis[2]);
+
+	if ( newParms.xrMultiview ) {
+		int e, j;
+		for ( e = 0; e < 2; e++ ) {
+			vec3_t offset;
+			R_MirrorPoint( oldParms.eyeOrigin[e], &surface, &camera, newParms.eyeOrigin[e] );
+			for ( j = 0; j < 3; j++ )
+				R_MirrorVector( oldParms.eyeAxis[e][j], &surface, &camera, newParms.eyeAxis[e][j] );
+			/* Portal PVS uses the destination anchor, plus transformed eye separation. */
+			VectorSubtract( newParms.eyeOrigin[e], newParms.or.origin, offset );
+			VectorAdd( newParms.pvsOrigin, offset, newParms.eyePvsOrigin[e] );
+		}
+	}
 
 	// OPTIMIZE: restrict the viewport on the mirrored view
 
@@ -1633,6 +1795,7 @@ static void R_AddEntitySurfaces( void ) {
 		case RT_LIGHTNING:
 		case RT_RAIL_CORE:
 		case RT_RAIL_RINGS:
+		case RT_LASERSIGHT:
 			// self blood sprites, talk balloons, etc should not be drawn in the primary
 			// view.  We can't just do this check for all entities, because md3
 			// entities may still want to cast shadows from them

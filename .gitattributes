@@ -1,3 +1,8 @@
 # Shell scripts must keep LF line endings so /bin/sh can execute them on every
 # platform, regardless of a developer's core.autocrlf setting.
 *.sh text eol=lf
+
+code/renderervk/shaders/shaders.list text eol=lf
+
+code/win32/msvc2017/*.vcxproj -text
+code/win32/msvc2017/*.sln -text

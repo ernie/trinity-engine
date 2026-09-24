@@ -20,6 +20,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "tr_local.h"
+#include "vk_hud_coverage.h"
 
 // tr_shader.c -- this file deals with the parsing and definition of shaders
 
@@ -3102,6 +3103,14 @@ static shader_t *FinishShader( void ) {
 	colorBlend = qfalse;
 	depthMask = qfalse;
 	fogCollapse = qfalse;
+	/* Normalize before fog/sort and pipeline derivation: captured HUD RGB is
+	 * premultiplied, so fog must attenuate both RGB and coverage together. */
+	if ( !Q_stricmp( shader.name, "sprites/vr/hud" ) ) {
+		stages[0].stateBits = VK_HudCompositeBlend( stages[0].stateBits );
+		/* Draw after world alpha/additive effects. Assign before insertion into
+		 * sortedShaders so the draw-surface key uses the HUD's final order. */
+		shader.sort = SS_BLEND2;
+	}
 
 	//
 	// set sky stuff appropriate
@@ -3407,6 +3416,8 @@ static shader_t *FinishShader( void ) {
 			int env_mask;
 			shaderStage_t *pStage = &stages[i];
 			def.state_bits = pStage->stateBits;
+			def.hud_coverage = VK_HudCoverage( shader.lightmapIndex == LIGHTMAP_2D,
+				stages[0].stateBits, pStage->stateBits );
 
 			if ( pStage->mtEnv3 ) {
 				switch ( pStage->mtEnv3 ) {
@@ -3599,6 +3610,11 @@ static shader_t *FinishShader( void ) {
 					pStage->bundle[0].tcGen = TCGEN_BAD;
 				}
 			}
+
+			if ( !strcmp( shader.name, "*virtualFloor" ) )
+				def.shader_type = TYPE_VR_FLOOR_GRID;
+			if ( !strcmp( shader.name, "*virtualScreen" ) )
+				def.shader_type = TYPE_VR_SCREEN;
 
 			def.mirror = qfalse;
 			pStage->vk_pipeline[0] = vk_find_pipeline_ext( 0, &def, qtrue );
@@ -4509,6 +4525,22 @@ static void CreateExternalShaders( void ) {
 	}
 
 	tr.sunShader = R_FindShader( "sun", LIGHTMAP_NONE, qtrue );
+	if ( vk_hud_image() ) {
+		shader_t *hud = R_FindShader( "sprites/vr/hud", LIGHTMAP_2D, qfalse );
+		if ( hud && hud->stages[0] ) {
+			tr.hudShader = hud;
+			hud->stages[0]->bundle[0].image[0] = vk_hud_image();
+		}
+		InitShader( "*virtualScreen", LIGHTMAP_2D );
+		R_CreateDefaultShading( vk_screen_image() );
+		shader.cullType = CT_TWO_SIDED;
+		stages[0].stateBits = GLS_DEPTHTEST_DISABLE;
+		tr.virtualScreenShader = FinishShader();
+		InitShader( "*virtualFloor", LIGHTMAP_2D );
+		R_CreateDefaultShading( tr.whiteImage );
+		shader.cullType = CT_TWO_SIDED;
+		tr.virtualFloorShader = FinishShader();
+	}
 }
 
 

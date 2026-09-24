@@ -1265,26 +1265,30 @@ static void RB_CalcDiffuseColor_scalar( unsigned char *colors )
 	vec3_t			lightDir;
 	vec3_t			directedLight;
 	int				numVertexes;
+	float overbright;
 	ent = backEnd.currentEntity;
 	ambientLightInt = ent->ambientLightInt;
 	VectorCopy( ent->ambientLight, ambientLight );
 	VectorCopy( ent->directedLight, directedLight );
 	VectorCopy( ent->lightDir, lightDir );
 
+	// Preserve the HDR peak when overbright lighting exceeds byte range.
+	overbright = (ent->e.renderfx & RF_OVERBRIGHT) ? (float)(1 << tr.overbrightBits) : 1.0f;
 	normal = tess.normal[0];
 
 	numVertexes = tess.numVertexes;
 	for (i = 0 ; i < numVertexes ; i++, normal += 4) {
 		float r, g, b, peak;
 		incoming = DotProduct (normal, lightDir);
-		if ( incoming <= 0 ) {
+		if ( incoming <= 0 && overbright == 1.0f ) {
 			*(int *)&colors[i*4] = ambientLightInt;
 			tess.svars.overbright[i] = 1.0f;
 			continue;
 		}
-		r = ambientLight[0] + incoming * directedLight[0];
-		g = ambientLight[1] + incoming * directedLight[1];
-		b = ambientLight[2] + incoming * directedLight[2];
+		if ( incoming < 0 ) incoming = 0;
+		r = (ambientLight[0] + incoming * directedLight[0]) * overbright;
+		g = (ambientLight[1] + incoming * directedLight[1]) * overbright;
+		b = (ambientLight[2] + incoming * directedLight[2]) * overbright;
 
 		j = myftol( r ); if ( j > 255 ) j = 255; colors[i*4+0] = j;
 		j = myftol( g ); if ( j > 255 ) j = 255; colors[i*4+1] = j;

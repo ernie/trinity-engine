@@ -22,6 +22,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_main.c  -- client main loop
 
 #include "client.h"
+#include "cl_renderer_recovery.h"
+#include "cl_vr.h"
+#include "cl_vr_modules.h"
+#include "../vrcommon/vr_state.h"
 #include "cl_discord.h"
 #include "cl_trinity.h"
 #include "cl_trinity_rconset.h"
@@ -34,6 +38,7 @@ cvar_t	*cl_motd;
 
 #ifdef USE_RENDERER_DLOPEN
 static cvar_t *cl_renderer;
+static qboolean rendererWasXR;
 #endif
 
 cvar_t	*rcon_client_password;
@@ -1062,6 +1067,7 @@ void CL_ShutdownAll( void ) {
 	// shutdown the renderer
 	if ( re.Shutdown ) {
 		if ( CL_GameSwitch() ) {
+			CL_VR_GameSwitch();
 			CL_ShutdownRef( REF_DESTROY_WINDOW ); // shutdown renderer & GLimp
 		} else {
 			re.Shutdown( REF_KEEP_CONTEXT ); // don't destroy window or context
@@ -1255,6 +1261,16 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 	}
 
 	cl_disconnecting = qtrue;
+	if ( com_errorEntered ) {
+		int errorCode = Cvar_VariableIntegerValue( "com_errorCode" );
+		if ( errorCode != ERR_DISCONNECT && errorCode != ERR_SERVERDISCONNECT )
+			CL_VR_ResetForError();
+		else
+			CL_VR_RestartAborted();
+	} else {
+		CL_VR_EndFrame();
+	}
+	CL_VRModulesReset();
 
 	// Stop demo recording
 	if ( clc.demorecording ) {
@@ -1870,7 +1886,7 @@ we also have to reload the UI and CGame because the renderer
 doesn't know what graphics to reload
 =================
 */
-static void CL_Vid_Restart( refShutdownCode_t shutdownCode ) {
+static void CL_Vid_RestartInternal( refShutdownCode_t shutdownCode ) {
 
 	// Settings may have changed so stop recording now
 	if ( CL_VideoRecording() )
@@ -1925,6 +1941,49 @@ static void CL_Vid_Restart( refShutdownCode_t shutdownCode ) {
 }
 
 
+/* Serves both modes; a renderer init failure forces one flat retry and drops all VM handles. */
+static refShutdownCode_t vrRestartCode;
+static void CL_Vid_RestartOperation( void ) {
+	CL_Vid_RestartInternal( vrRestartCode );
+}
+static void CL_Vid_Restart( refShutdownCode_t shutdownCode ) {
+	char failure[MAXPRINTMSG];
+	qboolean ok;
+
+	/* A staged display mode needs the ordinary context teardown; a sound-only restart can keep it. */
+	if ( shutdownCode == REF_KEEP_CONTEXT && CL_VR_ModePending() ) {
+		shutdownCode = REF_KEEP_WINDOW;
+	}
+	CL_VR_RestartBegin();
+	vrRestartCode = shutdownCode;
+	ok = CL_RendererTry( CL_Vid_RestartOperation, failure, sizeof( failure ) );
+	if ( ok && CL_VR_RestartComplete() ) {
+		return;
+	}
+	if ( !CL_VR_RestartWantsVR() ) {
+		Com_Error( CL_RendererFailureCode() == ERR_FATAL ? ERR_FATAL : ERR_DROP, "Video restart failed: %s", failure );
+	}
+	if ( !ok ) {
+		/* A renderer error may unwind a UI_INIT/CG_INIT syscall, so those VMs' shutdown entry points must not run. */
+		VM_Forced_Unload_Start();
+		VM_Free( cgvm );
+		cgvm = NULL;
+		VM_Free( uivm );
+		uivm = NULL;
+		VM_Forced_Unload_Done();
+		cls.cgameStarted = cls.uiStarted = qfalse;
+		FS_VM_CloseFiles( H_CGAME );
+		FS_VM_CloseFiles( H_Q3UI );
+		Key_SetCatcher( Key_GetCatcher() & ~(KEYCATCH_CGAME | KEYCATCH_UI) );
+		Cbuf_NestedReset();
+	}
+	CL_VR_RestartFallback( ok ? NULL : failure );
+	vrRestartCode = REF_DESTROY_WINDOW;
+	if ( !CL_RendererTry( CL_Vid_RestartOperation, failure, sizeof( failure ) ) || !CL_VR_RestartComplete() ) {
+		Com_Error( ERR_DROP, "Flatscreen recovery failed: %s", failure );
+	}
+}
+
 /*
 =================
 CL_Vid_Restart_f
@@ -1938,7 +1997,7 @@ static void CL_Vid_Restart_f( void ) {
 		// fast path: keep window
 		CL_Vid_Restart( REF_KEEP_WINDOW );
 	} else {
-		if ( cls.lastVidRestart ) {
+		if ( cls.lastVidRestart && !CL_VR_ModePending() ) {
 			if ( abs( cls.lastVidRestart - Sys_Milliseconds() ) < 500 ) {
 				// hack for OSP mod: do not allow vid restart right after cgame init
 				return;
@@ -2442,6 +2501,9 @@ static void CL_CheckForResend( void ) {
 		if ( !notOverflowed ) {
 			Com_Printf( S_COLOR_YELLOW "WARNING: oversize userinfo, you might be not able to join remote server!\n" );
 		}
+
+		// the server picks the command width from the key in the string it receives
+		clc.vrIdentity = atoi( Info_ValueForKey( info, "vr" ) ) == 1;
 
 		len = Com_sprintf( data, sizeof( data ), "connect \"%s\"", info );
 		// NOTE TTimo don't forget to set the right data length!
@@ -3081,16 +3143,18 @@ static void CL_CheckUserinfo( void ) {
 	if ( cvar_modifiedFlags & CVAR_USERINFO )
 	{
 		qboolean infoTruncated = qfalse;
-		const char *info;
+		char info[MAX_INFO_STRING];
 
 		cvar_modifiedFlags &= ~CVAR_USERINFO;
 
-		info = Cvar_InfoString( CVAR_USERINFO, &infoTruncated );
+		Q_strncpyz( info, Cvar_InfoString( CVAR_USERINFO, &infoTruncated ), sizeof( info ) );
 		if ( strlen( info ) > MAX_USERINFO_LENGTH || infoTruncated ) {
 			Com_Printf( S_COLOR_YELLOW "WARNING: oversize userinfo, you might be not able to play on remote server!\n" );
 		}
 
 		CL_AddReliableCommand( va( "userinfo \"%s\"", info ), qfalse );
+		// the server picks the command width from the key in the string it receives
+		clc.vrIdentity = atoi( Info_ValueForKey( info, "vr" ) ) == 1;
 	}
 }
 
@@ -3140,6 +3204,7 @@ CL_Frame
 ==================
 */
 void CL_Frame( int msec, int realMsec ) {
+	qboolean renderScreen;
 
 #ifdef USE_CURL
 	if ( download.cURL ) {
@@ -3197,6 +3262,8 @@ void CL_Frame( int msec, int realMsec ) {
 	if ( !com_cl_running->integer ) {
 		return;
 	}
+
+	CL_VR_Frame();
 
 	// save the msec before checking pause
 	cls.realFrametime = realMsec;
@@ -3307,6 +3374,7 @@ void CL_Frame( int msec, int realMsec ) {
 		CL_CheckTimeout();
 	}
 
+	renderScreen = CL_VR_BeginFrame();
 	// send intentions now
 	CL_SendCmd();
 
@@ -3318,7 +3386,11 @@ void CL_Frame( int msec, int realMsec ) {
 
 	// update the screen
 	cls.framecount++;
-	SCR_UpdateScreen();
+	if ( VR_IsActiveMode() && !CL_VR_RenderStereo() ) {
+		CL_CGameUpdate();
+	}
+	if ( renderScreen ) SCR_UpdateScreen();
+	CL_VR_EndFrame();
 
 	// update audio
 	S_Update( realMsec );
@@ -3369,7 +3441,7 @@ CL_ShutdownRef
 static void CL_ShutdownRef( refShutdownCode_t code ) {
 
 #ifdef USE_RENDERER_DLOPEN
-	if ( cl_renderer->modified ) {
+	if ( (cl_renderer && cl_renderer->modified) || rendererWasXR != CL_VR_RestartWantsVR() ) {
 		code = REF_UNLOAD_DLL;
 	}
 #endif
@@ -3390,7 +3462,8 @@ static void CL_ShutdownRef( refShutdownCode_t code ) {
 	}
 
 #ifdef USE_RENDERER_DLOPEN
-	if ( rendererLib ) {
+	/* A surviving graphics context belongs to this renderer DLL. */
+	if ( rendererLib && code != REF_KEEP_CONTEXT ) {
 		Sys_UnloadLibrary( rendererLib );
 		rendererLib = NULL;
 	}
@@ -3419,6 +3492,7 @@ static void CL_InitRenderer( void ) {
 
 	// load character sets
 	cls.charSetShader = re.RegisterShader( "gfx/2d/bigchars" );
+	cls.vrTrackingIcon = re.RegisterShaderNoMip( "menu/art/vr" );
 	cls.whiteShader = re.RegisterShader( "white" );
 	cls.consoleShader = re.RegisterShader( "console" );
 
@@ -3455,6 +3529,11 @@ This is the only place that any of these functions are called from
 void CL_StartHunkUsers( void ) {
 
 	if ( !com_cl_running || !com_cl_running->integer ) {
+		return;
+	}
+
+	if ( CL_VR_ConsumeStartupRequest() ) {
+		CL_Vid_Restart( REF_KEEP_WINDOW );
 		return;
 	}
 
@@ -3588,7 +3667,7 @@ static void CL_InitRef( void ) {
 #define REND_ARCH_STRING ARCH_STRING
 #endif
 
-	Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, cl_renderer->string );
+	Com_sprintf( dllName, sizeof( dllName ), RENDERER_PREFIX "_%s_" REND_ARCH_STRING DLL_EXT, CL_VR_RestartWantsVR() ? "vulkan" : cl_renderer->string );
 #ifdef __APPLE__
 	// Renderer DLLs live inside Trinity.app/Contents/MacOS/, but
 	// Sys_DefaultBasePath() returns the .app's *parent* directory (so
@@ -3599,14 +3678,18 @@ static void CL_InitRef( void ) {
 #else
 	ospath = FS_BuildOSPath( Sys_DefaultBasePath(), dllName, NULL );
 #endif
-	rendererLib = Sys_LoadLibrary( ospath );
+	if ( !rendererLib ) rendererLib = Sys_LoadLibrary( ospath );
 	if ( !rendererLib )
 	{
+		if ( CL_VR_RestartWantsVR() ) {
+			CL_RendererError( ERR_DROP, "Failed to load VR renderer %s", dllName );
+			return;
+		}
 		// If the failing renderer already equals the default, retrying after a
 		// Cvar_ForceReset would just try the same DLL again. Bail out cleanly.
 		if ( !Q_stricmp( cl_renderer->string, XSTRING( RENDERER_DEFAULT ) ) )
 		{
-			Com_Error( ERR_FATAL, "Failed to load default renderer %s", dllName );
+			CL_RendererError( ERR_FATAL, "Failed to load default renderer %s", dllName );
 		}
 		Com_Printf( S_COLOR_YELLOW "Failed to load renderer DLL '%s', reverting to default '%s'\n",
 			dllName, XSTRING( RENDERER_DEFAULT ) );
@@ -3620,18 +3703,19 @@ static void CL_InitRef( void ) {
 		rendererLib = Sys_LoadLibrary( ospath );
 		if ( !rendererLib )
 		{
-			Com_Error( ERR_FATAL, "Failed to load renderer %s", dllName );
+			CL_RendererError( ERR_FATAL, "Failed to load renderer %s", dllName );
 		}
 	}
 
 	GetRefAPI = Sys_LoadFunction( rendererLib, "GetRefAPI" );
 	if( !GetRefAPI )
 	{
-		Com_Error( ERR_FATAL, "Can't load symbol GetRefAPI" );
+		CL_RendererError( ERR_FATAL, "Can't load symbol GetRefAPI" );
 		return;
 	}
 
 	cl_renderer->modified = qfalse;
+	rendererWasXR = CL_VR_RestartWantsVR();
 #endif
 
 	Com_Memset( &rimp, 0, sizeof( rimp ) );
@@ -3642,7 +3726,7 @@ static void CL_InitRef( void ) {
 	rimp.Cmd_Argv = Cmd_Argv;
 	rimp.Cmd_ExecuteText = Cbuf_ExecuteText;
 	rimp.Printf = CL_RefPrintf;
-	rimp.Error = Com_Error;
+	rimp.Error = CL_RendererError;
 	rimp.Milliseconds = CL_ScaledMilliseconds;
 	rimp.Microseconds = Sys_Microseconds;
 	rimp.Malloc = CL_RefMalloc;
@@ -3724,10 +3808,11 @@ static void CL_InitRef( void ) {
 	Com_Printf( "-------------------------------\n");
 
 	if ( !ret ) {
-		Com_Error (ERR_FATAL, "Couldn't initialize refresh" );
+		CL_RendererError (ERR_FATAL, "Couldn't initialize refresh" );
 	}
 
 	re = *ret;
+	CL_VR_PrepareRenderer();
 
 	// unpause so the cgame definitely gets a snapshot and renders a frame
 	Cvar_Set( "cl_paused", "0" );
@@ -4304,6 +4389,7 @@ void CL_Init( void ) {
 	CL_UpdateGUID( NULL, 0 );
 
 	CL_Discord_Init();
+	CL_VR_Init();
 
 	Com_Printf( "----- Client Initialization Complete -----\n" );
 }
@@ -4338,6 +4424,7 @@ void CL_Shutdown( const char *finalmsg, qboolean quit ) {
 	// clear and mute all sounds until next registration
 	S_DisableSounds();
 
+	CL_VR_Shutdown();
 	CL_Discord_Shutdown();
 
 	CL_ShutdownVMs();

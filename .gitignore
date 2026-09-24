@@ -1,4 +1,5 @@
 build/
+Makefile.local
 dist/
 output/
 .vs/

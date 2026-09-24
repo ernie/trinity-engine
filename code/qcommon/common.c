@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "q_shared.h"
 #include "qcommon.h"
+#include "../vrcommon/vr_state.h"
 #include <setjmp.h>
 #ifndef _WIN32
 #include <netinet/in.h>
@@ -472,6 +473,7 @@ Com_ParseCommandLine
 Break it up into multiple console lines
 ==================
 */
+
 static void Com_ParseCommandLine( char *commandLine ) {
 	static int parsed = 0;
 	int inq;
@@ -4313,7 +4315,8 @@ void Com_Frame( qboolean noDelay ) {
 			minMsec = 0;
 			bias = 0;
 		} else {
-			if ( !gw_active && com_maxfpsUnfocused->integer > 0 )
+			// The headset paces an active VR session; the mirror window losing focus does not.
+			if ( !gw_active && com_maxfpsUnfocused->integer > 0 && !VR_IsActiveMode() )
 				minMsec = 1000 / com_maxfpsUnfocused->integer;
 			else
 			if ( com_maxfps->integer > 0 )
