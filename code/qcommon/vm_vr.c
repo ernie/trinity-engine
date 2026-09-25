@@ -1,5 +1,6 @@
 #include "vm_local.h"
 #include "vm_vr.h"
+#include "vm_vr_select.h"
 #include "../vrcommon/vr_shared.h"
 #if defined(__linux__)
 #include <unistd.h>
@@ -47,7 +48,8 @@ static qboolean VM_VRNativePath( char *path, int size, vmIndex_t index, qboolean
 #else
 	return qfalse;
 #endif
-	return Com_sprintf( path, size, "%s/trinity-native/%s/%s" ARCH_STRING DLL_EXT,
+	// the bundled modules live in the game directories beside the executable
+	return Com_sprintf( path, size, "%s/%s/%s" ARCH_STRING DLL_EXT,
 		directory, missionpack ? "missionpack" : "baseq3", index == VM_CGAME ? "cgame" : "ui" ) < size;
 }
 
@@ -99,6 +101,26 @@ qboolean VM_VRPrepareNativeFallback( vmIndex_t index, qboolean qvmOnly, qboolean
 
 void VM_VRSetNativeFallback( vmIndex_t index, qboolean enabled ) {
 	if ( VM_VRNativeIndex( index ) ) vrNative[index].selected = enabled;
+}
+
+qboolean VM_VRQVMAccepted( vmIndex_t index ) {
+	char filename[MAX_QPATH];
+	void *buffer;
+	int length, major, minor;
+	qboolean accepted;
+
+	Com_sprintf( filename, sizeof( filename ), "vm/%s.qvm", index == VM_CGAME ? "cgame" : "ui" );
+	length = FS_ReadFile( filename, &buffer );
+	if ( !buffer )
+		return qfalse;
+	major = VM_VRParseMarker( (const byte *)buffer, length, &minor );
+	accepted = VM_VRAccepts( major, minor, VR_API_MAJOR, VR_API_MINOR );
+	FS_FreeFile( buffer );
+	return accepted;
+}
+
+qboolean VM_VRNativeFallback( const vm_t *vm ) {
+	return vm && vm->vrNative;
 }
 
 // the shared vm.c unloads native modules through this wrapper; map it onto Sys_UnloadLibrary
@@ -171,8 +193,9 @@ qboolean VM_VRSelectModule( vm_t *vm, vmInterpret_t *interpret, qboolean qvmOnly
 		vm->privateFlag = 0;
 		vm->dataAlloc = vm->dataMask = ~0U;
 		vm->dataBase = NULL;
+		vm->vrNative = qtrue;
 		entry( vm->dllSyscall );
-		Com_Printf( "%s: using bundled native VR fallback (VR API %d.%d), trinity-native/%s\n",
+		Com_Printf( "%s: using bundled native VR fallback (VR API %d.%d) from %s\n",
 			vm->name, VR_API_MAJOR, VR_API_MINOR, fallback->missionpack ? "missionpack" : "baseq3" );
 		return qtrue;
 	}
@@ -202,7 +225,7 @@ qboolean VM_VRSelectModule( vm_t *vm, vmInterpret_t *interpret, qboolean qvmOnly
 	// a QVM can't run native; execute under the JIT
 	if ( *interpret == VMI_NATIVE )
 		*interpret = VMI_COMPILED;
-	// Load the FS-priority winner; sentinel inspection never changes selection.
+	// VR runs the FS-priority winner too: a server's cgame must match its game module.
 	*header = VM_LoadQVM( vm, qtrue );
 	if ( !*header ) return qfalse;
 	if ( vm->vrSentinel )
@@ -213,26 +236,11 @@ qboolean VM_VRSelectModule( vm_t *vm, vmInterpret_t *interpret, qboolean qvmOnly
 }
 
 int VM_VRLoadQVMFile( vm_t *vm, const char *filename, void **buffer ) {
-	static const char needle[] = "TRINITY_VR_API/";
-	const int needleLen = (int)sizeof( needle ) - 1;
-	const byte *data;
-	int length, i;
+	int length, major, minor;
 	vm->vrSentinel = qfalse;
 	length = FS_ReadFile( filename, buffer );
-	if ( length < needleLen || !buffer || !*buffer ) return length;
-	data = (const byte *)*buffer;
-	// FS_ReadFile's trailing allocation byte is outside the file and not scanned.
-	for ( i = 0; i + needleLen <= length; i++ ) {
-		const char *p;
-		int major, minor = 0;
-		if ( data[i] != needle[0] || memcmp( data + i, needle, needleLen ) ) continue;
-		p = (const char *)data + i + needleLen;
-		major = atoi( p );
-		while ( p < (const char *)data + length && *p >= '0' && *p <= '9' ) p++;
-		if ( p < (const char *)data + length && *p == '.' ) minor = atoi( p + 1 );
-		// The engine runs a QVM whose major matches and whose minor it meets or exceeds.
-		if ( major == VR_API_MAJOR && minor <= VR_API_MINOR ) vm->vrSentinel = qtrue;
-		break;
-	}
+	if ( length <= 0 || !buffer || !*buffer ) return length;
+	major = VM_VRParseMarker( (const byte *)*buffer, length, &minor );
+	vm->vrSentinel = VM_VRAccepts( major, minor, VR_API_MAJOR, VR_API_MINOR );
 	return length;
 }

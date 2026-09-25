@@ -37,10 +37,10 @@ if(TRINITY_RELEASE_BUILD)
     endif()
 endif()
 if(NOT DEFINED TRINITY_NATIVE_OUTPUT_DIR)
-    set(TRINITY_NATIVE_OUTPUT_DIR "${CMAKE_BINARY_DIR}" CACHE PATH "Executable directory receiving trinity-native")
+    set(TRINITY_NATIVE_OUTPUT_DIR "${CMAKE_BINARY_DIR}" CACHE PATH "Executable directory receiving the native modules in baseq3 and missionpack")
 endif()
 if(NOT DEFINED TRINITY_NATIVE_INSTALL_DIR)
-    set(TRINITY_NATIVE_INSTALL_DIR "trinity-native")
+    set(TRINITY_NATIVE_INSTALL_DIR ".")
 endif()
 
 set(TRINITY_SRCS_MK "${TRINITY_SOURCE_DIR}/build/srcs.mk")
@@ -346,8 +346,8 @@ foreach(VARIANT baseq3 missionpack)
             C_STANDARD 99 C_STANDARD_REQUIRED YES
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
             PREFIX "" OUTPUT_NAME "${MODULE}${NATIVE_ARCH}"
-            RUNTIME_OUTPUT_DIRECTORY "${TRINITY_NATIVE_OUTPUT_DIR}/trinity-native/${VARIANT}"
-            LIBRARY_OUTPUT_DIRECTORY "${TRINITY_NATIVE_OUTPUT_DIR}/trinity-native/${VARIANT}")
+            RUNTIME_OUTPUT_DIRECTORY "${TRINITY_NATIVE_OUTPUT_DIR}/${VARIANT}"
+            LIBRARY_OUTPUT_DIRECTORY "${TRINITY_NATIVE_OUTPUT_DIR}/${VARIANT}")
         install(TARGETS ${TARGET}
             RUNTIME DESTINATION "${TRINITY_NATIVE_INSTALL_DIR}/${VARIANT}" COMPONENT TrinityNative
             LIBRARY DESTINATION "${TRINITY_NATIVE_INSTALL_DIR}/${VARIANT}" COMPONENT TrinityNative)

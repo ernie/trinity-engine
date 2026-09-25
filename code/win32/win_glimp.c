@@ -1621,6 +1621,7 @@ static size_t Win_VRDialogTemplate( DWORD storage[256] ) {
 static INT_PTR CALLBACK Win_VRDialogProc( HWND dialog, UINT message, WPARAM wparam, LPARAM lparam ) {
 	if ( message == WM_INITDIALOG ) {
 		SetDlgItemTextA( dialog, 100, (const char *)lparam );
+		SetForegroundWindow( dialog );
 		SetFocus( GetDlgItem( dialog, IDIGNORE ) );
 		return FALSE;
 	}
@@ -1646,7 +1647,7 @@ static int Win_VRFailureDialog( const char *reason ) {
 	INT_PTR result;
 
 	Win_VRDialogTemplate( storage );
-	result = DialogBoxIndirectParamW( GetModuleHandleW( NULL ), (const DLGTEMPLATE *)storage, NULL, Win_VRDialogProc, (LPARAM)(reason && *reason ? reason : "VR could not start.") );
+	result = DialogBoxIndirectParamW( GetModuleHandleW( NULL ), (const DLGTEMPLATE *)storage, g_wv.hWnd, Win_VRDialogProc, (LPARAM)(reason && *reason ? reason : "VR could not start.") );
 	return result == IDRETRY ? 1 : result == IDABORT ? 2 : 0;
 }
 int Sys_VRFailureDialog( const char *reason ) {

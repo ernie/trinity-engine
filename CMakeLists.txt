@@ -79,7 +79,7 @@ SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
 AUX_SOURCE_DIRECTORY(code/qcommon QCOMMON_SRCS)
 # exclude platform-dependent QVM bytecode compilers and the VM policy file
 list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alpvx].*.c")
-list(APPEND QCOMMON_SRCS code/qcommon/vm_vr.c code/qcommon/vm_vr_state.c code/vrcommon/vr_shared_sync.c)
+list(APPEND QCOMMON_SRCS code/qcommon/vm_vr.c code/qcommon/vm_vr_select.c code/qcommon/vm_vr_state.c code/vrcommon/vr_shared_sync.c)
 # add platform-dependent QVM bytecode compilers
 IF(EMSCRIPTEN)
 	# Emscripten uses interpreted VM only - no native bytecode compiler
@@ -465,7 +465,7 @@ if(BUILD_OPENXR_LOADER AND NOT EMSCRIPTEN)
 endif()
 set(TRINITY_NATIVE_OUTPUT_DIR "$<TARGET_FILE_DIR:${CNAME}${BINEXT}>")
 if(APPLE)
-	set(TRINITY_NATIVE_INSTALL_DIR "${CNAME}${BINEXT}.app/Contents/MacOS/trinity-native")
+	set(TRINITY_NATIVE_INSTALL_DIR "${CNAME}${BINEXT}.app/Contents/MacOS")
 endif()
 include(TrinityNative)
 if(TARGET trinity-native)

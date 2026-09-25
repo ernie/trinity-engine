@@ -27,8 +27,47 @@ connected keeps the connection. Servers without VR support receive the standard
 command set, so VR controller buttons beyond the first sixteen are not sent to
 them. The client widens commands from the server's `vr_support` serverinfo key
 while the server reads the `vr` userinfo key, so each side derives the width from
-its own configstring. `vr_status` reports requested and active modes and the most
-recent failure. A request can wait for a headset; applying flatscreen cancels it.
+its own configstring. `vr_status` reports the VR state, the requested and active
+modes, and the most recent failure. A request can wait for a headset; applying
+flatscreen cancels it.
+
+## Staying in VR
+
+While `vr_enabled` is `1`, the client stays in VR through map changes, game
+directory switches (for example joining a Team Arena server from baseq3), video
+restarts and errors. Only you change `vr_enabled`: the Display Mode setting, the
+console, a game directory's own configuration, or Flatscreen in the dialog shown
+when VR cannot start. `vr_status` names the state:
+
+| State | Meaning |
+| --- | --- |
+| `FLAT` | Flatscreen was chosen, or repeated errors stopped VR for now. |
+| `VR` | Running in the headset. |
+| `VR_TRANSITION` | The renderer is rebuilding into VR, or VR resumes at the next match or the main menu. |
+| `WAITING_HEADSET` | VR is wanted but no headset or runtime is available. The desktop shows the tracking prompt and VR starts when the headset returns. |
+| `VR_UNSUPPORTED` | The current server's or mod's game modules cannot run in VR. |
+
+The client leaves VR in four cases:
+
+- The server's or mod's game modules are proven VR-incompatible: a pure server
+  whose cgame or UI QVM has no VR support, a mod other than baseq3 or
+  missionpack without VR modules, or a bundled fallback that is missing or
+  fails to start.
+  The game continues in flatscreen. The same message names the incompatible pak
+  either way: over the match once play starts, or in the main menu's error
+  message when it happens at the menu. VR returns when you disconnect, connect to a server, or change mods,
+  including from the Mods menu.
+- The headset or runtime goes away, or a probe fails. The client waits in
+  `WAITING_HEADSET` and returns to VR when it is back.
+- The machine cannot run VR: no OpenXR loader, no Vulkan binding in the
+  runtime, or a runtime without `XR_KHR_vulkan_enable2`. The game continues in
+  flatscreen with no polling, and the next launch or `vid_restart` tries again.
+  When VR was on at launch, a failure dialog names the reason, and choosing
+  Flatscreen there sets `vr_enabled` to `0`; enabling VR later in the session
+  reports the reason in the console only.
+- Three errors or headset losses within 30 seconds. The game continues in
+  flatscreen, and an on-screen notice in a match, or the main menu's error
+  message, says VR stopped; `vid_restart` or the next launch tries VR again.
 
 While VR is active, game audio continues even if the desktop mirror is unfocused
 or minimized. The focus-mute settings still apply in flatscreen mode. Removing
@@ -36,14 +75,17 @@ the headset does not automatically pause the game; open the menu manually.
 
 ## Game modules
 
-Keep the matching Trinity mod paks and any packaged `trinity-native` directory
-with the release. The engine loads cgame and UI at runtime through their VR
-interface. Compatible QVMs can run in VR. In non-pure baseq3 or missionpack,
-bundled native modules can replace incompatible modules. This fallback is not
-a general compatibility layer for other mods.
+The engine runs the cgame and UI QVM that ordinary pk3
+priority selects, in VR and flatscreen alike, because a server's cgame must
+match its game module. In VR, when that QVM has no supported VR API marker,
+non-pure baseq3 and missionpack use the bundled native modules. This fallback is
+limited to those two games. When the bundled modules replace a QVM, an on-screen
+notice at the start of each connection's play names that pak (or game
+directory) for a few seconds, and `vr_status` lists it.
 
-Pure servers require compatible cgame and UI QVMs; native fallback is prohibited.
-An ineligible VR request leaves the client in flatscreen and reports the reason.
+Pure servers prohibit native fallback. A pure server whose cgame or UI QVM has
+no VR support keeps the client in flatscreen for that connection
+(`VR_UNSUPPORTED`) and reports the reason.
 Do not disable server purity to work around a mismatched release: install the
 matching mod assets. Retail Quake III / Team Arena data is still required as
 described in the [main README](../README.md#game-data).

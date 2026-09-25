@@ -1,15 +1,19 @@
 #ifndef CL_VR_MODULES_H
 #define CL_VR_MODULES_H
 
-// Select fallback modules before ordinary vid_restart reloads them.
-qboolean CL_VRModulesPreflight( void );
-qboolean CL_VRModulesCommit( void );
-void CL_VRModulesCancel( void );
+#include "cl_vr_state.h"
+
+// Chooses where a ui or cgame module loads from, just before VM_Create.
+void CL_VRModulesPreflight( vmIndex_t index );
 void CL_VRModulesReset( void );
 void CL_VRModulesValidateContext( void );
-/* Called after CG_INIT has had a chance to register a compatible QVM. */
-qboolean CL_VRModulesPrepareForCGame( void );
-qboolean CL_VRModulesNeedsRestart( void );
-const char *CL_VRModulesLastError( void );
+/* After UI_INIT and CG_INIT; a fallback verdict asks for a module restart. */
+vrModuleVerdict_t CL_VRModulesCheck( const char **reason, const char **source );
+// The on-screen notice's two lines, or NULL while it is hidden.
+const char *CL_VRModulesNotice( const char **detail );
+// Replaces the connection's notice; it draws once play starts.
+void CL_VRModulesNoticeShow( const char *headline, const char *detail );
+void CL_VRModulesNoticeReset( void );
+void CL_VRModulesStatus( void );
 
 #endif

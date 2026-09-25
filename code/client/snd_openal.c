@@ -2319,8 +2319,8 @@ static void S_AL_UpdateOutput(void)
 		Com_Printf("OpenAL output changed to: %s\n", requested);
 	} else {
 		if (!alOutputEvents) alOutputInterval = 30000;
-		Com_Printf("OpenAL output change failed (%d); keeping current output and retrying\n",
-			qalcGetError(alDevice));
+		Com_Printf("OpenAL output change failed (%d); keeping current output %s\n",
+			qalcGetError(alDevice), alOutputEvents ? "until the next device change" : "and retrying");
 	}
 }
 

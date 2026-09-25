@@ -699,6 +699,28 @@ static void Con_AdjustNotifyVR(float *x, float *y)
 	*y = *y * scale + (cls.glconfig.vidHeight - 480.0f * scale) / 2.0f + opticalOffset;
 }
 
+qboolean Con_PlayFrom640VR( float *x, float *y, float *w, float *h ) {
+	int mode = vr_currentHudDrawStatus ? vr_currentHudDrawStatus->integer : 1;
+	qboolean hudBuffer = re.HUDBufferStart && re.HUDBufferEnd;
+	float right, bottom;
+
+	if ( mode == 1 && hudBuffer ) {
+		// the mode-1 HUD buffer is 1280x960
+		*x *= 2.0f;
+		*y *= 2.0f;
+		*w *= 2.0f;
+		*h *= 2.0f;
+		return qtrue;
+	}
+	right = *x + *w;
+	bottom = *y + *h;
+	Con_AdjustNotifyVR( x, y );
+	Con_AdjustNotifyVR( &right, &bottom );
+	*w = right - *x;
+	*h = bottom - *y;
+	return mode != 0 && hudBuffer;
+}
+
 typedef void (*conGlyphFn_t)( int column, int row, int ch, void *ctx );
 
 /* Skips entirely while the UI or cgame owns the screen outside intermission. */

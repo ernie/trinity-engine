@@ -1351,6 +1351,7 @@ void CL_InitUI( void ) {
 	int		v;
 	vmInterpret_t		interpret;
 	CL_VRModulesValidateContext();
+	CL_VRModulesPreflight( VM_UI );
 
 	// disallow vl.collapse for UI elements
 	re.VertexLighting( qfalse );

@@ -8,9 +8,10 @@
 // from trinity-engine (end-state: one shared vm.c across all three engines).
 
 qboolean VM_VRSelectModule( vm_t *vm, vmInterpret_t *interpret, qboolean qvmOnly, vmHeader_t **header );
-// Preflight while the old QVM is alive; selection takes effect at VM_Create.
-// Preflight unloads its temporary reference; VM_Create loads and validates anew.
-// Only bundled cgame/UI are eligible, and pure connections always reject it.
+// Reads the cgame/ui QVM that VM_Create loads next.
+qboolean VM_VRQVMAccepted( vmIndex_t index );
+qboolean VM_VRNativeFallback( const vm_t *vm );
+// Test-loads the bundled cgame/UI DLL; a selection takes effect at the next VM_Create.
 qboolean VM_VRPrepareNativeFallback( vmIndex_t index, qboolean qvmOnly, qboolean missionpack );
 void VM_VRSetNativeFallback( vmIndex_t index, qboolean enabled );
 void VM_VRCancelNativeFallback( vmIndex_t index );

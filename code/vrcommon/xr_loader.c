@@ -106,12 +106,28 @@ typedef struct {
 
 static xrLoaderState_t watch;
 
-static void XRLoader_Release( xrLoaderState_t *st ) {
+static void XRLoader_ReleaseInstance( xrLoaderState_t *st ) {
 	if ( st->instance != XR_NULL_HANDLE && st->destroy )
 		st->destroy( st->instance );
+	st->instance = XR_NULL_HANDLE;
+	st->destroy = NULL;
+	st->getSystem = NULL;
+	st->systemProperties = NULL;
+}
+
+static void XRLoader_Release( xrLoaderState_t *st ) {
+	XRLoader_ReleaseInstance( st );
 	if ( st->library )
 		XRLoader_UnloadLibrary( st->library );
 	memset( st, 0, sizeof( *st ) );
+}
+
+/* A runtime that may still start keeps the loader resident for cheap polls. */
+static void XRLoader_Settle( xrLoaderState_t *st, xrLoaderStatus_t status ) {
+	if ( status == XRLOADER_NO_RUNTIME || status == XRLOADER_PROBE_FAILED )
+		XRLoader_ReleaseInstance( st );
+	else
+		XRLoader_Release( st );
 }
 
 static xrLoaderStatus_t XRLoader_Open( xrLoaderState_t *st, xrLoaderInfo_t *info ) {
@@ -128,14 +144,17 @@ static xrLoaderStatus_t XRLoader_Open( xrLoaderState_t *st, xrLoaderInfo_t *info
 		return XRLOADER_PROBE_FAILED;
 	memset( info, 0, sizeof( *info ) );
 	XRLoader_Failure( info, XRLOADER_PROBE_FAILED, XR_SUCCESS, "OpenXR discovery failed" );
-	st->library = XRLoader_LoadLibrary();
+	if ( !st->library )
+		st->library = XRLoader_LoadLibrary();
 	if ( !st->library )
 		return XRLoader_Failure( info, XRLOADER_NO_LOADER, XR_SUCCESS,
 							"OpenXR loader could not be loaded (missing loader or dependency)" );
 	getproc = (PFN_xrGetInstanceProcAddr)XRLoader_LibrarySymbol( st->library, "xrGetInstanceProcAddr" );
-	if ( !getproc ) {
+	/* Resolved before create, so every instance created here can be destroyed. */
+	st->destroy = (PFN_xrDestroyInstance)XRLoader_LibrarySymbol( st->library, "xrDestroyInstance" );
+	if ( !getproc || !st->destroy ) {
 		XRLoader_Failure( info, XRLOADER_PROBE_FAILED, XR_ERROR_FUNCTION_UNSUPPORTED,
-					"Missing xrGetInstanceProcAddr" );
+					"Missing xrGetInstanceProcAddr or xrDestroyInstance" );
 		goto done;
 	}
 #define RESOLVE(handle, name, dest) \
@@ -197,7 +216,6 @@ static xrLoaderStatus_t XRLoader_Open( xrLoaderState_t *st, xrLoaderInfo_t *info
 	result = create( &ci, &st->instance );
 	if ( XR_FAILED( result ) )
 		goto runtime_failure;
-	RESOLVE( st->instance, xrDestroyInstance, st->destroy );
 	RESOLVE( st->instance, xrGetInstanceProperties, properties );
 	RESOLVE( st->instance, xrGetSystem, st->getSystem );
 	RESOLVE( st->instance, xrGetSystemProperties, st->systemProperties );
@@ -216,7 +234,7 @@ runtime_failure:
 done:
 	free( extensions );
 	if ( info->status != XRLOADER_AVAILABLE )
-		XRLoader_Release( st );
+		XRLoader_Settle( st, info->status );
 	return info->status;
 #undef RESOLVE
 }
@@ -249,17 +267,15 @@ static xrLoaderStatus_t XRLoader_QuerySystem( xrLoaderState_t *st, xrLoaderInfo_
 
 xrLoaderStatus_t XRLoader_WatchBegin( xrLoaderInfo_t *info ) {
 	XRLoader_WatchEnd();
-	if ( XRLoader_Open( &watch, info ) != XRLOADER_AVAILABLE )
-		return info->status;
 	return XRLoader_WatchPoll( info );
 }
 
 xrLoaderStatus_t XRLoader_WatchPoll( xrLoaderInfo_t *info ) {
-	if ( !watch.instance )
-		return XRLoader_WatchBegin( info );
+	if ( !watch.instance && XRLoader_Open( &watch, info ) != XRLOADER_AVAILABLE )
+		return info->status;
 	XRLoader_QuerySystem( &watch, info );
 	if ( info->status != XRLOADER_NO_HEADSET )
-		XRLoader_WatchEnd();
+		XRLoader_Settle( &watch, info->status );
 	return info->status;
 }
 

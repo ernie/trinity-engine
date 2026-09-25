@@ -1163,6 +1163,8 @@ CLIENT / SERVER SYSTEMS
 //
 void CL_Init( void );
 qboolean CL_Disconnect( qboolean showMainMenu );
+// Com_Error only, before its client cleanup
+void CL_AbortUnwind( errorParm_t code );
 void CL_ResetOldGame( void );
 void CL_Shutdown( const char *finalmsg, qboolean quit );
 void CL_Frame( int msec, int realMsec );

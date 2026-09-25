@@ -10530,7 +10530,7 @@ void vk_present_frame( void )
 		return;
 	}
 
-	// The headset paces frames while the mirror is hidden; only the window present is skipped.
+	// The headset paces frames while the mirror is hidden.
 	if ( !ri.CL_IsMinimized() && vk.cmd->swapchain_image_acquired ) {
 		present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 		present_info.pNext = NULL;

@@ -1067,7 +1067,7 @@ void CL_ShutdownAll( void ) {
 	// shutdown the renderer
 	if ( re.Shutdown ) {
 		if ( CL_GameSwitch() ) {
-			CL_VR_GameSwitch();
+			CL_VR_BeginGameSwitch();
 			CL_ShutdownRef( REF_DESTROY_WINDOW ); // shutdown renderer & GLimp
 		} else {
 			re.Shutdown( REF_KEEP_CONTEXT ); // don't destroy window or context
@@ -1238,6 +1238,25 @@ static qboolean CL_RestoreOldGame( void )
 }
 
 
+static qboolean cl_disconnecting;
+
+
+/*
+=====================
+CL_AbortUnwind
+
+Resets what a Com_Error longjmp abandoned mid-flight, so the error's own
+CL_Disconnect runs in full
+=====================
+*/
+void CL_AbortUnwind( errorParm_t code ) {
+	cls.gameSwitch = qfalse;
+	cl_disconnecting = qfalse;
+	CL_RendererRecoveryReset();
+	CL_VR_AbortUnwind( code == ERR_DISCONNECT || code == ERR_SERVERDISCONNECT );
+}
+
+
 /*
 =====================
 CL_Disconnect
@@ -1249,7 +1268,6 @@ This is also called on Com_Error and Com_Quit, so it shouldn't cause any errors
 =====================
 */
 qboolean CL_Disconnect( qboolean showMainMenu ) {
-	static qboolean cl_disconnecting = qfalse;
 	qboolean cl_restarted = qfalse;
 
 	if ( !com_cl_running || !com_cl_running->integer ) {
@@ -1270,7 +1288,9 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 	} else {
 		CL_VR_EndFrame();
 	}
-	CL_VRModulesReset();
+	if ( !CL_GameSwitch() )
+		CL_VRModulesReset();
+	CL_VRModulesNoticeReset();
 
 	// Stop demo recording
 	if ( clc.demorecording ) {
@@ -1343,6 +1363,8 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 		cl_disconnecting = qfalse;
 		return qfalse;
 	}
+
+	CL_VR_ConnectionEnded();
 
 	// send a disconnect message to the server
 	// send it a few times in case one is dropped
@@ -1941,14 +1963,14 @@ static void CL_Vid_RestartInternal( refShutdownCode_t shutdownCode ) {
 }
 
 
-/* Serves both modes; a renderer init failure forces one flat retry and drops all VM handles. */
+/* A failed VR restart retries in VR or rebuilds flat, dropping the UI and cgame VMs. */
 static refShutdownCode_t vrRestartCode;
 static void CL_Vid_RestartOperation( void ) {
 	CL_Vid_RestartInternal( vrRestartCode );
 }
-static void CL_Vid_Restart( refShutdownCode_t shutdownCode ) {
+void CL_Vid_Restart( refShutdownCode_t shutdownCode ) {
 	char failure[MAXPRINTMSG];
-	qboolean ok;
+	qboolean ok, retried = qfalse;
 
 	/* A staged display mode needs the ordinary context teardown; a sound-only restart can keep it. */
 	if ( shutdownCode == REF_KEEP_CONTEXT && CL_VR_ModePending() ) {
@@ -1956,31 +1978,37 @@ static void CL_Vid_Restart( refShutdownCode_t shutdownCode ) {
 	}
 	CL_VR_RestartBegin();
 	vrRestartCode = shutdownCode;
-	ok = CL_RendererTry( CL_Vid_RestartOperation, failure, sizeof( failure ) );
-	if ( ok && CL_VR_RestartComplete() ) {
-		return;
+	while ( 1 ) {
+		ok = CL_RendererTry( CL_Vid_RestartOperation, failure, sizeof( failure ) );
+		if ( ok && CL_VR_RestartComplete() ) {
+			return;
+		}
+		if ( !CL_VR_RestartWantsVR() ) {
+			Com_Error( CL_RendererFailureCode() == ERR_FATAL ? ERR_FATAL : ERR_DROP, "Video restart failed: %s", failure );
+		}
+		if ( !ok ) {
+			/* A renderer error may unwind a UI_INIT/CG_INIT syscall, so those VMs' shutdown entry points must not run. */
+			VM_Forced_Unload_Start();
+			VM_Free( cgvm );
+			cgvm = NULL;
+			VM_Free( uivm );
+			uivm = NULL;
+			VM_Forced_Unload_Done();
+			cls.cgameStarted = cls.uiStarted = qfalse;
+			FS_VM_CloseFiles( H_CGAME );
+			FS_VM_CloseFiles( H_Q3UI );
+			Key_SetCatcher( Key_GetCatcher() & ~(KEYCATCH_CGAME | KEYCATCH_UI) );
+			Cbuf_NestedReset();
+		}
+		vrRestartCode = REF_DESTROY_WINDOW;
+		if ( !CL_VR_RestartFailed( ok ? NULL : failure, retried ) ) {
+			break;
+		}
+		retried = qtrue;
+		CL_VR_RestartBegin();
 	}
-	if ( !CL_VR_RestartWantsVR() ) {
-		Com_Error( CL_RendererFailureCode() == ERR_FATAL ? ERR_FATAL : ERR_DROP, "Video restart failed: %s", failure );
-	}
-	if ( !ok ) {
-		/* A renderer error may unwind a UI_INIT/CG_INIT syscall, so those VMs' shutdown entry points must not run. */
-		VM_Forced_Unload_Start();
-		VM_Free( cgvm );
-		cgvm = NULL;
-		VM_Free( uivm );
-		uivm = NULL;
-		VM_Forced_Unload_Done();
-		cls.cgameStarted = cls.uiStarted = qfalse;
-		FS_VM_CloseFiles( H_CGAME );
-		FS_VM_CloseFiles( H_Q3UI );
-		Key_SetCatcher( Key_GetCatcher() & ~(KEYCATCH_CGAME | KEYCATCH_UI) );
-		Cbuf_NestedReset();
-	}
-	CL_VR_RestartFallback( ok ? NULL : failure );
-	vrRestartCode = REF_DESTROY_WINDOW;
 	if ( !CL_RendererTry( CL_Vid_RestartOperation, failure, sizeof( failure ) ) || !CL_VR_RestartComplete() ) {
-		Com_Error( ERR_DROP, "Flatscreen recovery failed: %s", failure );
+		Com_Error( CL_RendererFailureCode() == ERR_FATAL ? ERR_FATAL : ERR_DROP, "Flatscreen recovery failed: %s", failure );
 	}
 }
 
@@ -1992,6 +2020,10 @@ Wrapper for CL_Vid_Restart
 =================
 */
 static void CL_Vid_Restart_f( void ) {
+
+	/* CL_StartHunkUsers rebuilds once the new game's configuration has run. */
+	if ( CL_VR_RebuildPending() )
+		return;
 
 	if ( Q_stricmp( Cmd_Argv( 1 ), "keep_window" ) == 0 || Q_stricmp( Cmd_Argv( 1 ), "fast" ) == 0 ) {
 		// fast path: keep window
@@ -2019,6 +2051,10 @@ handles will be invalid
 */
 static void CL_Snd_Restart_f( void )
 {
+	/* CL_StartHunkUsers restarts sound and video once the new game's configuration has run. */
+	if ( CL_VR_RebuildPending() )
+		return;
+
 	S_Shutdown();
 
 	// sound will be reinitialized by vid_restart
@@ -3391,6 +3427,7 @@ void CL_Frame( int msec, int realMsec ) {
 	}
 	if ( renderScreen ) SCR_UpdateScreen();
 	CL_VR_EndFrame();
+	CL_VR_FrameDone();
 
 	// update audio
 	S_Update( realMsec );
@@ -3532,7 +3569,7 @@ void CL_StartHunkUsers( void ) {
 		return;
 	}
 
-	if ( CL_VR_ConsumeStartupRequest() ) {
+	if ( CL_VR_ConsumeRebuildRequest() ) {
 		CL_Vid_Restart( REF_KEEP_WINDOW );
 		return;
 	}

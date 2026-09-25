@@ -1257,6 +1257,7 @@ Q3OBJ = \
   $(B)/client/cl_main.o \
   $(B)/client/cl_vr.o \
   $(B)/client/cl_vr_modules.o \
+  $(B)/client/cl_vr_state.o \
   $(B)/client/cl_vr_input.o \
   $(B)/client/cl_bhaptics.o \
   $(B)/client/cl_keyboard.o \
@@ -1408,6 +1409,7 @@ Q3OBJ += \
   $(B)/client/qvm/vm.o \
   $(B)/client/qvm/vm_interpreted.o \
   $(B)/client/qvm/vm_vr.o \
+  $(B)/client/qvm/vm_vr_select.o \
   $(B)/client/qvm/vm_vr_state.o \
   $(B)/client/vr_shared_sync.o
 
@@ -1628,6 +1630,7 @@ endif
   $(B)/ded/qvm/vm.o \
   $(B)/ded/qvm/vm_interpreted.o \
   $(B)/ded/qvm/vm_vr.o \
+  $(B)/ded/qvm/vm_vr_select.o \
   $(B)/ded/qvm/vm_vr_state.o \
   $(B)/ded/vr_shared_sync.o
 
@@ -1842,7 +1845,7 @@ install: release
 ifeq ($(BUILD_TRINITY_NATIVE_FALLBACK),1)
 ifneq ($(BUILD_CLIENT),0)
 	@mkdir -p "$(DESTDIR)"
-	@cp -R "$(BR)/trinity-native" "$(DESTDIR)/"
+	@cp -R "$(BR)/baseq3" "$(BR)/missionpack" "$(DESTDIR)/"
 endif
 endif
 ifeq ($(BUILD_OPENXR_LOADER),1)

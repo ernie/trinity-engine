@@ -1110,6 +1110,7 @@ void CL_InitCGame( void ) {
 
 	cgameUpdateOnly = qfalse;
 	CL_VRModulesValidateContext();
+	CL_VRModulesPreflight( VM_CGAME );
 	Cbuf_NestedReset();
 
 	t1 = Sys_Milliseconds();
@@ -1151,10 +1152,6 @@ void CL_InitCGame( void ) {
 	VM_Call( cgvm, 3, CG_INIT,
 		clc.serverMessageSequence,
 		clc.lastExecutedServerCommand, clc.clientNum );
-	/* CG_INIT may have registered a compatible QVM. If it did not, the
-	 * renderer has already loaded this world; the native replacement must
-	 * start through ordinary vid_restart, which reconstructs the renderer. */
-	CL_VRModulesPrepareForCGame();
 
 	// reset any CVAR_CHEAT cvars registered by cgame
 	if ( !clc.demoplaying && !cl_connectedToCheatServer )

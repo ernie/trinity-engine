@@ -1717,6 +1717,9 @@ void R_SetColorMappings( void ) {
 				ri.GLimp_SetGamma( s_gammatable, s_gammatable, s_gammatable );
 			}
 		}
+	} else if ( gls.hardwareGamma ) {
+		// a window kept from flat mode can still carry its ramp
+		ri.GLimp_SetGamma( s_gammatable_linear, s_gammatable_linear, s_gammatable_linear );
 	}
 #else
 	if ( gls.deviceSupportsGamma ) {

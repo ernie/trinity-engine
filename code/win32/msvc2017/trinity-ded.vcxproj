@@ -376,6 +376,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\qcommon\vm_vr_state.c" />
+    <ClCompile Include="..\..\qcommon\vm_vr_select.c" />
     <ClCompile Include="..\..\vrcommon\vr_shared_sync.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -518,6 +518,14 @@ static void R_InitExtensions( void )
 #endif
 
 
+static void R_SetGammaSupport( void )
+{
+	// The desktop gamma ramp never reaches the headset
+	gls.deviceSupportsGamma = gls.hardwareGamma && !VK_XR_Enabled();
+	glConfig.deviceSupportsGamma = gls.deviceSupportsGamma && !r_ignorehwgamma->integer;
+}
+
+
 /*
 ** InitOpenGL
 **
@@ -598,19 +606,18 @@ static void InitOpenGL( void )
 
 		ri.GLimp_InitGamma( &glConfig );
 
-		if ( VK_XR_Enabled() ) {
-			// The desktop gamma ramp never reaches the headset
-			glConfig.deviceSupportsGamma = qfalse;
-		}
-		gls.deviceSupportsGamma = glConfig.deviceSupportsGamma;
-
-		if ( r_ignorehwgamma->integer )
-			glConfig.deviceSupportsGamma = qfalse;
+		gls.hardwareGamma = glConfig.deviceSupportsGamma;
+		R_SetGammaSupport();
 
 		// print info
 		GfxInfo();
 
 		gls.initTime = ri.Milliseconds();
+	}
+	else
+	{
+		// a kept window can switch between flat and VR
+		R_SetGammaSupport();
 	}
 
 #ifdef USE_VULKAN
@@ -1831,7 +1838,7 @@ static void R_Register( void )
 	r_fbo = ri.Cvar_Get( "r_fbo", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_fbo, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary video size and screenshot/video capture.\n Required for bloom, HDR rendering, anti-aliasing and greyscale effects.\n"
-		" In VR, 0 draws straight into the headset swapchain image: no overbright (multi-stage surfaces and blends look different), no bloom, \\r_greyscale, \\r_dither, \\r_presentBits, \\r_hdr, HDR mirror output, screenshots or video capture; \\r_gamma is baked into textures at load, so it needs a \\vid_restart. There \\r_ext_multisample works without the framebuffer, resolving into the swapchain, and the desktop mirror shows the headset image unprocessed." );
+		" In VR, 0 draws straight into the headset swapchain image: no overbright (multi-stage surfaces and blends look different), no bloom, \\r_greyscale, \\r_dither, \\r_presentBits, \\r_hdr, HDR mirror output, screenshots or video capture; \\r_gamma is baked into textures at load, so it needs a \\vid_restart. In that mode \\r_ext_multisample works without the framebuffer, resolving into the swapchain, and the desktop mirror shows the headset image unprocessed." );
 	r_hdr = ri.Cvar_Get( "r_hdr", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_SetDescription(r_hdr, "Enables high dynamic range frame buffer texture format. Requires \\r_fbo 1.\n -1: 4-bit, for testing purposes, heavy color banding, might not work on all systems\n  0: 8 bit, default, moderate color banding with multi-stage shaders\n  1: 16 bit, enhanced blending precision, no color banding, might decrease performance on AMD / Intel GPUs\n" );
 

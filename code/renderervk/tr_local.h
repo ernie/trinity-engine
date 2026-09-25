@@ -1109,6 +1109,7 @@ typedef struct glstatic_s {
 	int captureWidth;
 	int captureHeight;
 	int initTime;
+	qboolean hardwareGamma;
 	qboolean deviceSupportsGamma;
 } glstatic_t;
 

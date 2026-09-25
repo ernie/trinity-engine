@@ -452,9 +452,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\qcommon\vm_vr_state.c" />
+    <ClCompile Include="..\..\qcommon\vm_vr_select.c" />
     <ClCompile Include="..\..\vrcommon\vr_shared_sync.c" />
     <ClCompile Include="..\..\client\cl_vr.c" />
     <ClCompile Include="..\..\client\cl_vr_modules.c" />
+    <ClCompile Include="..\..\client\cl_vr_state.c" />
     <ClCompile Include="..\..\client\cl_vr_input.c" />
     <ClCompile Include="..\..\client\cl_bhaptics.c" />
     <ClCompile Include="..\..\client\cl_keyboard.c" />

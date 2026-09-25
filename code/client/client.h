@@ -643,6 +643,7 @@ extern	cvar_t	*cl_drawBuffer;
 void CL_AddReliableCommand( const char *cmd, qboolean isDisconnectCmd );
 
 void CL_StartHunkUsers( void );
+void CL_Vid_Restart( refShutdownCode_t shutdownCode );
 
 void CL_Disconnect_f( void );
 void CL_ReadDemoMessage( void );
@@ -711,6 +712,8 @@ void Con_ToggleConsole_f( void );
 void Con_ClearNotify( void );
 void Con_RunConsole( void );
 void Con_DrawConsole( void );
+// Places 640x480 units in VR play like the notify lines; qtrue when they go through the HUD buffer.
+qboolean Con_PlayFrom640VR( float *x, float *y, float *w, float *h );
 void Con_PageUp( int lines );
 void Con_PageDown( int lines );
 void Con_Top( void );

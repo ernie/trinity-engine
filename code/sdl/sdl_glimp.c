@@ -1007,15 +1007,23 @@ int Sys_VRFailureDialog( const char *reason ) {
 		{ 0, 2, "Quit" }
 	};
 	SDL_MessageBoxData box;
-	int selected = 0;
+	const char *hint = SDL_GetHint( SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS );
+	char minimize[16];
+	int selected = 0, shown;
 
 	Com_Memset( &box, 0, sizeof( box ) );
 	box.flags = SDL_MESSAGEBOX_WARNING;
+	box.window = SDL_window;
 	box.title = "Trinity Engine - VR startup failed";
 	box.message = reason && *reason ? reason : "VR could not start.";
 	box.numbuttons = 3;
 	box.buttons = buttons;
-	if ( SDL_ShowMessageBox( &box, &selected ) < 0 ) {
+	/* A fullscreen window minimizes when the box takes focus, and minimizing hides the box it owns. */
+	Q_strncpyz( minimize, hint ? hint : "", sizeof( minimize ) );
+	SDL_SetHint( SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, "0" );
+	shown = SDL_ShowMessageBox( &box, &selected );
+	SDL_SetHint( SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, minimize );
+	if ( shown < 0 ) {
 		return 0;
 	}
 	return selected == 1 ? 1 : selected == 2 ? 2 : 0;

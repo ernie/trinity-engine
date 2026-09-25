@@ -57,6 +57,7 @@ const int demo_protocols[] = { 66, 67, OLD_PROTOCOL_VERSION, NEW_PROTOCOL_VERSIO
 #endif
 
 static jmp_buf abortframe;	// an ERR_DROP occurred, exit the entire frame
+static qboolean com_gameRestarting;
 
 int		CPU_Flags = 0;
 
@@ -346,6 +347,12 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 	}
 
 	Cbuf_Init();
+
+	// The longjmp abandons whatever the unwound stack had in progress, so its cleanup below starts clean.
+	com_gameRestarting = qfalse;
+#ifndef DEDICATED
+	CL_AbortUnwind( code );
+#endif
 
 	if ( code == ERR_DISCONNECT || code == ERR_SERVERDISCONNECT ) {
 		VM_Forced_Unload_Start();
@@ -3024,8 +3031,6 @@ Change to a new mod properly with cleaning up cvars before switching.
 */
 void Com_GameRestart( int checksumFeed, qboolean clientRestart )
 {
-	static qboolean com_gameRestarting = qfalse;
-
 	// make sure no recursion can be triggered
 	if ( !com_gameRestarting && com_fullyInitialized )
 	{

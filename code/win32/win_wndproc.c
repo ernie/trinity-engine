@@ -729,8 +729,8 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 				// don't restore gamma if we have multiple monitors
 				if ( glw_state.monitorCount <= 1 || gw_minimized )
 					GLW_RestoreGamma();
-				// minimize if there is only one monitor
-				if ( glw_state.monitorCount <= 1 ) {
+				// minimize on one monitor unless the game's own dialog took focus, since minimizing hides it
+				if ( glw_state.monitorCount <= 1 && GetWindow( (HWND)lParam, GW_OWNER ) != hWnd ) {
 					if ( !CL_VideoRecording() || ( re.CanMinimize && re.CanMinimize() ) ) {
 						if ( !gw_minimized ) {
 							WIN_Minimize();

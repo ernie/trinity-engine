@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "cl_vr.h"
 #include "cl_vr_input.h"
+#include "cl_vr_modules.h"
 #include "../vrcommon/vr_state.h"
 #include "../vrcommon/vr_screen_geometry.h"
 
@@ -567,6 +568,63 @@ static void SCR_DrawTrackingStatus( void ) {
 	re.SetColor( NULL );
 }
 
+static void SCR_DrawRawString( float x, float y, float w, float h, const char *s ) {
+	for ( ; *s; s++, x += w ) {
+		int ch = *s & 255;
+		float col = ( ch & 15 ) * 0.0625f;
+		float row = ( ch >> 4 ) * 0.0625f;
+
+		if ( ch != ' ' )
+			re.DrawStretchPic( x, y, w, h, col, row, col + 0.0625f, row + 0.0625f, cls.charSetShader );
+	}
+}
+
+static void SCR_DrawVRNotice( void ) {
+	const float background[4] = { 0.025f, 0.025f, 0.025f, 0.85f };
+	const float white[4] = { 1, 1, 1, 1 };
+	const char *lines[2];
+	int lengths[2];
+	float size = BIGCHAR_WIDTH, x, y, w, h, w640, h640;
+	int i, longest;
+	qboolean hud = qfalse;
+
+	lines[0] = CL_VRModulesNotice( &lines[1] );
+	if ( !lines[0] ) {
+		return;
+	}
+	lengths[0] = (int)strlen( lines[0] );
+	lengths[1] = (int)strlen( lines[1] );
+	longest = lengths[0] > lengths[1] ? lengths[0] : lengths[1];
+	if ( longest * size > 560 ) {
+		size = 560.0f / longest;
+	}
+	w = w640 = ( longest + 2 ) * size;
+	h = h640 = size * 3.5f;
+	x = 320 - w * 0.5f;
+	y = 120;
+	if ( VR_IsActiveMode() && !vr.virtual_screen ) {
+		hud = Con_PlayFrom640VR( &x, &y, &w, &h );
+	} else {
+		SCR_AdjustFrom640( &x, &y, &w, &h );
+	}
+	if ( hud ) {
+		re.HUDBufferStart( qfalse );
+	}
+	re.SetColor( background );
+	re.DrawStretchPic( x, y, w, h, 0, 0, 0, 0, cls.whiteShader );
+	re.SetColor( white );
+	for ( i = 0; i < 2; i++ ) {
+		float charW = size * w / w640;
+		float charH = size * h / h640;
+		SCR_DrawRawString( x + ( w - lengths[i] * charW ) * 0.5f, y + ( 0.5f + i * 1.5f ) * charH,
+			charW, charH, lines[i] );
+	}
+	re.SetColor( NULL );
+	if ( hud ) {
+		re.HUDBufferEnd();
+	}
+}
+
 static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 	qboolean uiFullscreen;
 
@@ -656,6 +714,7 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 	}
 
 	SCR_DrawTrackingStatus();
+	SCR_DrawVRNotice();
 
 	// debug graph can be drawn on top of anything
 	if ( cl_debuggraph->integer || cl_timegraph->integer || cl_debugMove->integer ) {

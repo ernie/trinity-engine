@@ -33,20 +33,22 @@ architecture flags. On Windows, run in the full MSYS2 environment.
 Output and packaging layout, relative to the client executable:
 
 ```text
-trinity-native/baseq3/cgame<arch>.<extension>
-trinity-native/baseq3/ui<arch>.<extension>
-trinity-native/missionpack/cgame<arch>.<extension>
-trinity-native/missionpack/ui<arch>.<extension>
+baseq3/cgame<arch>.<extension>
+baseq3/ui<arch>.<extension>
+missionpack/cgame<arch>.<extension>
+missionpack/ui<arch>.<extension>
 ```
 
 Names use the engine's `ARCH_STRING`: Windows `x86`, `x86_64`, `arm32`,
 `arm64` with `.dll`; Linux `i386`, `x86_64`, `arm`, `aarch64`, `ppc64`,
 `ppc64le` with `.so`; modern macOS `x86_64` or `aarch64` with `.dylib`.
 Universal macOS builds install the same universal library under both names.
-No `lib` prefix is used. CMake installation places the enabled modules and client
-at the installation root (inside the client app bundle on macOS); Make installation copies the modules into
-`DESTDIR/trinity-native`. Release packaging must retain this directory beside
-the executable, including inside a macOS app's `Contents/MacOS` directory.
+No `lib` prefix is used. The modules live in the game directories beside the
+client, next to that game's paks. CMake installation places the client and the
+enabled modules at the installation root (inside `Contents/MacOS` of the app
+bundle on macOS); Make installation copies `baseq3` and `missionpack` into
+`DESTDIR`. Release packaging must keep the module files in those directories
+beside the executable.
 Use CMake's `--component TrinityNative` to stage only these four libraries.
 
 The runtime refuses native fallback on pure servers. Enabling this build option
