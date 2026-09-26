@@ -345,6 +345,8 @@ XrResult VK_XRVK_Poll( vkXRVk_t *ctx ) {
 				ctx->referenceSpaceChangeTime = change->changeTime;
 			}
 		}
+		if ( event.type == XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED )
+			ctx->profileChanged = 1;
 		if ( event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED ) {
 			XrEventDataSessionStateChanged *state = (XrEventDataSessionStateChanged *)&event;
 			if ( state->session != ctx->session )

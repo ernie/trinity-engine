@@ -13,6 +13,7 @@ void VK_XR_Submitted( void );
 int VK_XR_Status( void );
 qboolean VK_XR_Haptic( int hand, float amplitude, int durationMs );
 const char *VK_XR_LastError( void );
+void VK_XR_Info( void );
 qboolean VK_XR_Enabled( void );
 uint32_t VK_XR_ApiVersion( uint32_t version );
 VkResult VK_XR_CreateInstance( PFN_vkCreateInstance normal, const VkInstanceCreateInfo *info,

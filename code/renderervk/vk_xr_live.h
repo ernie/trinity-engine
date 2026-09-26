@@ -9,7 +9,9 @@ typedef struct {
 	XrSystemId system;
 	PFN_xrGetInstanceProcAddr getproc;
 	PFN_xrDestroyInstance destroy;
-	int picoInteraction, displayRefresh, eyeGaze, formatList;
+	int picoInteraction, displayRefresh, eyeGaze, formatList, frameInteraction;
+	const char *enabled[6];
+	unsigned enabledCount;
 } vkXRLive_t;
 /* Explicit VR requests only. Instance enables Vulkan2 plus optional extensions it finds.
  * No session/graphics creation. Close after every session/action owner is gone. */

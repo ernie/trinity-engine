@@ -324,7 +324,7 @@ jobs:
 
     - name: Build
       run: |
-          make install -j$(nproc) ARCH=${{ matrix.arch }} CC=${{ matrix.cc }} DESTDIR=bin
+          make install -j$(nproc) ARCH=aarch64 CC=${{ matrix.cc }} DESTDIR=bin
 
     - name: Build pinned runtime dependencies
       shell: bash

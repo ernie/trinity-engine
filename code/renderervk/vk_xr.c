@@ -310,8 +310,9 @@ void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device
 		refreshRequested = -1;
 		VKXR_UpdateRefresh();
 	}
-	if ( !VKXR_Check( VK_XRInput_Init( &input, live.instance, live.getproc, live.picoInteraction ),
-					 "OpenXR input actions" ) ) {
+	if ( !VKXR_Check(
+			VK_XRInput_Init( &input, live.instance, live.getproc, live.picoInteraction, live.frameInteraction ),
+			"OpenXR input actions" ) ) {
 		ri.Error( ERR_DROP, "%s", failure );
 		return;
 	}
@@ -557,6 +558,10 @@ int VK_XR_BeginFrame( refXRFrame_t *frame ) {
 	if ( !VKXR_Check( VK_XRVK_Poll( &xr ), "xrPollEvent" ) || xr.lost ) {
 		return -1;
 	}
+	if ( xr.profileChanged ) {
+		xr.profileChanged = 0;
+		VK_XRInput_UpdateProfiles( &input );
+	}
 	VKXR_UpdateRefresh();
 	frame->running = xr.running;
 	frame->focused = xr.state == XR_SESSION_STATE_FOCUSED;
@@ -656,6 +661,31 @@ int VK_XR_Status( void ) {
 }
 const char *VK_XR_LastError( void ) {
 	return failure;
+}
+void VK_XR_Info( void ) {
+	PFN_xrVoidFunction fn = NULL;
+	XrInstanceProperties props;
+	unsigned i;
+	int hand;
+	if ( !live.instance ) {
+		ri.Printf( PRINT_ALL, "OpenXR is not running\n" );
+		return;
+	}
+	Com_Memset( &props, 0, sizeof( props ) );
+	props.type = XR_TYPE_INSTANCE_PROPERTIES;
+	if ( XR_SUCCEEDED( live.getproc( live.instance, "xrGetInstanceProperties", &fn ) ) && fn &&
+		 XR_SUCCEEDED( ((PFN_xrGetInstanceProperties)fn)( live.instance, &props ) ) )
+		ri.Printf( PRINT_ALL, "Runtime: %s %u.%u.%u\n", props.runtimeName, XR_VERSION_MAJOR( props.runtimeVersion ),
+				   XR_VERSION_MINOR( props.runtimeVersion ), XR_VERSION_PATCH( props.runtimeVersion ) );
+	ri.Printf( PRINT_ALL, "Enabled extensions:\n" );
+	for ( i = 0; i < live.enabledCount; i++ )
+		ri.Printf( PRINT_ALL, "  %s\n", live.enabled[i] );
+	ri.Printf( PRINT_ALL, "Eye gaze: %s\n", live.eyeGaze ? "extension enabled" : "not offered" );
+	for ( hand = 0; hand < 2; hand++ ) {
+		const char *name = VK_XRInput_ProfileName( &input, hand );
+		ri.Printf( PRINT_ALL, "%s hand: %s, pitch correction %g\n", hand ? "Right" : "Left",
+				   name ? name : "none reported", (double)VK_XRInput_PitchCorrection( &input, hand ) );
+	}
 }
 qboolean VK_XR_Haptic( int hand, float amplitude, int durationMs ) {
 	if ( !active || failed || !input.focused ) {

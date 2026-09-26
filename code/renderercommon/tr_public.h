@@ -151,6 +151,7 @@ typedef struct {
 	/* Query between frames; changed logical eye dimensions require vid_restart. */
 	qboolean (*XRResolutionChanged)( void );
 	void (*DesktopTrackingStatus)( qboolean visible, qhandle_t font, qhandle_t icon );
+	void (*XRInfo)( void );
 } refexport_t;
 
 //

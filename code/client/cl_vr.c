@@ -200,6 +200,13 @@ static void CL_VR_Status_f( void ) {
 				cachedProbe.message[0] ? cachedProbe.message : "not probed", lastFailure );
 	CL_VRModulesStatus();
 }
+static void CL_VR_Info_f( void ) {
+	if ( !re.XRInfo ) {
+		Com_Printf( "xr_info: this renderer has no OpenXR support\n" );
+		return;
+	}
+	re.XRInfo();
+}
 void CL_VR_Init( void ) {
 	/* Supported modes, not current headset availability. Never archived. */
 #if defined(USE_VULKAN_API) && !defined(__EMSCRIPTEN__)
@@ -227,6 +234,7 @@ void CL_VR_Init( void ) {
 	CL_VRInput_Init();
 	CL_VR_ClearActive();
 	Cmd_AddCommand( "vr_status", CL_VR_Status_f );
+	Cmd_AddCommand( "xr_info", CL_VR_Info_f );
 }
 int CL_VR_Gametype( void ) {
 	return clc.serverGametype;
@@ -602,4 +610,5 @@ void CL_VR_Shutdown( void ) {
 	CL_VR_ClearActive();
 	CL_VRInput_Shutdown();
 	Cmd_RemoveCommand( "vr_status" );
+	Cmd_RemoveCommand( "xr_info" );
 }

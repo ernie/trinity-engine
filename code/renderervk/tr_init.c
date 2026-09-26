@@ -2217,6 +2217,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.XREndFrame = VK_XR_EndFrame;
 	re.XRStatus = VK_XR_Status;
 	re.XRLastError = VK_XR_LastError;
+	re.XRInfo = VK_XR_Info;
 	re.XRHaptic = VK_XR_Haptic;
 	re.XRSetVirtualScreen = VK_XR_SetVirtualScreen;
 	re.XRSetZoom = VK_XR_SetZoom;

@@ -54,6 +54,7 @@ typedef struct {
 	XrSessionState state;
 	XrEnvironmentBlendMode blend;
 	int running, lost, frameBegun, renderable;
+	int profileChanged;
 	int formatList;
 	XrTime displayTime;
 	VkFormat format;

@@ -19,8 +19,18 @@ enum {
 	CL_XRI_TRACKPAD,
 	CL_XRI_THUMBREST,
 	CL_XRI_SIMPLE_MENU,
+	CL_XRI_BUMPER,
+	CL_XRI_DPAD_UP,
+	CL_XRI_DPAD_DOWN,
+	CL_XRI_DPAD_LEFT,
+	CL_XRI_DPAD_RIGHT,
+	CL_XRI_VIEW,
+	CL_XRI_X,
+	CL_XRI_Y,
+	CL_XRI_SQUEEZE_CLICK,
 	CL_XRI_ACTIONS
 };
+enum { CL_XRP_TOUCH, CL_XRP_PICO4, CL_XRP_PICO4S, CL_XRP_INDEX, CL_XRP_SIMPLE, CL_XRP_FRAME, CL_XRP_COUNT };
 #include "../vrcommon/vr_input_types.h"
 
 #define CL_XRI_FUNCTIONS(X) \
@@ -28,7 +38,8 @@ enum {
 	X( CreateActionSet ) X( DestroyActionSet ) X( CreateAction ) X( SuggestInteractionProfileBindings ) \
 		X( AttachSessionActionSets ) X( CreateActionSpace ) X( DestroySpace ) X( SyncActions ) \
 			X( GetActionStateFloat ) X( GetActionStateVector2f ) X( GetActionStateBoolean ) \
-				X( GetActionStatePose ) X( LocateSpace ) X( ApplyHapticFeedback ) X( StopHapticFeedback )
+				X( GetActionStatePose ) X( LocateSpace ) X( ApplyHapticFeedback ) X( StopHapticFeedback ) \
+					X( GetCurrentInteractionProfile ) X( PathToString )
 typedef struct {
 #define CL_XRI_PROC(name) PFN_xr##name name;
 	CL_XRI_FUNCTIONS( CL_XRI_PROC )
@@ -43,12 +54,19 @@ typedef struct {
 	XrPath hands[2];
 	XrSpace spaces[2][2]; /* grip, aim */
 	int focused;
+	XrPath profilePaths[CL_XRP_COUNT];
+	int profile[2]; /* CL_XRP_* per hand, -1 until the runtime reports one */
 } vkXRInput_t;
 /* Init once per instance before Attach; Pico profiles require the instance's
  * optional XR_BD_controller_interaction extension to have been enabled. */
 XrResult VK_XRInput_Init( vkXRInput_t *ctx, XrInstance instance, PFN_xrGetInstanceProcAddr getproc,
-						  int picoEnabled );
+						  int picoEnabled, int frameEnabled );
 XrResult VK_XRInput_Attach( vkXRInput_t *ctx, XrSession session );
+/* Re-reads the runtime's active interaction profile for each hand; call after attach and on
+ * XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED. */
+void VK_XRInput_UpdateProfiles( vkXRInput_t *ctx );
+const char *VK_XRInput_ProfileName( const vkXRInput_t *ctx, int hand );
+float VK_XRInput_PitchCorrection( const vkXRInput_t *ctx, int hand );
 /* Every output starts neutral. focused must mean active VR AND XR FOCUSED.
  * baseSpace must match rendered views; time is the predicted display time.
  * Inputs/poses remain OpenXR coordinates; engine owns gameplay transforms. */

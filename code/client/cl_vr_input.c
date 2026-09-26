@@ -6,7 +6,7 @@
 #include "../vrcommon/vr_state.h"
 #include "../vrcommon/vr_input_types.h"
 
-#define VR_INPUT_SLOTS 22
+#define VR_INPUT_SLOTS 30
 static clBHaptics_t suitHaptics;
 static qboolean suitEnabled;
 static cvar_t *vrSensitivity;
@@ -16,12 +16,14 @@ static const char *bindingSlots[VR_INPUT_SLOTS] = {
 	"PRIMARYTHUMBSTICK", "SECONDARYTHUMBSTICK", "A", "B", "X", "Y",
 	"RTHUMBLEFT", "RTHUMBRIGHT", "RTHUMBFORWARD", "RTHUMBBACK",
 	"RTHUMBFORWARDRIGHT", "RTHUMBBACKRIGHT", "RTHUMBBACKLEFT", "RTHUMBFORWARDLEFT",
-	"PRIMARYTRACKPAD", "SECONDARYTRACKPAD", "PRIMARYTHUMBREST", "SECONDARYTHUMBREST"
+	"PRIMARYTRACKPAD", "SECONDARYTRACKPAD", "PRIMARYTHUMBREST", "SECONDARYTHUMBREST",
+	"LBUMPER", "RBUMPER", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT",
+	"PRIMARYGRIPCLICK", "SECONDARYGRIPCLICK"
 };
 static cvar_t *bindings[VR_INPUT_SLOTS][2];
 static struct {
 	clXRInputSample_t sample;
-	qboolean valid, tracked, menuDown;
+	qboolean valid, tracked, menuDown, viewDown;
 	int time, previousTime;
 	int navKey, navNext, navAnchorX, navAnchorY;
 	int triggerKey[2], adjustStart, dualGripStart;
@@ -376,13 +378,17 @@ static void VRInput_MenuTriggers( const refXRFrame_t *frame, qboolean menu ) {
 	}
 }
 
+static qboolean VRInput_MenuPressed( const refXRFrame_t *frame ) {
+	return ((frame->input.hands[0].buttons | frame->input.hands[1].buttons) & CL_XRI_MENU_BUTTON) != 0;
+}
+
 /* Cgame owns the timeline catcher; losing the playback context cancels the seek. */
 static qboolean VRInput_TVScrub( const refXRFrame_t *frame, const qboolean *pressed, int primary ) {
 	qboolean blocked = input.scrubGrip || vr.menuYawLocked;
 	qboolean eligible =
 		tvPlay.active && tvPlay.totalDuration > 0 && !vr.weapon_adjust && !vr.in_menu &&
 		!VKeyboard_IsActive() && !(Key_GetCatcher() & (KEYCATCH_UI | KEYCATCH_CONSOLE | KEYCATCH_MESSAGE)) &&
-		!(frame->input.hands[0].buttons & CL_XRI_MENU_BUTTON) && frame->input.hands[primary].active;
+		!VRInput_MenuPressed( frame ) && frame->input.hands[primary].active;
 	if ( input.scrubGrip && (!eligible || input.scrubHand != primary) ) {
 		Cbuf_AddText( "tv_scrub_cancel\n" );
 		input.scrubGrip = qfalse;
@@ -473,14 +479,14 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 		VectorCopy( weapon->grip.position, vr.weaponposition );
 		vr.weaponposition[1] += VRInput_Cvar( vr_heightAdjust, 0 );
 		VectorSubtract( vr.weaponposition, vr.hmdposition, vr.weaponoffset );
-		CL_VRInput_QuaternionAngles( weapon->grip.orientation, -90 + VRInput_Cvar( vr_weaponPitch, 0 ),
+		CL_VRInput_QuaternionAngles( weapon->grip.orientation, -90 + weapon->pitchCorrection + VRInput_Cvar( vr_weaponPitch, 0 ),
 									vr.weaponangles );
 	}
 	if ( other->grip.positionValid && other->grip.orientationValid ) {
 		VectorCopy( other->grip.position, vr.offhandposition );
 		vr.offhandposition[1] += VRInput_Cvar( vr_heightAdjust, 0 );
 		VectorSubtract( vr.offhandposition, vr.hmdposition, vr.offhandoffset );
-		CL_VRInput_QuaternionAngles( other->grip.orientation, -90 + VRInput_Cvar( vr_weaponPitch, 0 ),
+		CL_VRInput_QuaternionAngles( other->grip.orientation, -90 + other->pitchCorrection + VRInput_Cvar( vr_weaponPitch, 0 ),
 									vr.offhandangles );
 	}
 	if ( weapon->aim.orientationValid )
@@ -546,11 +552,15 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 		!VKeyboard_IsActive() && !vr.weapon_adjust && !vr.menuYawLocked )
 		CL_MouseEvent( 0, 0 );
 	VRInput_MenuTriggers( frame, (menu || VKeyboard_IsActive()) && !vr.weapon_adjust && !vr.menuYawLocked );
-	if ( (frame->input.hands[0].buttons & CL_XRI_MENU_BUTTON) && !input.menuDown ) {
+	if ( VRInput_MenuPressed( frame ) && !input.menuDown ) {
 		CL_KeyEvent( K_ESCAPE, qtrue, cls.realtime );
 		CL_KeyEvent( K_ESCAPE, qfalse, cls.realtime );
 	}
-	input.menuDown = !!(frame->input.hands[0].buttons & CL_XRI_MENU_BUTTON);
+	input.menuDown = VRInput_MenuPressed( frame );
+	// Hard-wired like Menu: slot bindings are suppressed while the console is up, so a slot could not close it
+	if ( (frame->input.hands[0].buttons & CL_XRI_VIEW_BUTTON) && !input.viewDown )
+		Cbuf_AddText( "toggleconsole\n" );
+	input.viewDown = !!(frame->input.hands[0].buttons & CL_XRI_VIEW_BUTTON);
 	pressed[0] = weapon->squeeze > .5f;
 	pressed[1] = other->squeeze > .5f;
 	pressed[2] = input.triggers[primary];
@@ -567,6 +577,17 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	pressed[19] = !!(other->buttons & CL_XRI_TRACKPAD_BUTTON);
 	pressed[20] = !!(weapon->buttons & CL_XRI_THUMBREST_BUTTON);
 	pressed[21] = !!(other->buttons & CL_XRI_THUMBREST_BUTTON);
+	/* The Frame puts X/Y on the right controller; they keep the shared X/Y slots */
+	pressed[8] = pressed[8] || (frame->input.hands[1].buttons & CL_XRI_X_BUTTON);
+	pressed[9] = pressed[9] || (frame->input.hands[1].buttons & CL_XRI_Y_BUTTON);
+	pressed[22] = !!(frame->input.hands[0].buttons & CL_XRI_BUMPER_BUTTON);
+	pressed[23] = !!(frame->input.hands[1].buttons & CL_XRI_BUMPER_BUTTON);
+	pressed[24] = !!(frame->input.hands[0].buttons & CL_XRI_DPAD_UP_BUTTON);
+	pressed[25] = !!(frame->input.hands[0].buttons & CL_XRI_DPAD_DOWN_BUTTON);
+	pressed[26] = !!(frame->input.hands[0].buttons & CL_XRI_DPAD_LEFT_BUTTON);
+	pressed[27] = !!(frame->input.hands[0].buttons & CL_XRI_DPAD_RIGHT_BUTTON);
+	pressed[28] = !!(weapon->buttons & CL_XRI_SQUEEZE_CLICK_BUTTON);
+	pressed[29] = !!(other->buttons & CL_XRI_SQUEEZE_CLICK_BUTTON);
 	for ( i = 0; i < VR_INPUT_SLOTS; i++ )
 		if ( !strcmp( input.held[i], "+alt" ) )
 			altHeld++;

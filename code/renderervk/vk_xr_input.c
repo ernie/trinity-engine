@@ -2,13 +2,24 @@
 #include "vk_xr_input.h"
 /* Supported core/vendor profile component table; no runtime calls. */
 #include <string.h>
-enum { CL_XRP_TOUCH, CL_XRP_PICO4, CL_XRP_PICO4S, CL_XRP_INDEX, CL_XRP_SIMPLE, CL_XRP_COUNT };
 static inline const char *CL_XRProfilePath( int profile ) {
-	static const char *paths[] = {
+	static const char *paths[CL_XRP_COUNT] = {
 		"/interaction_profiles/oculus/touch_controller", "/interaction_profiles/bytedance/pico4_controller",
 		"/interaction_profiles/bytedance/pico4s_controller", "/interaction_profiles/valve/index_controller",
-		"/interaction_profiles/khr/simple_controller"};
+		"/interaction_profiles/khr/simple_controller", "/interaction_profiles/valve/frame_controller_valve"};
 	return profile >= 0 && profile < CL_XRP_COUNT ? paths[profile] : NULL;
+}
+static inline const char *CL_XRProfileName( int profile ) {
+	static const char *names[CL_XRP_COUNT] = {[CL_XRP_TOUCH] = "Oculus Touch",	   [CL_XRP_PICO4] = "PICO 4",
+											  [CL_XRP_PICO4S] = "PICO 4 Ultra", [CL_XRP_INDEX] = "Valve Index",
+											  [CL_XRP_SIMPLE] = "Simple",	   [CL_XRP_FRAME] = "Steam Frame"};
+	return profile >= 0 && profile < CL_XRP_COUNT ? names[profile] : NULL;
+}
+/* Grip poses follow each handle's angle; measured on the headset, 0 until a controller needs one. */
+static inline float CL_XRProfilePitch( int profile ) {
+	static const float pitch[CL_XRP_COUNT] = {[CL_XRP_TOUCH] = 0, [CL_XRP_PICO4] = 0,	[CL_XRP_PICO4S] = 0,
+											  [CL_XRP_INDEX] = 0, [CL_XRP_SIMPLE] = 0, [CL_XRP_FRAME] = 20};
+	return profile >= 0 && profile < CL_XRP_COUNT ? pitch[profile] : 0;
 }
 static inline const char *CL_XRProfileComponent( int profile, const char *action, int hand ) {
 	if ( profile < 0 || profile >= CL_XRP_COUNT || hand < 0 || hand > 1 )
@@ -19,6 +30,29 @@ static inline const char *CL_XRProfileComponent( int profile, const char *action
 		return "input/aim/pose";
 	if ( !strcmp( action, "haptic" ) )
 		return "output/haptic";
+	if ( profile == CL_XRP_FRAME ) {
+		static const char *leftOnly[][2] = {{"dpad_up", "input/dpad_up/click"},
+											{"dpad_down", "input/dpad_down/click"},
+											{"dpad_left", "input/dpad_left/click"},
+											{"dpad_right", "input/dpad_right/click"},
+											{"view", "input/view/click"}};
+		static const char *rightOnly[][2] = {{"primary", "input/a/click"}, {"secondary", "input/b/click"},
+											 {"x", "input/x/click"}, {"y", "input/y/click"},
+											 {"menu", "input/menu/click"}};
+		unsigned i;
+		for ( i = 0; i < sizeof( leftOnly ) / sizeof( leftOnly[0] ); i++ )
+			if ( !strcmp( action, leftOnly[i][0] ) )
+				return hand ? NULL : leftOnly[i][1];
+		for ( i = 0; i < sizeof( rightOnly ) / sizeof( rightOnly[0] ); i++ )
+			if ( !strcmp( action, rightOnly[i][0] ) )
+				return hand ? rightOnly[i][1] : NULL;
+		if ( !strcmp( action, "bumper" ) )
+			return "input/bumper/click";
+		if ( !strcmp( action, "squeeze_click" ) )
+			return "input/squeeze/click";
+		if ( !strcmp( action, "trackpad" ) || !strcmp( action, "thumbrest" ) || !strcmp( action, "simple_menu" ) )
+			return NULL;
+	}
 	if ( profile == CL_XRP_SIMPLE ) {
 		if ( !strcmp( action, "trigger" ) )
 			return "input/select/click";
@@ -52,7 +86,8 @@ static inline const char *CL_XRProfileComponent( int profile, const char *action
 
 static const char *xriNames[CL_XRI_ACTIONS] = {
 	"trigger",	 "squeeze",	 "stick",  "stick_click", "primary",   "secondary",	 "menu",
-	"grip_pose", "aim_pose", "haptic", "trackpad",	  "thumbrest", "simple_menu"};
+	"grip_pose", "aim_pose", "haptic", "trackpad",	  "thumbrest", "simple_menu", "bumper",
+	"dpad_up",	 "dpad_down", "dpad_left", "dpad_right", "view", "x", "y", "squeeze_click"};
 static XrResult XRI_Suggest( vkXRInput_t *ctx, int profile ) {
 	XrActionSuggestedBinding bindings[CL_XRI_ACTIONS * 2];
 	XrInteractionProfileSuggestedBinding suggestion;
@@ -82,12 +117,15 @@ static XrResult XRI_Suggest( vkXRInput_t *ctx, int profile ) {
 }
 
 XrResult VK_XRInput_Init( vkXRInput_t *ctx, XrInstance instance, PFN_xrGetInstanceProcAddr getproc,
-						  int picoEnabled ) {
+						  int picoEnabled, int frameEnabled ) {
 	static const XrActionType types[CL_XRI_ACTIONS] = {
 		XR_ACTION_TYPE_FLOAT_INPUT,		 XR_ACTION_TYPE_FLOAT_INPUT,   XR_ACTION_TYPE_VECTOR2F_INPUT,
 		XR_ACTION_TYPE_BOOLEAN_INPUT,	 XR_ACTION_TYPE_BOOLEAN_INPUT, XR_ACTION_TYPE_BOOLEAN_INPUT,
 		XR_ACTION_TYPE_BOOLEAN_INPUT,	 XR_ACTION_TYPE_POSE_INPUT,	   XR_ACTION_TYPE_POSE_INPUT,
 		XR_ACTION_TYPE_VIBRATION_OUTPUT, XR_ACTION_TYPE_FLOAT_INPUT,   XR_ACTION_TYPE_BOOLEAN_INPUT,
+		XR_ACTION_TYPE_BOOLEAN_INPUT,	 XR_ACTION_TYPE_BOOLEAN_INPUT, XR_ACTION_TYPE_BOOLEAN_INPUT,
+		XR_ACTION_TYPE_BOOLEAN_INPUT,	 XR_ACTION_TYPE_BOOLEAN_INPUT, XR_ACTION_TYPE_BOOLEAN_INPUT,
+		XR_ACTION_TYPE_BOOLEAN_INPUT,	 XR_ACTION_TYPE_BOOLEAN_INPUT, XR_ACTION_TYPE_BOOLEAN_INPUT,
 		XR_ACTION_TYPE_BOOLEAN_INPUT};
 	XrActionSetCreateInfo setInfo;
 	XrResult result;
@@ -131,13 +169,18 @@ XrResult VK_XRInput_Init( vkXRInput_t *ctx, XrInstance instance, PFN_xrGetInstan
 		info.subactionPaths = ctx->hands;
 		CHECK( ctx->xr.CreateAction( ctx->set, &info, &ctx->actions[i] ) );
 	}
+	for ( i = 0; i < CL_XRP_COUNT; i++ )
+		CHECK( ctx->xr.StringToPath( instance, CL_XRProfilePath( i ), &ctx->profilePaths[i] ) );
+	ctx->profile[0] = ctx->profile[1] = -1;
 	for ( i = 0; i < CL_XRP_COUNT; i++ ) {
 		if ( (i == CL_XRP_PICO4 || i == CL_XRP_PICO4S) && !picoEnabled )
+			continue;
+		if ( i == CL_XRP_FRAME && !frameEnabled )
 			continue;
 		result = XRI_Suggest( ctx, i );
 		if ( XR_SUCCEEDED( result ) )
 			accepted++;
-		else if ( result != XR_ERROR_PATH_UNSUPPORTED )
+		else if ( i != CL_XRP_FRAME && result != XR_ERROR_PATH_UNSUPPORTED )
 			goto fail;
 	}
 	if ( !accepted ) {
@@ -179,6 +222,7 @@ XrResult VK_XRInput_Attach( vkXRInput_t *ctx, XrSession session ) {
 				return result;
 			}
 		}
+	VK_XRInput_UpdateProfiles( ctx );
 	return XR_SUCCESS;
 }
 
@@ -196,6 +240,33 @@ void VK_XRInput_Reset( vkXRInput_t *ctx ) {
 			ctx->xr.StopHapticFeedback( ctx->session, &info );
 		}
 	ctx->focused = 0;
+}
+
+void VK_XRInput_UpdateProfiles( vkXRInput_t *ctx ) {
+	unsigned hand;
+	int p;
+	if ( !ctx || !ctx->session )
+		return;
+	for ( hand = 0; hand < 2; hand++ ) {
+		XrInteractionProfileState state;
+		memset( &state, 0, sizeof( state ) );
+		state.type = XR_TYPE_INTERACTION_PROFILE_STATE;
+		ctx->profile[hand] = -1;
+		if ( XR_FAILED( ctx->xr.GetCurrentInteractionProfile( ctx->session, ctx->hands[hand], &state ) ) )
+			continue;
+		for ( p = 0; p < CL_XRP_COUNT; p++ )
+			if ( state.interactionProfile != XR_NULL_PATH && state.interactionProfile == ctx->profilePaths[p] )
+				ctx->profile[hand] = p;
+	}
+}
+
+const char *VK_XRInput_ProfileName( const vkXRInput_t *ctx, int hand ) {
+	if ( !ctx || !ctx->session || hand < 0 || hand > 1 )
+		return NULL;
+	return CL_XRProfileName( ctx->profile[hand] );
+}
+float VK_XRInput_PitchCorrection( const vkXRInput_t *ctx, int hand ) {
+	return ctx && ctx->session && hand >= 0 && hand < 2 ? CL_XRProfilePitch( ctx->profile[hand] ) : 0;
 }
 
 XrResult VK_XRInput_Sample( vkXRInput_t *ctx, XrSpace baseSpace, XrTime time, int focused,
@@ -233,6 +304,7 @@ XrResult VK_XRInput_Sample( vkXRInput_t *ctx, XrSpace baseSpace, XrTime time, in
 	for ( hand = 0; hand < 2; hand++ ) {
 		clXRHandInput_t *out = &sample->hands[hand];
 		XrActionStateGetInfo get;
+		out->pitchCorrection = CL_XRProfilePitch( ctx->profile[hand] );
 		memset( &get, 0, sizeof( get ) );
 		get.type = XR_TYPE_ACTION_STATE_GET_INFO;
 		get.subactionPath = ctx->hands[hand];
@@ -297,6 +369,21 @@ XrResult VK_XRInput_Sample( vkXRInput_t *ctx, XrSpace baseSpace, XrTime time, in
 						sample->hands[1 - hand].active = 1;
 					}
 				}
+			}
+		}
+		for ( i = CL_XRI_BUMPER; i <= CL_XRI_SQUEEZE_CLICK; i++ ) {
+			static const unsigned bits[] = {CL_XRI_BUMPER_BUTTON,	  CL_XRI_DPAD_UP_BUTTON,	CL_XRI_DPAD_DOWN_BUTTON,
+											CL_XRI_DPAD_LEFT_BUTTON,  CL_XRI_DPAD_RIGHT_BUTTON, CL_XRI_VIEW_BUTTON,
+											CL_XRI_X_BUTTON,		  CL_XRI_Y_BUTTON,			CL_XRI_SQUEEZE_CLICK_BUTTON};
+			XrActionStateBoolean state;
+			memset( &state, 0, sizeof( state ) );
+			state.type = XR_TYPE_ACTION_STATE_BOOLEAN;
+			get.action = ctx->actions[i];
+			SAMPLE( ctx->xr.GetActionStateBoolean( ctx->session, &get, &state ) );
+			if ( state.isActive ) {
+				out->active = 1;
+				if ( state.currentState )
+					out->buttons |= bits[i - CL_XRI_BUMPER];
 			}
 		}
 		for ( i = 0; i < 2; i++ ) {
