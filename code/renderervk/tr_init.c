@@ -1597,7 +1597,7 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_lodCurveError, "Level of detail error on curved surface grids. Higher values result in better quality at a distance." );
 	r_lodbias = ri.Cvar_Get( "r_lodbias", "-2", CVAR_ARCHIVE_ND );
 	ri.Cvar_SetDescription( r_lodbias, "Sets the level of detail of in-game models:\n -2: Ultra (further delays LOD transition in the distance)\n -1: Very High (delays LOD transition in the distance)\n 0: High\n 1: Medium\n 2: Low" );
-	r_flares = ri.Cvar_Get ("r_flares", "0", CVAR_ARCHIVE_ND );
+	r_flares = ri.Cvar_Get ("r_flares", "1", CVAR_ARCHIVE_ND );
 	ri.Cvar_SetDescription( r_flares, "Enables corona effects on light sources." );
 	r_znear = ri.Cvar_Get( "r_znear", "4", CVAR_CHEAT );
 	ri.Cvar_CheckRange( r_znear, "0.001", "200", CV_FLOAT );
@@ -1828,7 +1828,7 @@ static void R_Register( void )
 		" -2 - first integrated GPU" );
 	r_device->modified = qfalse;
 
-	r_fbo = ri.Cvar_Get( "r_fbo", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_fbo = ri.Cvar_Get( "r_fbo", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_fbo, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary video size and screenshot/video capture.\n Required for bloom, HDR rendering, anti-aliasing and greyscale effects.\n"
 		" In VR, 0 draws straight into the headset swapchain image: no overbright (multi-stage surfaces and blends look different), no bloom, \\r_greyscale, \\r_dither, \\r_presentBits, \\r_hdr, HDR mirror output, screenshots or video capture; \\r_gamma is baked into textures at load, so it needs a \\vid_restart. In that mode \\r_ext_multisample works without the framebuffer, resolving into the swapchain, and the desktop mirror shows the headset image unprocessed." );
@@ -1886,7 +1886,7 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_hdrActive,
 		"Read-only: 1 when HDR output is genuinely live (HDR swapchain up and the display's HDR switch on), else 0." );
 
-	r_bloom = ri.Cvar_Get( "r_bloom", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_bloom = ri.Cvar_Get( "r_bloom", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");
 

@@ -34,13 +34,13 @@ It is based on ioquake3-r1160 (latest non-SDL revision) with upstream patches an
 <li><b>\r_defaultImage</b> <font color=silver>&lt;filename&gt;|#rgb|#rrggbb</font> - replace default (missing) image texture by either exact file or solid #rgb|#rrggbb background color</li>
 <li><b>\r_vbo</b> <font color=silver><b>0</b>|1</font> - use Vertex Buffer Objects to cache static map geometry, may improve FPS on modern GPUs, increases hunk memory usage by 15-30MB (map-dependent)</li>
 <div id="r_fbo"></div>
-<li><b>\r_fbo</b> <font color=silver><b>0</b>|1</font> - use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary size (i.e. greater than logical desktop resolution) screenshot/video capture, required for bloom, hdr rendering, anti-aliasing, greyscale effects, OpenGL 3.0+ required</li>
+<li><b>\r_fbo</b> <font color=silver>0|<b>1</b></font> - use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary size (i.e. greater than logical desktop resolution) screenshot/video capture, required for bloom, hdr rendering, anti-aliasing, greyscale effects, OpenGL 3.0+ required</li>
 <li><b>\r_hdr</b> <font color=silver>-1|<b>0</b>|1</font> - select texture format for framebuffer:<br>
 &nbsp;&nbsp;-1 - 4-bit, for testing purposes, heavy color banding, might not work on all systems<br>
 &nbsp;&nbsp; 0 - 8 bit, default, moderate color banding with multi-stage shaders<br>
 &nbsp;&nbsp; 1 - 16 bit, enhanced blending precision, no color banding, might decrease performance on AMD/Intel GPUs<br>
 </li>
-<li><b><a href="#r_bloom">\r_bloom</a></b> <font color=silver><b>0</b>|1|2</font> - high-quality light bloom postprocessing effect</li>
+<li><b><a href="#r_bloom">\r_bloom</a></b> <font color=silver>0|<b>1</b>|2</font> - high-quality light bloom postprocessing effect</li>
 <li><b>\r_dlightMode</b> <font color=silver>0|<b>1</b>|2</font> - dynamic light mode</li>
 &nbsp;&nbsp; 0 - VQ3 'fake' dynamic lights<br>
 &nbsp;&nbsp; 1 - new high-quality per-pixel dynamic lights, slightly faster than VQ3's on modern hardware<br>

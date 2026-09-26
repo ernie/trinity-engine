@@ -407,23 +407,21 @@ qboolean FS_Initialized( void ) {
 
 /*
 =================
-FS_TrinityPakIndex
+FS_TrinityPakBase
 
-For Trinity paks (pak8t, pak3t, zzz-trinity-announcer), returns the
-index into fs_serverReferencedPaks[] whose name matches this pack,
-or -1 if no match.  Matches both exact base names (e.g. "pak8t") and
-checksummed download variants (e.g. "pak8t.0abcdef0").
+The Trinity pak (pak8t, pak3t, zzz-trinity-announcer) this pack is, by
+exact base name (e.g. "pak8t") or checksummed download variant
+(e.g. "pak8t.0abcdef0", which sets *download); NULL for any other pak.
 =================
 */
 #ifndef DEDICATED
-static int FS_TrinityPakIndex( const pack_t *pack ) {
+static const char *FS_TrinityPakBase( const pack_t *pack, qboolean *download ) {
 	static const char *trinityPaks[] = {
 		"pak8t", "pak3t", "zzz-trinity-announcer"
 	};
-	int t, i;
+	int t;
 	const char *base;
 	int baseLen;
-	char qualifiedName[MAX_OSPATH];
 
 	for ( t = 0; t < ARRAY_LEN( trinityPaks ); t++ ) {
 		base = trinityPaks[t];
@@ -435,18 +433,39 @@ static int FS_TrinityPakIndex( const pack_t *pack ) {
 		if ( pack->pakBasename[baseLen] != '\0' &&
 		     pack->pakBasename[baseLen] != '.' )
 			continue;
+		*download = pack->pakBasename[baseLen] == '.';
+		return base;
+	}
+	return NULL;
+}
 
-		Com_sprintf( qualifiedName, sizeof( qualifiedName ),
-		             "%s/%s", pack->pakGamename, base );
 
-		// Find the matching entry in the server's referenced list.
-		// Referenced names use "gamedir/basename" format.
-		for ( i = 0; i < fs_numServerReferencedPaks; i++ ) {
-			if ( !fs_serverReferencedPakNames[i] )
-				continue;
-			if ( !Q_stricmp( fs_serverReferencedPakNames[i], qualifiedName ) )
-				return i;
-		}
+/*
+=================
+FS_TrinityPakIndex
+
+For Trinity paks, returns the index into fs_serverReferencedPaks[]
+whose name matches this pack, or -1 if no match.
+=================
+*/
+static int FS_TrinityPakIndex( const pack_t *pack ) {
+	qboolean download;
+	const char *base = FS_TrinityPakBase( pack, &download );
+	int i;
+	char qualifiedName[MAX_OSPATH];
+
+	if ( !base )
+		return -1;
+	Com_sprintf( qualifiedName, sizeof( qualifiedName ),
+	             "%s/%s", pack->pakGamename, base );
+
+	// Find the matching entry in the server's referenced list.
+	// Referenced names use "gamedir/basename" format.
+	for ( i = 0; i < fs_numServerReferencedPaks; i++ ) {
+		if ( !fs_serverReferencedPakNames[i] )
+			continue;
+		if ( !Q_stricmp( fs_serverReferencedPakNames[i], qualifiedName ) )
+			return i;
 	}
 	return -1;
 }
@@ -481,6 +500,12 @@ static qboolean FS_PakIsPure( const pack_t *pack ) {
 	if ( fs_numServerReferencedPaks ) {
 		i = FS_TrinityPakIndex( pack );
 		if ( i >= 0 && pack->checksum != fs_serverReferencedPaks[i] )
+			return qfalse;
+	} else {
+		// A downloaded Trinity pak is bound to the server it came from: local games use the installed copy,
+		// which sits behind the home directory's downloads in the search order.
+		qboolean download = qfalse;
+		if ( FS_TrinityPakBase( pack, &download ) && download )
 			return qfalse;
 	}
 #endif

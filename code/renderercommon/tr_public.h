@@ -276,6 +276,9 @@ typedef struct {
 	// headroom (>1 = HDR-capable). macOS-only effect, 1.0 elsewhere.
 	float	(*VK_ConfigureHDR)( qboolean enable );
 
+	// which pak supplies a file, so model detail levels come from the full-detail model's own pak
+	qboolean	(*FS_FileIsInPAK)( const char *name, int *pCheckSum, char *pakName );
+
 	// called between the steps of a load so the headset keeps getting frames; redraw says the caller sits where a
 	// redrawn loading screen may register shaders (no shader mid-parse), otherwise only a tracked frame may go out
 	void	(*LoadingPump)( qboolean redraw );

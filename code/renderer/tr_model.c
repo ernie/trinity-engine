@@ -30,6 +30,35 @@ static qboolean R_LoadMDR(model_t *mod, void *buffer, int filesize, const char *
 
 /*
 ====================
+R_MD3LodCount
+
+Detail levels count only while they come from the pak holding the full-detail model, so a
+replacement model that ships none never borrows another pak's stand-ins.
+====================
+*/
+static int R_MD3LodCount( const char *filename, const char *fext )
+{
+	char		namebuf[MAX_QPATH+20];
+	int			baseSum = 0, sum, lod;
+	qboolean	baseInPak;
+
+	Com_sprintf( namebuf, sizeof( namebuf ), "%s.%s", filename, fext );
+	baseInPak = ri.FS_FileIsInPAK( namebuf, &baseSum, NULL );
+
+	for ( lod = 1; lod < MD3_MAX_LODS; lod++ )
+	{
+		sum = 0;
+		Com_sprintf( namebuf, sizeof( namebuf ), "%s_%d.%s", filename, lod, fext );
+		if ( ri.FS_FileIsInPAK( namebuf, &sum, NULL ) != baseInPak || sum != baseSum )
+			break;
+	}
+
+	return lod;
+}
+
+
+/*
+====================
 R_RegisterMD3
 ====================
 */
@@ -39,7 +68,7 @@ static qhandle_t R_RegisterMD3(const char *name, model_t *mod)
 		uint32_t *u;
 		void *v;
 	} buf;
-	int			lod;
+	int			lod, numLods;
 	uint32_t	ident;
 	qboolean	loaded;
 	int			fileSize;
@@ -49,7 +78,8 @@ static qhandle_t R_RegisterMD3(const char *name, model_t *mod)
 	fext = COM_GetExtension(name); // always non-empty
 	COM_StripExtension(name, filename, sizeof(filename));
 
-	for ( lod = 0 ; lod < MD3_MAX_LODS ; lod++ ) {
+	numLods = R_MD3LodCount( filename, fext );
+	for ( lod = 0 ; lod < numLods ; lod++ ) {
 		if ( lod )
 			Com_sprintf(namebuf, sizeof(namebuf), "%s_%d.%s", filename, lod, fext);
 		else

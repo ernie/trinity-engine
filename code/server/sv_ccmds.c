@@ -365,6 +365,11 @@ static void SV_MapRestart_f( void ) {
 			continue;
 		}
 
+		// the restart can end a recording, which a full map load would offer the same way
+		if ( !isBot ) {
+			client->tvDemoPending = ( sv_tvDownload->integer && tv.lastRecordedFile[0] ) ? qtrue : qfalse;
+		}
+
 		if ( client->state == CS_ACTIVE ) {
 			SV_ClientEnterWorld( client );
 		}

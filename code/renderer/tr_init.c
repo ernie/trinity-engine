@@ -1629,7 +1629,7 @@ static void R_Register( void )
 	ri.Cvar_SetDescription(r_hdr, "Enables high dynamic range frame buffer texture format. Requires \\r_fbo 1.\n -1: 4-bit, for testing purposes, heavy color banding, might not work on all systems\n  0: 8 bit, default, moderate color banding with multi-stage shaders\n  1: 16 bit, enhanced blending precision, no color banding, might decrease performance on AMD / Intel GPUs\n" );
 	ri.Cvar_SetGroup( r_hdr, CVG_RENDERER );
 	// bloom
-	r_bloom = ri.Cvar_Get( "r_bloom", "0", CVAR_ARCHIVE_ND );
+	r_bloom = ri.Cvar_Get( "r_bloom", "1", CVAR_ARCHIVE_ND );
 	r_bloom->flags &= ~CVAR_LATCH; // If we were running renderervk before, we need to remove latch
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");
 	r_bloom_threshold = ri.Cvar_Get( "r_bloom_threshold", "0.6", CVAR_ARCHIVE_ND );
@@ -1817,11 +1817,11 @@ static void R_Register( void )
 	ri.Cvar_CheckRange( r_ignorehwgamma, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_ignorehwgamma, "Overrides hardware gamma capabilities." );
 
-	r_flares = ri.Cvar_Get( "r_flares", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_flares = ri.Cvar_Get( "r_flares", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_flares, "Enables corona effects on light sources." );
 
 #ifdef USE_FBO
-	r_fbo = ri.Cvar_Get( "r_fbo", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_fbo = ri.Cvar_Get( "r_fbo", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_fbo, "Use framebuffer objects, enables gamma correction in windowed mode and allows arbitrary video size and screenshot/video capture.\n Required for bloom, HDR rendering, anti-aliasing and greyscale effects.\n OpenGL 3.0+ required." );
 
 	r_ext_supersample = ri.Cvar_Get( "r_ext_supersample", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );

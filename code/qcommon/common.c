@@ -3051,6 +3051,12 @@ void Com_GameRestart( int checksumFeed, qboolean clientRestart )
 		// Reset console command history
 		Con_ResetHistory();
 
+		// FS_Shutdown closes the log; drop the handle so logging reopens in the new game dir
+		if ( logfile != FS_INVALID_HANDLE ) {
+			FS_FCloseFile( logfile );
+			logfile = FS_INVALID_HANDLE;
+		}
+
 		// Shutdown FS early so Cvar_Restart will not reset old game cvars
 		FS_Shutdown( qtrue );
 

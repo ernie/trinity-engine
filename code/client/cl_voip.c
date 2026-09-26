@@ -317,6 +317,11 @@ void CL_CaptureVoip( void )
 			Cvar_Set( "cl_voip", "0" );
 		}
 		Cvar_Set( "cl_voipProtocol", cl_voip->integer ? "opus" : "" );
+		// The capture checks cl_voip only when the microphone opens, so a change while it is open acts here.
+		if ( !cl_voip->integer && cl_voipCapture->integer )
+			Cvar_Set( "cl_voipCapture", "0" );
+		else if ( cl_voip->integer && cl_voipUseVAD->integer )
+			cl_voipUseVAD->modified = qtrue;
 		cl_voip->modified = qfalse;
 	}
 

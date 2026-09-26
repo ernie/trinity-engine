@@ -3797,7 +3797,7 @@ static void CL_InitRef( void ) {
 	rimp.FS_WriteFile = FS_WriteFile;
 	rimp.FS_FreeFileList = FS_FreeFileList;
 	rimp.FS_ListFiles = FS_ListFiles;
-	//rimp.FS_FileIsInPAK = FS_FileIsInPAK;
+	rimp.FS_FileIsInPAK = FS_FileIsInPAK;
 	rimp.FS_FileExists = FS_FileExists;
 
 	rimp.Cvar_Get = Cvar_Get;
