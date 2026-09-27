@@ -59,6 +59,14 @@ static VkQueryPool gpuTimePool;
 static float gpuTimeSamples[4096];
 static int gpuTimeCount, gpuTimeWindow;
 static unsigned gpuTimeGeneration;
+#define VK_GPU_TIME_QUERIES 10
+/* Frame-order stamps after frame top; each segment ends at its query. */
+static const struct { unsigned query; const char *name; } gpuSegments[] = {
+	{ 6, "scene" }, { 8, "bloom blur" }, { 2, "post" },
+	{ 3, "mirror" }, { 9, "eye output" }, { 1, "end" },
+};
+static float gpuSegmentSamples[ARRAY_LEN( gpuSegments )][4096];
+static int gpuSegmentCount[ARRAY_LEN( gpuSegments )];
 static void vk_gpu_time_stamp( VkCommandBuffer command, unsigned query );
 
 #ifdef _WIN32
@@ -4857,6 +4865,7 @@ static void vk_destroy_sync_primitives( void  ) {
 		gpuTimePool = VK_NULL_HANDLE;
 	}
 	gpuTimeCount = gpuTimeWindow = 0;
+	Com_Memset( gpuSegmentCount, 0, sizeof( gpuSegmentCount ) );
 	++gpuTimeGeneration;
 
 #ifdef USE_UPLOAD_QUEUE
@@ -9699,11 +9708,48 @@ static qboolean vk_find_screenmap_drawsurfs( void )
 /* vk_flares.c owns generation-tagged probe metadata for each fenced slot. */
 void RB_BeginFlareFrame( qboolean completed );
 
-/* Query pairs: full main commands, desktop mirror, separately submitted HUD.
+static void vk_gpu_segments_add( const uint64_t *main, const uint64_t *marks, int window ) {
+	uint64_t prev = main[0];
+	uint32_t s;
+	// frames that skipped bloom (menus, loading) would fold the scene into another pass's median
+	if ( vk.fboActive && r_bloom->integer && !marks[1] )
+		return;
+	for ( s = 0; s < ARRAY_LEN( gpuSegments ); s++ ) {
+		const unsigned q = gpuSegments[s].query;
+		const uint64_t *slot = q >= 6 ? &marks[( q - 6 ) * 2] : &main[q * 2];
+		if ( !slot[1] || gpuSegmentCount[s] >= window )
+			continue;
+		gpuSegmentSamples[s][gpuSegmentCount[s]++] = (float)( (double)VK_GPUTimeDelta( prev, slot[0], vk.timestampValidBits ) *
+															  vk.deviceLimits.timestampPeriod * 1e-6 );
+		prev = slot[0];
+	}
+}
+
+static void vk_gpu_segments_print( int window ) {
+	const qboolean sceneSplit = gpuSegmentCount[0] > 0;
+	char line[512];
+	uint32_t s;
+	Com_sprintf( line, sizeof( line ), "GPU passes over %i frames (median ms):", window );
+	for ( s = 0; s < ARRAY_LEN( gpuSegments ); s++ ) {
+		const int n = gpuSegmentCount[s];
+		if ( !n )
+			continue;
+		qsort( gpuSegmentSamples[s], n, sizeof( float ), VK_GPUTimeCompare );
+		Q_strcat( line, sizeof( line ),
+				  va( " %s%s %.2f,", !sceneSplit && gpuSegments[s].query == 2 ? "scene+" : "",
+					  gpuSegments[s].name, gpuSegmentSamples[s][VK_GPUTimePercentile( n, 50 )] ) );
+		gpuSegmentCount[s] = 0;
+	}
+	line[strlen( line ) - 1] = '\n';
+	ri.Printf( PRINT_ALL, "%s", line );
+}
+
+/* Query pairs: full main commands, desktop mirror, separately submitted HUD; 6..9 split main by pass.
  * All stamps are outside render passes (multiview replicates in-pass queries).
  * Results are consumed only after the slot's existing completion fence. */
 static void vk_gpu_time_collect( qboolean completed ) {
-	uint64_t queries[12];
+	uint64_t queries[12], marks[8];
+	VkResult res;
 	double ticks;
 	int window = r_gpuTimeLog->integer;
 	if ( window < 0 )
@@ -9713,6 +9759,7 @@ static void vk_gpu_time_collect( qboolean completed ) {
 	if ( window != gpuTimeWindow || r_gpuTimeLog->modified ) {
 		gpuTimeWindow = window;
 		gpuTimeCount = 0;
+		Com_Memset( gpuSegmentCount, 0, sizeof( gpuSegmentCount ) );
 		++gpuTimeGeneration;
 		r_gpuTimeLog->modified = qfalse;
 	}
@@ -9722,24 +9769,27 @@ static void vk_gpu_time_collect( qboolean completed ) {
 	if ( !completed || !window || vk.cmd->gpu_time_generation != gpuTimeGeneration )
 		return;
 	Com_Memset( queries, 0, sizeof( queries ) );
-	/* Only request pairs actually written; unused queries may be unavailable. */
-	if ( qvkGetQueryPoolResults( vk.device, gpuTimePool, vk.cmd_index * 6, 2, 4 * sizeof( uint64_t ), queries,
-								2 * sizeof( uint64_t ),
-								VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT ) != VK_SUCCESS )
+	Com_Memset( marks, 0, sizeof( marks ) );
+	/* Main-buffer stamps a frame never wrote stay reset, hence unavailable (VK_NOT_READY). */
+	res = qvkGetQueryPoolResults( vk.device, gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES, 4,
+								  8 * sizeof( uint64_t ), queries, 2 * sizeof( uint64_t ),
+								  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT );
+	if ( res != VK_SUCCESS && res != VK_NOT_READY )
 		return;
-	if ( vk.cmd->gpu_time_mirror &&
-		qvkGetQueryPoolResults( vk.device, gpuTimePool, vk.cmd_index * 6 + 2, 2, 4 * sizeof( uint64_t ),
-								queries + 4, 2 * sizeof( uint64_t ),
-								VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT ) != VK_SUCCESS )
+	res = qvkGetQueryPoolResults( vk.device, gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES + 6, 4,
+								  sizeof( marks ), marks, 2 * sizeof( uint64_t ),
+								  VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT );
+	if ( res != VK_SUCCESS && res != VK_NOT_READY )
 		return;
 	if ( vk.cmd->hud_begun &&
-		qvkGetQueryPoolResults( vk.device, gpuTimePool, vk.cmd_index * 6 + 4, 2, 4 * sizeof( uint64_t ),
+		qvkGetQueryPoolResults( vk.device, gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES + 4, 2, 4 * sizeof( uint64_t ),
 								queries + 8, 2 * sizeof( uint64_t ),
 								VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT ) != VK_SUCCESS )
 		return;
 	if ( !VK_GPUTimeTicks( queries, vk.timestampValidBits, vk.cmd->gpu_time_mirror, vk.cmd->hud_begun, &ticks ) )
 		return;
 	gpuTimeSamples[gpuTimeCount++] = (float)(ticks * vk.deviceLimits.timestampPeriod * 1e-6);
+	vk_gpu_segments_add( queries, marks, window );
 	if ( gpuTimeCount == window ) {
 		qsort( gpuTimeSamples, window, sizeof( float ), VK_GPUTimeCompare );
 		ri.Printf( PRINT_ALL,
@@ -9748,6 +9798,7 @@ static void vk_gpu_time_collect( qboolean completed ) {
 				   window, gpuTimeSamples[VK_GPUTimePercentile( window, 50 )],
 				   gpuTimeSamples[VK_GPUTimePercentile( window, 99 )], gpuTimeSamples[window - 1] );
 		gpuTimeCount = 0;
+		vk_gpu_segments_print( window );
 	}
 }
 
@@ -9760,26 +9811,27 @@ static void vk_gpu_time_begin( void ) {
 		Com_Memset( &desc, 0, sizeof( desc ) );
 		desc.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
 		desc.queryType = VK_QUERY_TYPE_TIMESTAMP;
-		desc.queryCount = NUM_COMMAND_BUFFERS * 6;
+		desc.queryCount = NUM_COMMAND_BUFFERS * VK_GPU_TIME_QUERIES;
 		VK_CHECK( qvkCreateQueryPool( vk.device, &desc, NULL, &gpuTimePool ) );
 	}
 	vk.cmd->gpu_time_armed = qtrue;
 	vk.cmd->gpu_time_generation = gpuTimeGeneration;
 	/* The HUD reset belongs in its own buffer: HUD executes before main. */
-	qvkCmdResetQueryPool( vk.cmd->command_buffer, gpuTimePool, vk.cmd_index * 6, 4 );
+	qvkCmdResetQueryPool( vk.cmd->command_buffer, gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES, 4 );
+	qvkCmdResetQueryPool( vk.cmd->command_buffer, gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES + 6, 4 );
 	qvkCmdWriteTimestamp( vk.cmd->command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, gpuTimePool,
-						  vk.cmd_index * 6 );
+						  vk.cmd_index * VK_GPU_TIME_QUERIES );
 }
 
 static void vk_gpu_time_stamp( VkCommandBuffer command, unsigned query ) {
 	if ( !vk.cmd->gpu_time_armed )
 		return;
 	if ( query == 4 ) {
-		qvkCmdResetQueryPool( command, gpuTimePool, vk.cmd_index * 6 + 4, 2 );
+		qvkCmdResetQueryPool( command, gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES + 4, 2 );
 	}
 	qvkCmdWriteTimestamp(
 		command, query == 4 ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-		gpuTimePool, vk.cmd_index * 6 + query );
+		gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES + query );
 }
 
 void vk_begin_frame( void )
@@ -10541,6 +10593,8 @@ void vk_end_frame( void )
 		vk_end_render_pass();
 		if ( vk.cmd->gpu_time_mirror )
 			vk_gpu_time_stamp( vk.cmd->command_buffer, 3 );
+		else
+			vk_gpu_time_stamp( vk.cmd->command_buffer, 2 ); // hidden mirror: marks the post-scene end
 	}
 
 	if ( VK_XR_Drawing() ) {
@@ -10559,6 +10613,7 @@ void vk_end_frame( void )
 			vk_end_render_pass();
 			VK_XR_CopyEyes( vk.cmd->command_buffer, vk.xr_output.image, VK_FORMAT_R8G8B8A8_SRGB,
 							vk.sceneWidth, vk.sceneHeight, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
+			vk_gpu_time_stamp( vk.cmd->command_buffer, 9 );
 		}
 	}
 	vk_gpu_time_stamp( vk.cmd->command_buffer, 1 );
@@ -10958,6 +11013,7 @@ qboolean vk_bloom( void )
 	}
 
 	vk_end_render_pass(); // end main
+	vk_gpu_time_stamp( vk.cmd->command_buffer, 6 );
 
 	// bloom extraction
 	vk_begin_bloom_extract_render_pass();
@@ -10984,6 +11040,7 @@ qboolean vk_bloom( void )
 		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 		vk_end_render_pass();
 	}
+	vk_gpu_time_stamp( vk.cmd->command_buffer, 8 );
 
 	vk_begin_post_bloom_render_pass(); // begin post-bloom
 	{

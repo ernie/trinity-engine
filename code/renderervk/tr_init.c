@@ -1735,7 +1735,7 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_showcluster, "Shows current cluster index." );
 	r_speeds = ri.Cvar_Get ("r_speeds", "0", CVAR_CHEAT);
 	r_gpuTimeLog = ri.Cvar_Get( "r_gpuTimeLog", "0", CVAR_TEMP );
-	ri.Cvar_SetDescription( r_gpuTimeLog, "GPU eye/HUD milliseconds, excluding desktop mirror. Window in frames (1..4096); 0 disables queries. Reports median/p99/max." );
+	ri.Cvar_SetDescription( r_gpuTimeLog, "GPU eye/HUD milliseconds, excluding desktop mirror, plus per-pass medians. Window in frames (1..4096); 0 disables queries. Reports median/p99/max." );
 	ri.Cvar_SetDescription( r_speeds, "Prints out various debugging stats from PVS:\n 0: Disabled\n 1: Backend BSP\n 2: Frontend grid culling\n 3: Current view cluster index\n 4: Dynamic lighting\n 5: zFar clipping\n 6: Flares" );
 	r_debugSurface = ri.Cvar_Get ("r_debugSurface", "0", CVAR_CHEAT);
 	ri.Cvar_SetDescription( r_debugSurface, "Backend visual debugging tool for bezier mesh surfaces." );
