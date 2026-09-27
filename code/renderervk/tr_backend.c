@@ -1287,7 +1287,15 @@ static void RB_Begin2D( void ) {
 	if ( vk_hud_recording() || vk.renderPassIndex == RENDER_PASS_DESKTOP ) {
 		return;
 	}
-	if ( r_bloom->integer )
+	// the eye pass opens only after the world, which renders into the pass before it
+	if ( vk.postFlow != VK_POST_FLOW_LEGACY ) {
+		if ( !backEnd.doneSurfaces )
+			return;
+		if ( vk.postFlow == VK_POST_FLOW_WORLD )
+			vk_begin_eye_post_pass();
+		else
+			vk_begin_screen_post_pass();
+	} else if ( r_bloom->integer )
 		vk_bloom();
 	RB_RenderDeferredFlares();
 	RB_DrawDeferredHud();
@@ -1605,7 +1613,8 @@ static const void *RB_DrawSurfs( const void *data ) {
 	}
 
 #ifdef USE_VULKAN
-	if ( cmd->refdef.switchRenderPass ) {
+	// once the post pass is open the scene targets are finished
+	if ( cmd->refdef.switchRenderPass && !vk.postOpen ) {
 		vk_end_render_pass();
 		vk_begin_main_render_pass();
 		backEnd.screenMapDone = qtrue;

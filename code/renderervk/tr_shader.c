@@ -4483,6 +4483,26 @@ static void CreateInternalShaders( void ) {
 CreateExternalShaders
 ====================
 */
+// stateBits set after FinishShader has baked the pipelines are inert in Vulkan, so rebake them too
+static void StageDisableDepthTest( shaderStage_t *st ) {
+	Vk_Pipeline_Def def;
+	int i;
+
+	st->stateBits |= GLS_DEPTHTEST_DISABLE;
+	for ( i = 0; i < 2; i++ ) {
+		if ( st->vk_pipeline[i] ) {
+			vk_get_pipeline_def( st->vk_pipeline[i], &def );
+			def.state_bits |= GLS_DEPTHTEST_DISABLE;
+			st->vk_pipeline[i] = vk_find_pipeline_ext( 0, &def, qfalse );
+		}
+		if ( st->vk_mirror_pipeline[i] ) {
+			vk_get_pipeline_def( st->vk_mirror_pipeline[i], &def );
+			def.state_bits |= GLS_DEPTHTEST_DISABLE;
+			st->vk_mirror_pipeline[i] = vk_find_pipeline_ext( 0, &def, qfalse );
+		}
+	}
+}
+
 static void CreateExternalShaders( void ) {
 	tr.projectionShadowShader = R_FindShader( "projectionShadow", LIGHTMAP_NONE, qtrue );
 	tr.flareShader = R_FindShader( "flareShader", LIGHTMAP_NONE, qtrue );
@@ -4496,33 +4516,9 @@ static void CreateExternalShaders( void ) {
 		for(index = 0; index < tr.flareShader->numUnfoggedPasses; index++)
 		{
 			shaderStage_t *st = tr.flareShader->stages[index];
-			Vk_Pipeline_Def def;
 
 			st->bundle[0].adjustColorsForFog = ACFF_NONE;
-			st->stateBits |= GLS_DEPTHTEST_DISABLE;
-
-			// stateBits above lands after FinishShader already baked these pipelines,
-			// so it's inert in Vulkan (baked at pipeline creation, unlike GL's per-draw state); rebake them.
-			if ( st->vk_pipeline[0] ) {
-				vk_get_pipeline_def( st->vk_pipeline[0], &def );
-				def.state_bits |= GLS_DEPTHTEST_DISABLE;
-				st->vk_pipeline[0] = vk_find_pipeline_ext( 0, &def, qfalse );
-			}
-			if ( st->vk_mirror_pipeline[0] ) {
-				vk_get_pipeline_def( st->vk_mirror_pipeline[0], &def );
-				def.state_bits |= GLS_DEPTHTEST_DISABLE;
-				st->vk_mirror_pipeline[0] = vk_find_pipeline_ext( 0, &def, qfalse );
-			}
-			if ( st->vk_pipeline[1] ) {
-				vk_get_pipeline_def( st->vk_pipeline[1], &def );
-				def.state_bits |= GLS_DEPTHTEST_DISABLE;
-				st->vk_pipeline[1] = vk_find_pipeline_ext( 0, &def, qfalse );
-			}
-			if ( st->vk_mirror_pipeline[1] ) {
-				vk_get_pipeline_def( st->vk_mirror_pipeline[1], &def );
-				def.state_bits |= GLS_DEPTHTEST_DISABLE;
-				st->vk_mirror_pipeline[1] = vk_find_pipeline_ext( 0, &def, qfalse );
-			}
+			StageDisableDepthTest( st );
 		}
 	}
 
@@ -4530,8 +4526,12 @@ static void CreateExternalShaders( void ) {
 	if ( vk_hud_image() ) {
 		shader_t *hud = R_FindShader( "sprites/vr/hud", LIGHTMAP_2D, qfalse );
 		if ( hud && hud->stages[0] ) {
+			int index;
 			tr.hudShader = hud;
 			hud->stages[0]->bundle[0].image[0] = vk_hud_image();
+			// the floating HUD draws in front of the world in every mode; after bloom no world depth remains
+			for ( index = 0; index < hud->numUnfoggedPasses; index++ )
+				StageDisableDepthTest( hud->stages[index] );
 		}
 		InitShader( "*virtualScreen", LIGHTMAP_2D );
 		R_CreateDefaultShading( vk_screen_image() );

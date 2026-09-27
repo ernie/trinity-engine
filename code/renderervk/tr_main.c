@@ -646,6 +646,28 @@ static void R_SetupFrustum( viewParms_t *dest, float xmin, float xmax, float yma
 }
 
 
+/* Frustum sides from view-plane extents at zProj: right, left (negated), top, bottom (negated). */
+static void R_SetupFrustumExtents( viewParms_t *dest, const float extent[4], float zProj )
+{
+	int plane;
+	for ( plane = 0; plane < 4; plane++ ) {
+		VectorScale( dest->or.axis[0], extent[plane], dest->frustum[plane].normal );
+		VectorMA( dest->frustum[plane].normal, ((plane == 1 || plane == 2) ? -zProj : zProj),
+				  dest->or.axis[plane < 2 ? 1 : 2], dest->frustum[plane].normal );
+		VectorNormalize( dest->frustum[plane].normal );
+	}
+	VectorCopy( dest->or.axis[0], dest->frustum[4].normal );
+	for ( plane = 0; plane < 5; plane++ ) {
+		dest->frustum[plane].type = PLANE_NON_AXIAL;
+		dest->frustum[plane].dist = DotProduct( dest->or.origin, dest->frustum[plane].normal );
+		if ( plane == 4 ) {
+			dest->frustum[plane].dist += r_znear->value;
+		}
+		SetPlaneSignbits( &dest->frustum[plane] );
+	}
+}
+
+
 /*
 ===============
 R_SetupProjection
@@ -707,31 +729,24 @@ void R_SetupProjection( viewParms_t *dest, float zProj, qboolean computeFrustum 
 		if ( dest->xrMultiview ) {
 			float planes[5][4];
 			int plane;
-			VK_MultiviewPlanes( dest->or.axis, dest->eyeOrigin, dest->eyeAxis, dest->eyeFov, planes );
+			VK_MultiviewPlanes( dest->or.axis, dest->eyeOrigin, dest->eyeAxis,
+								dest->xrCullFov ? dest->cullFov : dest->eyeFov, planes );
 			for ( plane = 0; plane < 5; plane++ ) {
 				VectorCopy( planes[plane], dest->frustum[plane].normal );
 				dest->frustum[plane].dist = planes[plane][3];
 				dest->frustum[plane].type = PLANE_NON_AXIAL;
 				SetPlaneSignbits( &dest->frustum[plane] );
 			}
+		} else if ( dest->cullNdcSet && stereoSep == 0 ) {
+			// NDC is linear in the view-plane coordinate, so the portal's screen bounds map straight to extents
+			const float extent[4] = { xmin + 0.5f * ( dest->cullNdc[1] + 1.0f ) * width,
+									  -( xmin + 0.5f * ( dest->cullNdc[0] + 1.0f ) * width ),
+									  ymin + 0.5f * ( dest->cullNdc[3] + 1.0f ) * height,
+									  -( ymin + 0.5f * ( dest->cullNdc[2] + 1.0f ) * height ) };
+			R_SetupFrustumExtents( dest, extent, zProj );
 		} else if ( dest->xrProjection ) {
-			int plane;
 			const float extent[4] = {xmax, -xmin, ymax, -ymin};
-			for ( plane = 0; plane < 4; plane++ ) {
-				VectorScale( dest->or.axis[0], extent[plane], dest->frustum[plane].normal );
-				VectorMA( dest->frustum[plane].normal, ((plane == 1 || plane == 2) ? -zProj : zProj),
-						  dest->or.axis[plane < 2 ? 1 : 2], dest->frustum[plane].normal );
-				VectorNormalize( dest->frustum[plane].normal );
-			}
-			VectorCopy( dest->or.axis[0], dest->frustum[4].normal );
-			for ( plane = 0; plane < 5; plane++ ) {
-				dest->frustum[plane].type = PLANE_NON_AXIAL;
-				dest->frustum[plane].dist = DotProduct( dest->or.origin, dest->frustum[plane].normal );
-				if ( plane == 4 ) {
-					dest->frustum[plane].dist += r_znear->value;
-				}
-				SetPlaneSignbits( &dest->frustum[plane] );
-			}
+			R_SetupFrustumExtents( dest, extent, zProj );
 		} else {
 			R_SetupFrustum( dest, xmin, xmax, ymax, zProj, stereoSep );
 		}
@@ -1236,7 +1251,7 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, qboolean *isMirror 
 R_GetModelViewBounds
 ================
 */
-static void R_GetModelViewBounds( int *mins, int *maxs )
+static void R_GetModelViewBounds( int *mins, int *maxs, float ndc[4] )
 {
 	float			minn[2];
 	float			maxn[2];
@@ -1296,6 +1311,66 @@ static void R_GetModelViewBounds( int *mins, int *maxs )
 	mins[1] = (int)(-0.5 + 0.5 * ( 1.0 + minn[1] ) * tr.viewParms.viewportHeight);
 	maxs[0] = (int)(0.5 + 0.5 * ( 1.0 + maxn[0] ) * tr.viewParms.viewportWidth);
 	maxs[1] = (int)(0.5 + 0.5 * ( 1.0 + maxn[1] ) * tr.viewParms.viewportHeight);
+	ndc[0] = minn[0];
+	ndc[1] = maxn[0];
+	ndc[2] = minn[1];
+	ndc[3] = maxn[1];
+}
+
+
+/* Multiview shares one scissor, so take the union of the surface's pixel bounds in both eyes;
+ * a vertex behind either eye widens to the whole viewport. cullFov gets each eye's field
+ * narrowed to the surface, for culling the view drawn through it. */
+static void R_GetEyeModelViewBounds( int *mins, int *maxs, float cullFov[2][4] )
+{
+	const float margin = 0.02f; // of the eye's tangent range, so rounding never culls the surface's own edge
+	float minn[2] = { 1.0f, 1.0f };
+	float maxn[2] = { -1.0f, -1.0f };
+	float mvp[16];
+	vec4_t clip;
+	int e, i, j;
+
+	for ( e = 0; e < 2; e++ ) {
+		float emin[2] = { 1.0f, 1.0f }, emax[2] = { -1.0f, -1.0f };
+		const float *fov = tr.viewParms.eyeFov[e];
+		qboolean behind = qfalse;
+		myGlMultMatrix( tr.or.modelMatrix, tr.viewParms.eyeProjection[e], mvp );
+		for ( i = 0; i < tess.numVertexes; i++ ) {
+			R_TransformModelToClipMVP( tess.xyz[i], mvp, clip );
+			if ( clip[3] <= 0.0f ) {
+				behind = qtrue;
+				break;
+			}
+			for ( j = 0; j < 2; j++ ) {
+				float n = clip[j] / clip[3];
+				if ( n < -1.0f ) n = -1.0f; else if ( n > 1.0f ) n = 1.0f;
+				if ( n < emin[j] ) emin[j] = n;
+				if ( n > emax[j] ) emax[j] = n;
+			}
+		}
+		if ( behind ) {
+			emin[0] = emin[1] = -1.0f;
+			emax[0] = emax[1] = 1.0f;
+		}
+		for ( j = 0; j < 2; j++ ) {
+			if ( emin[j] < minn[j] ) minn[j] = emin[j];
+			if ( emax[j] > maxn[j] ) maxn[j] = emax[j];
+		}
+		/* NDC is linear in the view-plane tangent: x spans left..right, y spans down..up. */
+		{
+			const float tl = tanf( fov[0] ), tr_ = tanf( fov[1] ), tu = tanf( fov[2] ), td = tanf( fov[3] );
+			const float mx = margin * ( tr_ - tl ), my = margin * ( tu - td );
+			cullFov[e][0] = atanf( MAX( tl, tl + 0.5f * ( emin[0] + 1.0f ) * ( tr_ - tl ) - mx ) );
+			cullFov[e][1] = atanf( MIN( tr_, tl + 0.5f * ( emax[0] + 1.0f ) * ( tr_ - tl ) + mx ) );
+			cullFov[e][2] = atanf( MIN( tu, td + 0.5f * ( emax[1] + 1.0f ) * ( tu - td ) + my ) );
+			cullFov[e][3] = atanf( MAX( td, td + 0.5f * ( emin[1] + 1.0f ) * ( tu - td ) - my ) );
+		}
+	}
+
+	mins[0] = (int)(-0.5 + 0.5 * ( 1.0 + minn[0] ) * tr.viewParms.viewportWidth);
+	mins[1] = (int)(-0.5 + 0.5 * ( 1.0 + minn[1] ) * tr.viewParms.viewportHeight);
+	maxs[0] = (int)(0.5 + 0.5 * ( 1.0 + maxn[0] ) * tr.viewParms.viewportWidth);
+	maxs[1] = (int)(0.5 + 0.5 * ( 1.0 + maxn[1] ) * tr.viewParms.viewportHeight);
 }
 
 
@@ -1343,6 +1418,20 @@ static qboolean R_MirrorViewBySurface( const drawSurf_t *drawSurf, int entityNum
 		return qfalse;		// bad portal, no portalentity
 	}
 
+	// the reflected view renders only where either eye can see the surface
+	if ( newParms.xrMultiview && tess.numVertexes > 2 ) {
+		int mins[2], maxs[2];
+		R_GetEyeModelViewBounds( mins, maxs, newParms.cullFov );
+		if ( maxs[0] <= mins[0] || maxs[1] <= mins[1] ) {
+			return qfalse;
+		}
+		newParms.xrCullFov = qtrue;
+		newParms.scissorX = newParms.viewportX + mins[0];
+		newParms.scissorY = newParms.viewportY + mins[1];
+		newParms.scissorWidth = maxs[0] - mins[0];
+		newParms.scissorHeight = maxs[1] - mins[1];
+	}
+
 #ifdef USE_PMLIGHT
 	// create dedicated set for each view
 	if ( r_numdlights + oldParms.num_dlights <= ARRAY_LEN( backEndData->dlights ) ) {
@@ -1355,17 +1444,25 @@ static qboolean R_MirrorViewBySurface( const drawSurf_t *drawSurf, int entityNum
 	}
 #endif
 
-#if defined (USE_VULKAN) && !defined (USE_BUFFER_CLEAR)
-	if ( !newParms.xrMultiview && tess.numVertexes > 2 && r_fastsky->integer && vk.clearAttachment ) {
-#else
-	if ( !newParms.xrMultiview && tess.numVertexes > 2 && r_fastsky->integer ) {
-#endif
+	if ( !newParms.xrMultiview && tess.numVertexes > 2 ) {
+		const float margin = 0.04f; // 2% of the NDC range, so rounding never culls the surface's own edge
 		int mins[2], maxs[2];
-		R_GetModelViewBounds( mins, maxs );
-		newParms.scissorX = newParms.viewportX + mins[0];
-		newParms.scissorY = newParms.viewportY + mins[1];
-		newParms.scissorWidth = maxs[0] - mins[0];
-		newParms.scissorHeight = maxs[1] - mins[1];
+		R_GetModelViewBounds( mins, maxs, newParms.cullNdc );
+		newParms.cullNdc[0] = MAX( -1.0f, newParms.cullNdc[0] - margin );
+		newParms.cullNdc[1] = MIN( 1.0f, newParms.cullNdc[1] + margin );
+		newParms.cullNdc[2] = MAX( -1.0f, newParms.cullNdc[2] - margin );
+		newParms.cullNdc[3] = MIN( 1.0f, newParms.cullNdc[3] + margin );
+		newParms.cullNdcSet = qtrue;
+#if defined (USE_VULKAN) && !defined (USE_BUFFER_CLEAR)
+		if ( r_fastsky->integer && vk.clearAttachment ) {
+#else
+		if ( r_fastsky->integer ) {
+#endif
+			newParms.scissorX = newParms.viewportX + mins[0];
+			newParms.scissorY = newParms.viewportY + mins[1];
+			newParms.scissorWidth = maxs[0] - mins[0];
+			newParms.scissorHeight = maxs[1] - mins[1];
+		}
 	}
 
 	R_MirrorPoint( oldParms.or.origin, &surface, &camera, newParms.or.origin );

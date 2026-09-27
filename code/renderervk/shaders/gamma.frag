@@ -3,8 +3,19 @@
 #include "../vk_xr_color.h"
 #include "postprocess_source.glsl"
 
+#ifdef USE_BLOOM_COMPOSITE
+layout(set = 0, binding = 0) uniform sceneSampler texture0;
+layout(set = 0, binding = 1) uniform sceneSampler texture1; // emissive highlight layer
+layout(set = 0, binding = 2) uniform sceneSampler bloom0;
+layout(set = 0, binding = 3) uniform sceneSampler bloom1;
+layout(set = 0, binding = 4) uniform sceneSampler bloom2;
+layout(set = 0, binding = 5) uniform sceneSampler bloom3;
+layout(constant_id = 4) const float bloomFactor = 0.5;
+layout(constant_id = 15) const int bloomEnabled = 1;
+#else
 layout(set = 0, binding = 0) uniform sceneSampler texture0;
 layout(set = 1, binding = 0) uniform sceneSampler texture1; // emissive highlight layer
+#endif
 
 layout(location = 0) in vec2 frag_tex_coord;
 
@@ -18,7 +29,7 @@ layout(constant_id = 7) const int ditherMode = 0; // 0 - disabled, 1 - ordered
 layout(constant_id = 8) const int depth_r = 255;
 layout(constant_id = 9) const int depth_g = 255;
 layout(constant_id = 10) const int depth_b = 255;
-layout(constant_id = 11) const int hdrMode = 0;          // 0 - SDR, 1 - scRGB linear HDR
+layout(constant_id = 11) const int hdrMode = 0;          // 0 - SDR, 1 - scRGB linear HDR, 3 - scRGB from the encoded eye image
 layout(constant_id = 13) const int screenSource = 0; // 1: encoded composition, 2: linear menu capture
 layout(constant_id = 12) const int linearSDROutput = 0; // SRGB headset attachment
 
@@ -43,7 +54,7 @@ vec3 sRGBtoLinear(vec3 c) {
 
 // Reconstructs scRGB-linear HDR output from the SDR color buffer and the emissive
 // highlight layer. 1.0 == paper-white; result is scaled to scRGB (paper-white / 80).
-vec3 hdrReconstruct( vec3 base, vec3 emissive,
+vec3 hdrReconstruct( vec3 base, vec3 emissive, float coverage, bool encoded,
                      float gamma, float obScale,
                      float paperWhite, float hdrPeak, float hdrHighlight,
                      float hdrSaturation, float hdrSaturationFull, float hdrSoftKnee )
@@ -53,12 +64,13 @@ vec3 hdrReconstruct( vec3 base, vec3 emissive,
 	// inflates base in halos but never writes the emissive layer (no fringing);
 	// the base term restores 2D occlusion, since 2D composited on top darkens
 	// base below the ceiling even where the emissive layer kept the emitter.
+	// Coverage (eye alpha) turns it off under 2D drawn after the scene.
 	float em = max( max( emissive.r, emissive.g ), emissive.b );
 	float clip = smoothstep( 1.0, 1.1, em )
-	           * smoothstep( 0.990, 1.0, max( max( base.r, base.g ), base.b ) );
-	vec3 src = mix( base, max( base, emissive ), clip );
-
-	vec3 lin = sRGBtoLinear( pow( src, vec3( gamma ) ) * obScale );
+	           * smoothstep( 0.990, 1.0, max( max( base.r, base.g ), base.b ) ) * ( 1.0 - coverage );
+	// An encoded base already carries gamma and overbright; the emissive layer never does.
+	vec3 lin = encoded ? sRGBtoLinear( mix( base, max( base, pow( emissive, vec3( gamma ) ) * obScale ), clip ) )
+	                   : sRGBtoLinear( pow( mix( base, max( base, emissive ), clip ), vec3( gamma ) ) * obScale );
 
 	// Highlights (m>1.0): bleed over-white emitters toward white, then roll the
 	// headroom off toward the panel peak.
@@ -117,7 +129,7 @@ vec3 dither(vec3 color) {
 }
 
 void main() {
-	if ( hdrMode == 1 && push.hdrCalibrate == 1 ) {
+	if ( ( hdrMode == 1 || hdrMode == 3 ) && push.hdrCalibrate == 1 ) {
 		// Peak-match test: a fixed outer rectangle that clips to the panel's true
 		// peak, and an inner rectangle at r_hdrPeak. Raise r_hdrPeak until the inner
 		// edge vanishes = panel peak. Window ~5% of pixels, 2.4:1:
@@ -136,7 +148,23 @@ void main() {
 		}
 	}
 
+	if ( hdrMode == 3 ) {
+		vec4 eye = sceneSample(texture0, frag_tex_coord);
+		out_color = vec4( hdrReconstruct( eye.rgb, sceneSample(texture1, frag_tex_coord).rgb, eye.a, true, gamma,
+			obScale, push.paperWhite, push.hdrPeak, push.hdrHighlight, push.hdrSaturation,
+			push.hdrSaturationFull, push.hdrSoftKnee ), 1.0 );
+		return;
+	}
+
 	vec3 base = sceneSample(texture0, frag_tex_coord).rgb;
+#ifdef USE_BLOOM_COMPOSITE
+	if ( bloomEnabled != 0 ) {
+		vec3 bloom = sceneSample(bloom0, frag_tex_coord).rgb + sceneSample(bloom1, frag_tex_coord).rgb
+			+ sceneSample(bloom2, frag_tex_coord).rgb + sceneSample(bloom3, frag_tex_coord).rgb;
+		// The blend pass adds into a UNORM target, which clamps.
+		base = min( base + bloom * bloomFactor, vec3(1.0) );
+	}
+#endif
 	// Screen content already went through gamma/overbright before capture.
 	if (screenSource != 0) {
 		vec3 linear = screenSource == 2 ? base : sRGBtoLinear(base);
@@ -160,7 +188,7 @@ void main() {
 	if ( hdrMode == 1 )
 	{
 		vec3 emissive = sceneSample(texture1, frag_tex_coord).rgb;
-		out_color = vec4( hdrReconstruct( base, emissive, gamma, obScale,
+		out_color = vec4( hdrReconstruct( base, emissive, 0.0, false, gamma, obScale,
 			push.paperWhite, push.hdrPeak, push.hdrHighlight, push.hdrSaturation,
 			push.hdrSaturationFull, push.hdrSoftKnee ), 1.0 );
 		return;
@@ -181,4 +209,8 @@ void main() {
 	if ( linearSDROutput == 1 ) {
 		out_color.rgb=vec3(VKXR_SdrLinear(out_color.r),VKXR_SdrLinear(out_color.g),VKXR_SdrLinear(out_color.b));
 	}
+#ifdef USE_BLOOM_COMPOSITE
+	// Alpha accumulates post-scene 2D coverage for the HDR mirror.
+	out_color.a = 0.0;
+#endif
 }

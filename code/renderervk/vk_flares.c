@@ -633,22 +633,11 @@ static void RB_TestFlare( flare_t *f ) {
 }
 
 
-/*
-==================
-RB_RenderFlare
-==================
-*/
-static void RB_RenderFlare( flare_t *f ) {
-	float			size;
-	vec3_t			color;
+/* Corona color at one fade level; qfalse when falloff or fog leave it black. Fog math uses tess, so never mid-batch. */
+static qboolean RB_FlareColor( const flare_t *f, float fade, float *size, color4ub_t *c ) {
 	float distance, intensity, factor;
 	byte fogFactors[3] = {255, 255, 255};
-	color4ub_t		c;
-
-	//if ( f->drawIntensity == 0.0 )
-	//	return;
-
-	backEnd.pc.c_flareRenders++;
+	int k;
 
 	// We don't want too big values anyways when dividing by distance.
 	if ( f->eyeZ > -1.0f )
@@ -657,7 +646,7 @@ static void RB_RenderFlare( flare_t *f ) {
 		distance = -f->eyeZ;
 
 	// use the flare's own captured viewport width so a deferred draw isn't mis-sized by the last 3D view's viewParms
-	size = f->viewportWidth * ( r_flareSize->value/640.0f + 8 / distance );
+	*size = f->viewportWidth * ( r_flareSize->value/640.0f + 8 / distance );
 
 /*
  * This is an alternative to intensity scaling. It changes the size of the flare on screen instead
@@ -680,11 +669,9 @@ static void RB_RenderFlare( flare_t *f ) {
  * The coefficient flareCoeff will determine the falloff speed with increasing distance.
  */
 
-	factor = distance + size * sqrt( r_flareCoeff->value );
+	factor = distance + *size * sqrt( r_flareCoeff->value );
 
-	intensity = r_flareCoeff->value * size * size / ( factor * factor );
-
-	VectorScale( f->color, f->drawIntensity * intensity, color );
+	intensity = r_flareCoeff->value * *size * *size / ( factor * factor );
 
 	// Calculations for fogging
 	if ( tr.world && f->fogNum > 0 && f->fogNum < tr.world->numfogs )
@@ -697,41 +684,89 @@ static void RB_RenderFlare( flare_t *f ) {
 
 		// We don't need to render the flare if colors are 0 anyways.
 		if ( !(fogFactors[0] || fogFactors[1] || fogFactors[2]) )
-			return;
+			return qfalse;
 	}
 
-	c.rgba[0] = color[0] * fogFactors[0];
-	c.rgba[1] = color[1] * fogFactors[1];
-	c.rgba[2] = color[2] * fogFactors[2];
-	c.rgba[3] = 255;
+	for ( k = 0; k < 3; k++ )
+		c->rgba[k] = f->color[k] * fade * intensity * fogFactors[k];
+	c->rgba[3] = 255;
 
-	if ( f->multiview ) {
-		viewParms_t saved = backEnd.viewParms;
-		int e, k;
-		for ( e = 0; e < 2; e++ )
-			if ( f->eyeIntensity[e] > 0 ) {
+	// an additive black quad contributes nothing but still pays its fill
+	return ( c->rgba[0] | c->rgba[1] | c->rgba[2] ) != 0;
+}
+
+
+/* Draws a multiview corona set in one draw per eye; the opposite layer is clipped so each eye keeps its own fade. */
+static void RB_RenderFlareEyes( flare_t **flares, color4ub_t (*colors)[2], int count ) {
+	const viewParms_t saved = backEnd.viewParms;
+	const orientationr_t savedOrientation = backEnd.or;
+	int e, i, fogNum, scene;
+
+	for ( e = 0; e < 2; e++ ) {
+		fogNum = -1;
+		scene = -1;
+		for ( i = 0; i < count; i++ ) {
+			const flare_t *f = flares[i];
+			if ( !( colors[i][e].rgba[0] | colors[i][e].rgba[1] | colors[i][e].rgba[2] ) )
+				continue;
+			if ( f->owningView.frameSceneNum != scene ) {
 				float *hidden;
+				if ( fogNum >= 0 )
+					RB_EndSurface();
 				backEnd.viewParms = f->owningView;
-				/* Independent fading: clip the opposite layer so each eye keeps its own
-				 * depth answer and color. */
+				backEnd.or = f->owningView.world;
 				hidden = backEnd.viewParms.eyeProjection[1 - e];
 				memset( hidden, 0, 16 * sizeof( float ) );
 				hidden[14] = 2;
 				hidden[15] = 1;
 				vk_update_mvp( f->owningView.world.modelMatrix );
-				for ( k = 0; k < 3; k++ )
-					c.rgba[k] = f->color[k] * f->eyeIntensity[e] * intensity * fogFactors[k];
+				vk.cmd->depth_range = DEPTH_RANGE_COUNT;
 				RB_BeginSurface( tr.flareShader, f->fogNum );
-				RB_AddQuadStamp( f->origin, f->billboardLeft, f->billboardUp, c );
+				fogNum = f->fogNum;
+				scene = f->owningView.frameSceneNum;
+			} else if ( f->fogNum != fogNum ) {
 				RB_EndSurface();
+				RB_BeginSurface( tr.flareShader, f->fogNum );
+				fogNum = f->fogNum;
 			}
-		backEnd.viewParms = saved;
-		vk_update_mvp( saved.world.modelMatrix );
-	} else {
-		RB_BeginSurface( tr.flareShader, f->fogNum );
-		RB_AddQuadStamp2( f->windowX - size, f->windowY - size, size * 2, size * 2, 0, 0, 1, 1, c );
-		RB_EndSurface();
+			RB_AddQuadStamp( f->origin, f->billboardLeft, f->billboardUp, colors[i][e] );
+		}
+		if ( fogNum >= 0 )
+			RB_EndSurface();
 	}
+	backEnd.viewParms = saved;
+	backEnd.or = savedOrientation;
+	vk_update_mvp( saved.world.modelMatrix );
+}
+
+
+/*
+==================
+RB_RenderFlare
+==================
+*/
+static void RB_RenderFlare( flare_t *f ) {
+	float size;
+	color4ub_t c;
+
+	backEnd.pc.c_flareRenders++;
+
+	if ( f->multiview ) {
+		color4ub_t colors[1][2];
+		int e;
+		Com_Memset( colors, 0, sizeof( colors ) );
+		for ( e = 0; e < 2; e++ )
+			if ( f->eyeIntensity[e] > 0 )
+				RB_FlareColor( f, f->eyeIntensity[e], &size, &colors[0][e] );
+		RB_RenderFlareEyes( &f, colors, 1 );
+		return;
+	}
+
+	if ( !RB_FlareColor( f, f->drawIntensity, &size, &c ) )
+		return;
+	RB_BeginSurface( tr.flareShader, f->fogNum );
+	RB_AddQuadStamp2( f->windowX - size, f->windowY - size, size * 2, size * 2, 0, 0, 1, 1, c );
+	RB_EndSurface();
 }
 
 
@@ -761,7 +796,8 @@ void RB_RenderFlares( void ) {
 		return;
 	}
 
-	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP ) {
+	// probes read world depth, which post-scene 2D doesn't have
+	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP || VK_PassIsPostScene2D( vk.renderPassIndex ) ) {
 		return;
 	}
 
@@ -856,6 +892,9 @@ vk_bloom()'s bright-pass, so coronas aren't re-bloomed. doneFlares guards the on
 ==================
 */
 void RB_RenderDeferredFlares( void ) {
+	static flare_t		*batchFlares[MAX_FLARES];
+	static color4ub_t	batchColors[MAX_FLARES][2];
+	int					batchCount = 0;
 	flare_t				*f;
 	float				*m;
 	const trRefEntity_t	*savedEntity;
@@ -891,11 +930,14 @@ void RB_RenderDeferredFlares( void ) {
 			f->drawIntensity = f->deferredIntensity;
 			if ( f->drawIntensity ) {
 				if ( f->multiview ) {
-					backEnd.viewParms = f->owningView;
-					backEnd.or = f->owningView.world;
-					vk_update_mvp( f->owningView.world.modelMatrix );
-					vk.cmd->depth_range = DEPTH_RANGE_COUNT;
-					RB_RenderFlare( f );
+					float size;
+					int e;
+					backEnd.pc.c_flareRenders++;
+					Com_Memset( batchColors[batchCount], 0, sizeof( batchColors[batchCount] ) );
+					for ( e = 0; e < 2; e++ )
+						if ( f->eyeIntensity[e] > 0 )
+							RB_FlareColor( f, f->eyeIntensity[e], &size, &batchColors[batchCount][e] );
+					batchFlares[batchCount++] = f;
 					continue;
 				}
 				backEnd.viewParms.viewportX = f->viewportX;
@@ -916,6 +958,9 @@ void RB_RenderDeferredFlares( void ) {
 			}
 		}
 	}
+
+	if ( batchCount )
+		RB_RenderFlareEyes( batchFlares, batchColors, batchCount );
 
 	// Reached from the 3D boundary and from the end-of-frame fallback.
 	backEnd.viewParms = savedView;

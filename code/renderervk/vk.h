@@ -172,20 +172,23 @@ typedef struct {
 
 #include "vk_pass.h"
 
+/* How a frame's scene reaches the headset: the post-bloom pass, the stereo eye pass, or the mono capture pass. */
+typedef enum { VK_POST_FLOW_LEGACY, VK_POST_FLOW_WORLD, VK_POST_FLOW_SCREEN } vkPostFlow_t;
+
 /* Mono screen sources reuse XR array images; only their compatible pass,
  * framebuffer and pipeline handles differ. vk.c owns this target lifetime. */
 typedef struct {
 	qboolean sourceActive;
 	struct {
-		VkRenderPass main, post_bloom, bloom_extract, output;
+		VkRenderPass main, output;
 		VkRenderPass blur[VK_NUM_BLOOM_PASSES * 2];
 	} pass;
 	struct {
-		VkFramebuffer main, bloom_extract, output;
+		VkFramebuffer main, output;
 		VkFramebuffer blur[VK_NUM_BLOOM_PASSES * 2];
 	} framebuffer;
 	struct {
-		VkPipeline bloom_extract, bloom_blend, output;
+		VkPipeline output, composite;
 		VkPipeline blur[VK_NUM_BLOOM_PASSES * 2];
 	} pipeline;
 } vkMonoTargets_t;
@@ -288,17 +291,18 @@ void vk_get_pipeline_def( uint32_t pipeline, Vk_Pipeline_Def *def );
 
 typedef enum {
 	VK_POST_GAMMA,
-	VK_POST_BLOOM_EXTRACT,
 	VK_POST_BLOOM_BLEND,
 	VK_POST_CAPTURE,
 	VK_POST_XR_OUTPUT,
-	VK_POST_SCREEN_OUTPUT,
+	VK_POST_XR_COMPOSITE,
 	VK_POST_SCREEN_MONO,
 	VK_POST_SCREEN_CAPTURE,
 	VK_POST_EYE_LEFT,
 	VK_POST_EYE_RIGHT,
 	VK_POST_SCREEN_LEFT,
-	VK_POST_SCREEN_RIGHT
+	VK_POST_SCREEN_RIGHT,
+	VK_POST_EYE_MIRROR_LEFT,
+	VK_POST_EYE_MIRROR_RIGHT
 } vkPostProgram_t;
 
 void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t width, uint32_t height );
@@ -330,6 +334,8 @@ void vk_draw_dot( uint32_t storage_offset );
 
 void vk_read_pixels( byte* buffer, uint32_t width, uint32_t height ); // screenshots
 qboolean vk_bloom( void );
+void vk_begin_eye_post_pass( void );
+void vk_begin_screen_post_pass( void );
 
 qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size );
 void vk_update_mvp( const float *m );
@@ -443,7 +449,6 @@ typedef struct {
 		VkRenderPass screenmap;
 		VkRenderPass gamma;
 		VkRenderPass capture;
-		VkRenderPass bloom_extract;
 		VkRenderPass blur[VK_NUM_BLOOM_PASSES*2]; // horizontal-vertical pairs
 		VkRenderPass post_bloom;
 	} render_pass;
@@ -452,28 +457,46 @@ typedef struct {
 	VkDescriptorPool descriptor_pool;
 	VkDescriptorPool target_descriptor_pool; /* never contains game image sets */
 	qboolean multiview;
+	vkPostFlow_t postFlow;					// how this frame finishes; decided when it begins
+	qboolean postOpen;						// the flow's post pass has begun
 	VkDescriptorSetLayout set_layout_sampler;	// combined image sampler
 	VkDescriptorSetLayout set_layout_uniform;	// dynamic uniform buffer
 	VkDescriptorSetLayout set_layout_storage;	// feedback buffer
+	VkDescriptorSetLayout set_layout_composite;	// scene, emissive and bloom levels in one set
 
 	VkPipelineLayout pipeline_layout;			// default shaders
 	VkPipelineLayout pipeline_layout_storage;	// flare test shader layout
 	VkPipelineLayout pipeline_layout_post_process;	// post-processing
 	VkPipelineLayout pipeline_layout_blend;		// post-processing
+	VkPipelineLayout pipeline_layout_composite;	// bloom composite in the eye output pass
 
 	VkDescriptorSet color_descriptor;
 	VkDescriptorSet emissive_descriptor;
+	VkDescriptorSet composite_descriptor;
 
 	VkImage color_image;
 	VkImageView color_image_view;
 	struct {
 		VkImage image;
 		VkImageView view;
+		VkImageView unorm_view;				// the eye post pass writes encoded values through this
+		VkImage depth;						// transient depth for post-scene 2D
+		VkImageView depth_view;
 		VkRenderPass pass;
 		VkFramebuffer framebuffer;
 		VkPipeline pipeline;
-		VkPipeline screen_pipeline, screen_mono_pipeline, screen_capture_pipeline;
+		VkPipeline composite_pipeline;
+		VkPipeline screen_mono_pipeline, screen_capture_pipeline;
 		VkPipeline screen_mirror_eye[2];
+		VkPipeline eye_mirror[2];			// desktop mirror of the finished eye image
+		VkFormat format;					// swapchain format when it is sRGB, else the blit source format
+		VkRenderPass eye_pass;				// output pass writing the acquired swapchain image
+		uint32_t eye_count;
+		VkImage eye_image[VK_XR_DIRECT_MAX_IMAGES];
+		VkImageView eye_view[VK_XR_DIRECT_MAX_IMAGES];
+		VkDescriptorSet eye_descriptor[VK_XR_DIRECT_MAX_IMAGES];
+		VkDescriptorSet descriptor;			// the blit fallback image
+		VkFramebuffer eye_framebuffer[VK_XR_DIRECT_MAX_IMAGES];
 	} xr_output;
 	// Direct mode: one target per XR swapchain image; idle stands in while none is acquired.
 	struct {
@@ -526,7 +549,6 @@ typedef struct {
 
 	struct {
 		VkFramebuffer blur[VK_NUM_BLOOM_PASSES*2];
-		VkFramebuffer bloom_extract;
 		VkFramebuffer main[MAX_SWAPCHAIN_IMAGES];
 		VkFramebuffer gamma[MAX_SWAPCHAIN_IMAGES];
 		VkFramebuffer screenmap;
@@ -594,9 +616,9 @@ typedef struct {
 		VkShaderModule color_fs;
 		VkShaderModule color_vs;
 		VkShaderModule color_vs_mv, fog_vs_mv, dot_vs_mv, dot_fs_mv;
-		VkShaderModule bloom_fs_mv, blur_fs_mv, blend_fs_mv, gamma_fs_mv, gamma_fs_array;
+		VkShaderModule blur_extract_fs_mv, blur_fs_mv, blend_fs_mv, gamma_fs_mv, gamma_fs_array, gamma_composite_fs_mv;
 
-		VkShaderModule bloom_fs;
+		VkShaderModule blur_extract_fs;
 		VkShaderModule blur_fs;
 		VkShaderModule blend_fs;
 
@@ -667,7 +689,6 @@ typedef struct {
 	VkPipeline gamma_pipeline;
 	VkPipeline gamma_pipeline_eye[2];
 	VkPipeline capture_pipeline;
-	VkPipeline bloom_extract_pipeline;
 	VkPipeline blur_pipeline[VK_NUM_BLOOM_PASSES*2]; // horizontal & vertical pairs
 	VkPipeline bloom_blend_pipeline;
 
@@ -678,6 +699,7 @@ typedef struct {
 	qboolean fragmentStores;
 	qboolean depthClamp;
 	qboolean dedicatedAllocation;
+	qboolean imageFormatList;				// MUTABLE_FORMAT images can declare their view formats
 	qboolean debugMarkers;
 
 	float maxAnisotropy;

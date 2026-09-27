@@ -658,6 +658,10 @@ typedef struct {
 	vec3_t eyeOrigin[2], eyePvsOrigin[2];
 	vec3_t eyeAxis[2][3];
 	float eyeFov[2][4];
+	qboolean xrCullFov;		// portal views cull with cullFov, the part of each eye's field that sees the surface
+	float cullFov[2][4];
+	qboolean cullNdcSet;	// single-view portals cull to cullNdc (left, right, bottom, top in NDC)
+	float cullNdc[4];
 	float xrFov[4];
 	cplane_t	frustum[5];
 	vec3_t		visBounds[2];
