@@ -718,7 +718,7 @@ qboolean Con_PlayFrom640VR( float *x, float *y, float *w, float *h ) {
 	Con_AdjustNotifyVR( &right, &bottom );
 	*w = right - *x;
 	*h = bottom - *y;
-	return mode != 0 && hudBuffer;
+	return hudBuffer;
 }
 
 typedef void (*conGlyphFn_t)( int column, int row, int ch, void *ctx );
@@ -780,20 +780,26 @@ static int Con_DrawNotifyVR(void)
 	const int maxChars = 510 / SMALLCHAR_WIDTH;
 	float scale = con_scale ? con_scale->value : 2.0f;
 	float xadjust = 10.0f, yadjust = 10.0f, offset = 0.0f;
+	float unit = 2.0f; // pixels per 640 unit; mode 1's buffer is 1280x960
 	const short *text;
 	conVRGlyph_t glyph;
 	const short *lines[NUM_CON_TIMES];
 	int lineCount, n;
-	if (vr.weapon_zoomed || mode == 0 ||
+	if (vr.weapon_zoomed ||
 		(vr_showConsoleMessages && !vr_showConsoleMessages->integer) ||
 		!re.HUDBufferStart || !re.HUDBufferEnd) return 0;
-	if (mode == 2) {
-		scale = vr.virtual_screen ? scale * 1.5f : scale / 1.5f;
+	/* Mode 0 has no floating HUD; the renderer overlays its lines as in mode 2. */
+	if (mode != 1) {
+		float left = 0.0f, right = 640.0f, unused = 0.0f;
+		Con_AdjustNotifyVR(&left, &unused);
+		Con_AdjustNotifyVR(&right, &unused);
+		unit = (right - left) / 640.0f;
 		Con_AdjustNotifyVR(&xadjust, &yadjust);
 	}
+	/* Glyphs keep mode 1's size in 640 units whatever the target's resolution. */
+	scale *= unit / 2.0f;
 	if (cl_conXOffset->integer > 0) {
-		offset = cl_conXOffset->integer * (mode == 1 ? 2.0f : cls.glconfig.vidWidth / 640.0f);
-		if (mode == 2 && !vr.virtual_screen) offset /= 2.25f;
+		offset = cl_conXOffset->integer * unit;
 	}
 	lineCount = Con_VisibleNotifyLines( lines );
 	for (n = 0; n < lineCount; ++n) {

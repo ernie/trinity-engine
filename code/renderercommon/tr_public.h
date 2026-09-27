@@ -142,7 +142,7 @@ typedef struct {
 	int (*XRStatus)( void ); // 0 absent, 1 initialized, 2 active, -1 lost
 	const char *(*XRLastError)( void );
 	qboolean (*XRHaptic)( int hand, float amplitude, int durationMs );
-	void (*XRSetVirtualScreen)( qboolean enabled, refXRFrame_t *frame );
+	void (*XRSetVirtualScreen)( qboolean enabled, qboolean menuYawLocked, refXRFrame_t *frame );
 	void (*XRSetZoom)( qboolean zoomed, float *level );
 	void (*SceneComplete)( void );
 	void (*HUDBufferStart)( qboolean clear );

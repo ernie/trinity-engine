@@ -109,6 +109,7 @@ void GL_TextureMode( const char *string ) {
 	vk.samplers.filter_min = gl_filter_min;
 	vk.samplers.filter_max = gl_filter_max;
 	vk_update_attachment_descriptors();
+	vk_update_screen_hud_descriptors();
 	for ( i = 0; i < tr.numImages; i++ ) {
 		img = tr.images[i];
 		if ( img->flags & IMGFLAG_MIPMAP ) {

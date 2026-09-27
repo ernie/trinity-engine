@@ -136,15 +136,17 @@ qboolean VK_XR_Drawing( void ) {
 	return active && xr.renderable && !failed;
 }
 
-void VK_XR_SetVirtualScreen( qboolean enabled, refXRFrame_t *frame ) {
+void VK_XR_SetVirtualScreen( qboolean enabled, qboolean menuYawLocked, refXRFrame_t *frame ) {
 	/* Frames run before the session goes active, ahead of the cvar lookup. */
 	float curvature = screenCurvature ? screenCurvature->value : VR_SCREEN_REFERENCE_CURVATURE;
+	qboolean follow;
 	if ( !frame ) {
 		return;
 	}
+	/* Locked menu yaw (timeline scrub) holds the screen still instead of re-following the head. */
+	follow = virtualScreenMode && virtualScreenMode->integer == 1 && !menuYawLocked;
 	VR_ScreenUpdate( &screenAnchor, &screenGeometry, frame->head.position, frame->head.orientation,
-					 enabled && frame->renderable, virtualScreenMode ? virtualScreenMode->integer : 0,
-					 curvature );
+					 enabled && frame->renderable, follow, curvature );
 	frame->screen = screenGeometry;
 }
 const vrScreenGeometry_t *VK_XR_Screen( void ) {
@@ -154,9 +156,10 @@ void VK_XR_FloorOrigin( vec3_t origin ) {
 	VectorCopy( floorOrigin, origin );
 }
 void VK_XR_ScreenCaptureRect( int eyeWidth, int eyeHeight, int rect[4] ) {
-	VR_ScreenCaptureRect( eyeWidth, eyeHeight, eyeWidth, eyeHeight,
-						  (xr.views[0].fov.angleUp + xr.views[1].fov.angleUp) * .5f,
-						  (xr.views[0].fov.angleDown + xr.views[1].fov.angleDown) * .5f, rect );
+	/* The capture source is the symmetric flat render, so the crop centers geometrically */
+	float halfSpan = (xr.views[0].fov.angleUp + xr.views[1].fov.angleUp -
+					  xr.views[0].fov.angleDown - xr.views[1].fov.angleDown) * .25f;
+	VR_ScreenCaptureRect( eyeWidth, eyeHeight, eyeWidth, eyeHeight, halfSpan, -halfSpan, rect );
 }
 
 void VK_XR_EyeMatrix( int eye, float matrix[16] ) {
@@ -808,14 +811,10 @@ qboolean VK_XR_EyeView( int eye, refdef_t *view, float fov[4] ) {
 			halfX = tanf( view->fov_x * (float)M_PI / 360 ) * cropFactor;
 			halfY = tanf( view->fov_y * (float)M_PI / 360 ) * cropFactor;
 		} else {
-			/* Centered mono runtime projection, not angle-span FOV. */
-			float angleScale = .5f / zoomLevel;
-			halfX = (tanf( (xr.views[0].fov.angleRight + xr.views[1].fov.angleRight) * angleScale ) -
-					 tanf( (xr.views[0].fov.angleLeft + xr.views[1].fov.angleLeft) * angleScale )) *
-					.5f;
-			halfY = (tanf( (xr.views[0].fov.angleUp + xr.views[1].fov.angleUp) * angleScale ) -
-					 tanf( (xr.views[0].fov.angleDown + xr.views[1].fov.angleDown) * angleScale )) *
-					.5f * glConfig.vidWidth / glConfig.vidHeight;
+			/* A monitor: the refdef's FOV with square pixels, never the runtime's. The scope never
+			 * applies while the screen is visible, so no zoom divide here. */
+			halfX = tanf( view->fov_x * (float)M_PI / 360 );
+			halfY = halfX * glConfig.vidHeight / glConfig.vidWidth;
 		}
 		fov[0] = -atanf( halfX );
 		fov[1] = -fov[0];

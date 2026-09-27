@@ -1,25 +1,51 @@
-/* Shared OpenXR-meter-space geometry for screen drawing and controller rays. */
+/* Virtual screen placement in OpenXR meters; identical in the standalone, trinity-vr and trinity-engine. */
 #ifndef VR_SCREEN_GEOMETRY_H
 #define VR_SCREEN_GEOMETRY_H
 #include <math.h>
 #include <string.h>
-/* The reference curvature bends a 7.5 m radius through a half-pi arc. Other
- * curvatures scale the radius inversely and hold that arc length, and the
- * surface center stays VR_SCREEN_CENTER_DISTANCE beyond the anchor. */
+/* The PC layout at scale 1: a scale shrinks it toward the eye until the bottom edge meets the floor. */
+#define VR_SCREEN_ANCHOR_DISTANCE 3.0f
 #define VR_SCREEN_CENTER_DISTANCE 7.5f
 #define VR_SCREEN_REFERENCE_CURVATURE 0.5f
 #define VR_SCREEN_ARC_LENGTH ( VR_SCREEN_CENTER_DISTANCE * 1.5707963267948966f )
 #define VR_SCREEN_HEIGHT 7.875f
 #define VR_SCREEN_FLAT_CURVATURE 0.02f
+/* The bottom edge's depth below the eye at scale 1: the center's 0.5 m drop plus half the height. */
+#define VR_SCREEN_EYE_DROP ( 0.5f + VR_SCREEN_HEIGHT * 0.5f )
+#define VR_SCREEN_MIN_EYE_HEIGHT 0.5f
+#define VR_SCREEN_MAX_EYE_HEIGHT 2.2f
 typedef struct {
 	int visible, curved;
+	float curvature, scale;
 	float position[3], yaw;
-	float radius, height, arc, width;
+	float radius, arc, width, height;
 } vrScreenGeometry_t;
 typedef struct {
 	int initialized, updating;
-	float current[3], target[3], yaw;
+	float scale, current[3], target[3], yaw;
 } vrScreenAnchor_t;
+static inline float VR_ScreenScale( float eyeHeight ) {
+	if ( !( eyeHeight > VR_SCREEN_MIN_EYE_HEIGHT ) )
+		eyeHeight = VR_SCREEN_MIN_EYE_HEIGHT;
+	else if ( eyeHeight > VR_SCREEN_MAX_EYE_HEIGHT )
+		eyeHeight = VR_SCREEN_MAX_EYE_HEIGHT;
+	return eyeHeight / VR_SCREEN_EYE_DROP;
+}
+static inline float VR_ScreenCurvature( float curvature ) {
+	if ( !( curvature > VR_SCREEN_FLAT_CURVATURE ) )
+		return 0;
+	return curvature > 1 ? 1 : curvature;
+}
+/* Every curvature holds the arc length, so bending changes neither the size nor the center's distance. */
+static inline void VR_ScreenShape( vrScreenGeometry_t *screen, float curvature, float scale ) {
+	screen->curvature = VR_ScreenCurvature( curvature );
+	screen->curved = screen->curvature > 0;
+	screen->scale = scale;
+	screen->width = VR_SCREEN_ARC_LENGTH * scale;
+	screen->height = VR_SCREEN_HEIGHT * scale;
+	screen->radius = screen->curved ? VR_SCREEN_CENTER_DISTANCE * scale * VR_SCREEN_REFERENCE_CURVATURE / screen->curvature : 0;
+	screen->arc = screen->curved ? screen->width / screen->radius : 0;
+}
 /* Rectangle in one eye of the atlas, in left/top/right/bottom order. */
 static inline void VR_ScreenCaptureRect( int logicalWidth, int logicalHeight,
 	int eyeWidth, int eyeHeight, float up, float down, int rect[4] ) {
@@ -37,8 +63,7 @@ static inline void VR_ScreenCaptureRect( int logicalWidth, int logicalHeight,
 	}
 	x = (int)((logicalWidth - width) * 0.5f);
 	y = (logicalHeight - height) * 0.5f;
-	/* Match the module's 4:3 UI box and optical-center offset before scaling
-	 * from logical desktop coordinates into the native-resolution eye atlas. */
+	/* Match the 4:3 UI box and its optical-center offset before scaling into the eye atlas. */
 	tanUp = tanf( up );
 	tanDown = tanf( down );
 	span = tanUp - tanDown;
@@ -54,13 +79,15 @@ static inline void VR_ScreenCaptureRect( int logicalWidth, int logicalHeight,
 	rect[2] = (int)floorf( (x + width) * eyeWidth / logicalWidth + 0.5f );
 	rect[3] = (int)floorf( (y + height) * eyeHeight / logicalHeight + 0.5f );
 }
-static inline float VR_ScreenDistance( const float a[3], const float b[3] ) {
-	float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
-	return sqrtf( x * x + y * y + z * z );
+/* Follow measures on the floor plane, so raising or lowering the head never moves the screen. */
+static inline float VR_ScreenFloorDistance( const float a[3], const float b[3] ) {
+	float x = a[0] - b[0], z = a[2] - b[2];
+	return sqrtf( x * x + z * z );
 }
+/* Eye height is read only when anchoring, so the screen never breathes with the head. */
 static inline void VR_ScreenUpdate( vrScreenAnchor_t *anchor, vrScreenGeometry_t *screen,
 	const float head[3], const float orientation[4], int visible, int follow, float curvature ) {
-	float forward[2], front[3], length, distance, offset;
+	float forward[2], front[3], length, distance, offset, d;
 	int i;
 	if ( !visible ) {
 		memset( anchor, 0, sizeof( *anchor ) );
@@ -75,62 +102,76 @@ static inline void VR_ScreenUpdate( vrScreenAnchor_t *anchor, vrScreenGeometry_t
 		forward[1] = -cosf( anchor->yaw );
 		length = 1;
 	}
-	front[0] = head[0] + 3 * forward[0] / length;
+	if ( !anchor->initialized ) {
+		anchor->scale = VR_ScreenScale( head[1] );
+	}
+	d = VR_SCREEN_ANCHOR_DISTANCE * anchor->scale;
+	front[0] = head[0] + d * forward[0] / length;
 	front[1] = head[1];
-	front[2] = head[2] + 3 * forward[1] / length;
+	front[2] = head[2] + d * forward[1] / length;
 	if ( !anchor->initialized ) {
 		memcpy( anchor->current, front, sizeof( front ) );
 		memcpy( anchor->target, front, sizeof( front ) );
 		anchor->initialized = anchor->updating = 1;
 		anchor->yaw = atan2f( head[0] - front[0], head[2] - front[2] );
 	} else if ( follow ) {
-		distance = VR_ScreenDistance( anchor->target, front );
-		if ( distance < 0.12f ) {
+		distance = VR_ScreenFloorDistance( anchor->target, front );
+		if ( distance < 0.04f * d ) {
 			anchor->updating = 0;
-		} else if ( distance > 1.8f || anchor->updating ) {
+		} else if ( distance > 0.6f * d || anchor->updating ) {
 			memcpy( anchor->target, front, sizeof( front ) );
 			anchor->updating = 1;
-			if ( distance > 3.6f ) {
+			if ( distance > 1.2f * d ) {
 				memcpy( anchor->current, front, sizeof( front ) );
 			}
 		}
 		for ( i = 0; i < 3; i++ ) {
 			anchor->current[i] += (anchor->target[i] - anchor->current[i]) * 0.01f;
 		}
-		distance = VR_ScreenDistance( anchor->current, head );
-		if ( distance > 0.00001f && fabsf( distance - 3.0f ) > 0.001f ) {
-			for ( i = 0; i < 3; i++ ) {
-				anchor->current[i] = head[i] + (anchor->current[i] - head[i]) * 3 / distance;
-			}
+		distance = VR_ScreenFloorDistance( anchor->current, head );
+		if ( distance > 0.00001f && fabsf( distance - d ) > 0.001f ) {
+			anchor->current[0] = head[0] + (anchor->current[0] - head[0]) * d / distance;
+			anchor->current[2] = head[2] + (anchor->current[2] - head[2]) * d / distance;
 		}
 		anchor->yaw = atan2f( head[0] - anchor->current[0], head[2] - anchor->current[2] );
 	}
-	if ( curvature > 1 ) {
-		curvature = 1;
-	}
+	VR_ScreenShape( screen, curvature, anchor->scale );
 	screen->visible = 1;
-	screen->curved = curvature > VR_SCREEN_FLAT_CURVATURE;
-	screen->radius = screen->curved ? VR_SCREEN_CENTER_DISTANCE * VR_SCREEN_REFERENCE_CURVATURE / curvature : 0;
-	screen->arc = screen->curved ? VR_SCREEN_ARC_LENGTH / screen->radius : 0;
-	screen->width = VR_SCREEN_ARC_LENGTH;
-	screen->height = VR_SCREEN_HEIGHT;
-	memcpy( screen->position, anchor->current, sizeof( screen->position ) );
-	screen->position[1] -= 0.5f;
+	screen->position[0] = anchor->current[0];
+	screen->position[1] = 0;
+	screen->position[2] = anchor->current[2];
 	screen->yaw = anchor->yaw;
-	/* The surface center sits radius ahead of the position along the head axis,
-	 * so shifting the position by the radius change holds that center in place. */
-	offset = screen->radius - VR_SCREEN_CENTER_DISTANCE;
+	/* The surface center sits radius beyond the axis, so shifting by the radius change holds it in place. */
+	offset = screen->radius - VR_SCREEN_CENTER_DISTANCE * anchor->scale;
 	screen->position[0] += sinf( screen->yaw ) * offset;
 	screen->position[2] += cosf( screen->yaw ) * offset;
 }
-static inline void VR_ScreenPoint( const vrScreenGeometry_t *screen, float u, float v, float out[3] ) {
+static inline void VR_ScreenLocalPoint( const vrScreenGeometry_t *screen, float u, float v, float out[3] ) {
 	float theta = (u - 0.5f) * screen->arc;
-	float x = screen->curved ? screen->radius * sinf( theta ) : (u - 0.5f) * screen->width;
-	float z = screen->curved ? -screen->radius * cosf( theta ) : 0;
-	float c = cosf( screen->yaw ), s = sinf( screen->yaw );
-	out[0] = screen->position[0] + c * x + s * z;
-	out[1] = screen->position[1] + (0.5f - v) * screen->height;
-	out[2] = screen->position[2] - s * x + c * z;
+	out[0] = screen->curved ? screen->radius * sinf( theta ) : (u - 0.5f) * screen->width;
+	out[1] = (1 - v) * screen->height;
+	out[2] = screen->curved ? -screen->radius * cosf( theta ) : 0;
+}
+static inline void VR_ScreenPoint( const vrScreenGeometry_t *screen, float u, float v, float out[3] ) {
+	float p[3], c = cosf( screen->yaw ), s = sinf( screen->yaw );
+	VR_ScreenLocalPoint( screen, u, v, p );
+	out[0] = screen->position[0] + c * p[0] + s * p[2];
+	out[1] = screen->position[1] + p[1];
+	out[2] = screen->position[2] - s * p[0] + c * p[2];
+}
+/* World from a mesh built at scale 1; mirror reflects it through the floor. */
+static inline void VR_ScreenModelMatrix( const vrScreenGeometry_t *screen, int mirror, float m[16] ) {
+	float c = cosf( screen->yaw ), s = sinf( screen->yaw ), k = screen->scale;
+	memset( m, 0, 16 * sizeof( float ) );
+	m[0] = c * k;
+	m[2] = -s * k;
+	m[5] = mirror ? -k : k;
+	m[8] = s * k;
+	m[10] = c * k;
+	m[12] = screen->position[0];
+	m[13] = screen->position[1];
+	m[14] = screen->position[2];
+	m[15] = 1;
 }
 static inline int VR_ScreenRay( const vrScreenGeometry_t *screen, const float origin[3], const float direction[3], float uv[2] ) {
 	float c = cosf( screen->yaw ), s = sinf( screen->yaw ), ox = origin[0] - screen->position[0], oz = origin[2] - screen->position[2];
@@ -164,7 +205,7 @@ static inline int VR_ScreenRay( const vrScreenGeometry_t *screen, const float or
 		y = o[1] + roots[i] * d[1];
 		z = o[2] + roots[i] * d[2];
 		u = screen->curved ? 0.5f + atan2f( x, -z ) / screen->arc : 0.5f + x / screen->width;
-		v = 0.5f - y / screen->height;
+		v = 1 - y / screen->height;
 		if ( u >= 0 && u <= 1 && v >= 0 && v <= 1 ) {
 			uv[0] = u;
 			uv[1] = v;

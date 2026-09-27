@@ -8,6 +8,7 @@ void CL_VRInput_Init( void );
 void CL_VRInput_Shutdown( void );
 void CL_VRInput_Reset( void );
 void CL_VRInput_Frame( const refXRFrame_t *frame );
+void CL_VRInput_SetVirtualScreen( qboolean enabled );
 qboolean CL_VRInput_ApplyMove( usercmd_t *cmd );
 void CL_VRInput_QuaternionAngles( const float quaternion[4], float gripPitch, vec3_t angles );
 float CL_VRInput_StickCurve( float value, float deadzone );

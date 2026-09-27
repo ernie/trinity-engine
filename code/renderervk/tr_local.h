@@ -1235,7 +1235,7 @@ typedef struct {
 	shader_t				*flareShader;
 	shader_t				*sunShader;
 	shader_t *hudShader;
-	shader_t *virtualScreenShader, *virtualFloorShader;
+	shader_t *virtualScreenShader, *virtualFloorShader, *virtualReflectionShader;
 
 	int						numLightmaps;
 	image_t					**lightmaps;

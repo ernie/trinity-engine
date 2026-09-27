@@ -485,13 +485,16 @@ void RE_FinishBloom( void )
 
 void RE_HUDBufferStart( qboolean clear ) {
 	hudBufferCommand_t *cmd;
+	int status;
 	if ( !tr.registered ) { return; }
 	cmd = R_GetCommandBufferReserved( sizeof( *cmd ), 0 );
 	if ( !cmd ) { return; }
 	cmd->commandId = RC_HUD_BUFFER;
 	cmd->start = qtrue;
 	cmd->clear = clear;
-	cmd->overlay = ri.Cvar_VariableIntegerValue( "vr_currentHudDrawStatus" ) == 2;
+	/* Mode 0 draws overlays like mode 2, but its clears must still empty the texture cgame's sprite samples. */
+	status = ri.Cvar_VariableIntegerValue( "vr_currentHudDrawStatus" );
+	cmd->overlay = status == 2 || ( status == 0 && !clear );
 	/* First-person follow overlays belong in the native-resolution screen
 	 * source; only the floating HUD uses the HUD texture. */
 	tr_hudScreenDrawing = cmd->overlay && VK_XR_Screen() != NULL;

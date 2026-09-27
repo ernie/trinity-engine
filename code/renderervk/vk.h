@@ -64,6 +64,7 @@ typedef enum {
 	TYPE_SINGLE_TEXTURE_DF,
 	TYPE_VR_FLOOR_GRID,
 	TYPE_VR_SCREEN,
+	TYPE_VR_REFLECTION,
 
 	TYPE_GENERIC_BEGIN, // start of non-env/env shader pairs
 	TYPE_SINGLE_TEXTURE = TYPE_GENERIC_BEGIN,
@@ -279,6 +280,7 @@ void vk_upload_image_data( image_t *image, int x, int y, int width, int height, 
 void vk_update_descriptor_set( image_t *image, qboolean mipmap );
 void vk_destroy_image_resources( VkImage *image, VkImageView *imageView );
 void vk_update_attachment_descriptors( void );
+void vk_update_screen_hud_descriptors( void );
 void vk_destroy_samplers( void );
 
 uint32_t vk_find_pipeline_ext( uint32_t base, const Vk_Pipeline_Def *def, qboolean use );
@@ -588,6 +590,7 @@ typedef struct {
 
 		VkShaderModule floor_grid_fs;
 		VkShaderModule virtualscreen_fs;
+		VkShaderModule virtualreflect_fs;
 		VkShaderModule color_fs;
 		VkShaderModule color_vs;
 		VkShaderModule color_vs_mv, fog_vs_mv, dot_vs_mv, dot_fs_mv;

@@ -36,7 +36,7 @@ void VK_XR_Rendered( void );
 qboolean VK_XR_EyeView( int eye, refdef_t *view, float fov[4] );
 void VK_XR_SetupView( refdef_t *view, viewParms_t *parms );
 qboolean VK_XR_Drawing( void );
-void VK_XR_SetVirtualScreen( qboolean enabled, refXRFrame_t *frame );
+void VK_XR_SetVirtualScreen( qboolean enabled, qboolean menuYawLocked, refXRFrame_t *frame );
 const vrScreenGeometry_t *VK_XR_Screen( void );
 void VK_XR_FloorOrigin( vec3_t origin );
 void VK_XR_ScreenCaptureRect( int eyeWidth, int eyeHeight, int rect[4] );

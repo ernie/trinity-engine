@@ -1143,7 +1143,7 @@ void CL_InitCGame( void ) {
 	CL_VR_CGameLoading();
 	// CG_INIT registers its VR mirror before nested loading-screen updates.
 	// Establish screen mode first so those updates use the correct coordinates.
-	vr.virtual_screen = VR_IsActiveMode();
+	CL_VRInput_SetVirtualScreen( VR_IsActiveMode() );
 	vr.first_person_following = qfalse;
 
 	// init for this gamestate

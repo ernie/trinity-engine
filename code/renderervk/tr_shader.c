@@ -3615,6 +3615,8 @@ static shader_t *FinishShader( void ) {
 				def.shader_type = TYPE_VR_FLOOR_GRID;
 			if ( !strcmp( shader.name, "*virtualScreen" ) )
 				def.shader_type = TYPE_VR_SCREEN;
+			if ( !strcmp( shader.name, "*virtualReflection" ) )
+				def.shader_type = TYPE_VR_REFLECTION;
 
 			def.mirror = qfalse;
 			pStage->vk_pipeline[0] = vk_find_pipeline_ext( 0, &def, qtrue );
@@ -4536,6 +4538,10 @@ static void CreateExternalShaders( void ) {
 		shader.cullType = CT_TWO_SIDED;
 		stages[0].stateBits = GLS_DEPTHTEST_DISABLE;
 		tr.virtualScreenShader = FinishShader();
+		InitShader( "*virtualReflection", LIGHTMAP_2D );
+		R_CreateDefaultShading( vk_screen_image() );
+		shader.cullType = CT_TWO_SIDED;
+		tr.virtualReflectionShader = FinishShader();
 		InitShader( "*virtualFloor", LIGHTMAP_2D );
 		R_CreateDefaultShading( tr.whiteImage );
 		shader.cullType = CT_TWO_SIDED;

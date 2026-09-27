@@ -21,6 +21,8 @@ static const char *bindingSlots[VR_INPUT_SLOTS] = {
 	"PRIMARYGRIPCLICK", "SECONDARYGRIPCLICK"
 };
 static cvar_t *bindings[VR_INPUT_SLOTS][2];
+/* The runtime's FOV, before VRInput_PublishFov decides what the frame sees */
+static float rawFovX = 90, rawFovUp = (float)M_PI / 4, rawFovDown = -(float)M_PI / 4;
 static struct {
 	clXRInputSample_t sample;
 	qboolean valid, tracked, menuDown, viewDown;
@@ -42,6 +44,30 @@ const char *CL_VRInput_MenuSkipName( void ) {
 }
 const char *CL_VRInput_MenuCancelName( void ) {
 	return "MENU";
+}
+
+/* The virtual screen is a monitor: the player's cg_fov over a symmetric crop, so its crop and 2D
+ * center geometrically; derived from vr.virtual_screen so the two agree within a frame. */
+static void VRInput_PublishFov( void ) {
+	if ( vr.virtual_screen ) {
+		float fovX = Cvar_VariableValue( "cg_fov" );
+		if ( !(fovX >= 1) )
+			fovX = 90;
+		else if ( fovX > 160 )
+			fovX = 160;
+		vr.fov_x = fovX;
+		vr.fov_angle_up = (rawFovUp - rawFovDown) * .5f;
+		vr.fov_angle_down = -vr.fov_angle_up;
+	} else {
+		vr.fov_x = rawFovX;
+		vr.fov_angle_up = rawFovUp;
+		vr.fov_angle_down = rawFovDown;
+	}
+}
+
+void CL_VRInput_SetVirtualScreen( qboolean enabled ) {
+	vr.virtual_screen = enabled;
+	VRInput_PublishFov();
 }
 
 static float VRInput_Cvar( const cvar_t *cv, float fallback ) {
@@ -214,9 +240,10 @@ void CL_VRInput_Init( void ) {
 	/* Modules may initialize before the first predicted frame. Keep projection
 	 * denominators usable until the runtime supplies its actual stereo FOV. */
 	vr.weapon_zoomLevel = 1;
-	vr.fov_x = vr.fov_y = 90;
-	vr.fov_angle_left = vr.fov_angle_down = -(float)M_PI / 4;
-	vr.fov_angle_right = vr.fov_angle_up = (float)M_PI / 4;
+	vr.fov_y = rawFovX = 90;
+	vr.fov_angle_left = rawFovDown = -(float)M_PI / 4;
+	vr.fov_angle_right = rawFovUp = (float)M_PI / 4;
+	VRInput_PublishFov();
 	vr.eye_fov_angle_left[0] = vr.eye_fov_angle_left[1] = vr.fov_angle_left;
 	vr.eye_fov_angle_right[0] = vr.eye_fov_angle_right[1] = vr.fov_angle_right;
 }
@@ -290,6 +317,25 @@ static void VRInput_Cursor( const vec3_t aim, int *x, int *y ) {
 	/* Quantize the target before smoothing to keep stationary cursors stable. */
 	int targetX = (int)Com_Clamp( -8000, 8000, 320 - tanf( yaw * (float)M_PI / 180 ) * 800 );
 	int targetY = (int)Com_Clamp( -8000, 8000, 240 + tanf( pitch * (float)M_PI / 180 ) * 800 );
+	*x = (int)(.5f * targetX + .5f * *x);
+	*y = (int)(.5f * targetY + .5f * *y);
+}
+
+/* The hand's aim ray on the virtual screen; a miss holds the cursor where it last was. */
+static void VRInput_ScreenCursor( const refXRFrame_t *frame, int hand, int *x, int *y ) {
+	const clXRPose_t *aim = &frame->input.hands[hand].aim;
+	const float *q = aim->orientation;
+	float forward[3], uv[2];
+	int targetX = *x, targetY = *y;
+	if ( aim->positionValid && aim->orientationValid ) {
+		forward[0] = -2 * (q[0] * q[2] + q[3] * q[1]);
+		forward[1] = -2 * (q[1] * q[2] - q[3] * q[0]);
+		forward[2] = -(1 - 2 * (q[0] * q[0] + q[1] * q[1]));
+		if ( VR_ScreenRay( &frame->screen, aim->position, forward, uv ) ) {
+			targetX = (int)(uv[0] * 640);
+			targetY = (int)(uv[1] * 480);
+		}
+	}
 	*x = (int)(.5f * targetX + .5f * *x);
 	*y = (int)(.5f * targetY + .5f * *y);
 }
@@ -469,10 +515,11 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	}
 	vr.fov_angle_left = (frame->eyes[0].fov[0] + frame->eyes[1].fov[0]) * .5f;
 	vr.fov_angle_right = (frame->eyes[0].fov[1] + frame->eyes[1].fov[1]) * .5f;
-	vr.fov_angle_up = (frame->eyes[0].fov[2] + frame->eyes[1].fov[2]) * .5f;
-	vr.fov_angle_down = (frame->eyes[0].fov[3] + frame->eyes[1].fov[3]) * .5f;
-	vr.fov_x = (vr.fov_angle_right - vr.fov_angle_left) * 180 / (float)M_PI;
-	vr.fov_y = (vr.fov_angle_up - vr.fov_angle_down) * 180 / (float)M_PI;
+	rawFovUp = (frame->eyes[0].fov[2] + frame->eyes[1].fov[2]) * .5f;
+	rawFovDown = (frame->eyes[0].fov[3] + frame->eyes[1].fov[3]) * .5f;
+	rawFovX = (vr.fov_angle_right - vr.fov_angle_left) * 180 / (float)M_PI;
+	VRInput_PublishFov();
+	vr.fov_y = (rawFovUp - rawFovDown) * 180 / (float)M_PI;
 	if ( weapon->grip.positionValid && weapon->grip.orientationValid ) {
 		VectorCopy( vr.weaponoffset_last[1], vr.weaponoffset_last[0] );
 		VectorCopy( vr.weaponoffset, vr.weaponoffset_last[1] );
@@ -519,6 +566,13 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 			/* Smooth once for each tracked controller sample. */
 			for ( i = 0; i < 2; i++ )
 				if ( frame->input.hands[i].grip.positionValid ) {
+					if ( frame->screen.visible ) {
+						VRInput_ScreenCursor( frame, vr.menuLeftHanded ? 0 : 1, &vr.menuCursorX, &vr.menuCursorY );
+						if ( VKeyboard_IsActive() )
+							VRInput_ScreenCursor( frame, vr.menuLeftHanded ? 1 : 0, &vr.offhandCursorX,
+												  &vr.offhandCursorY );
+						continue;
+					}
 					VRInput_Cursor( menuWeapon ? vr.weaponaimangles : vr.offhandaimangles, &vr.menuCursorX,
 									&vr.menuCursorY );
 					if ( VKeyboard_IsActive() )

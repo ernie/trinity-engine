@@ -266,7 +266,8 @@ void CL_VR_RestartBegin( void ) {
 	CL_VR_EndFrame();
 	CL_VRInput_Reset();
 	CL_VR_ClearActive();
-	vr.virtual_screen = vr.sp_intermission_active = qfalse;
+	vr.sp_intermission_active = qfalse;
+	CL_VRInput_SetVirtualScreen( qfalse );
 }
 void CL_VR_PrepareRenderer( void ) {
 	if ( machine.xrRenderer && (!re.XRPrepareInit || !re.XRPrepareInit( qtrue )) ) {
@@ -515,14 +516,16 @@ static qboolean CL_VR_BeginFrameInternal( qboolean updateInput ) {
 	frame.open = qtrue;
 	frame.stereo = VR_IsActiveMode() && xrFrame.renderable;
 	CL_VR_CheckTracking();
-	vr.virtual_screen = VR_IsActiveMode() && CL_VR_UseVirtualScreen();
+	CL_VRInput_SetVirtualScreen( VR_IsActiveMode() && CL_VR_UseVirtualScreen() );
 	if ( re.XRSetVirtualScreen ) {
-		if ( resetScreen || screenConnectionState != cls.state ) {
-			re.XRSetVirtualScreen( qfalse, &xrFrame );
+		/* A locked menu yaw (timeline scrub) suppresses the connection-state re-anchor, but the
+		 * state is still tracked so the edge isn't replayed once the lock lifts. */
+		if ( resetScreen || (screenConnectionState != cls.state && !vr.menuYawLocked) ) {
+			re.XRSetVirtualScreen( qfalse, vr.menuYawLocked, &xrFrame );
 		}
 		resetScreen = qfalse;
 		screenConnectionState = cls.state;
-		re.XRSetVirtualScreen( vr.virtual_screen, &xrFrame );
+		re.XRSetVirtualScreen( vr.virtual_screen, vr.menuYawLocked, &xrFrame );
 	}
 	if ( !vr.menuYawLocked && xrFrame.screen.visible ) {
 		vr.menuYaw = xrFrame.screen.yaw * 180 / (float)M_PI;
@@ -535,9 +538,9 @@ static qboolean CL_VR_BeginFrameInternal( qboolean updateInput ) {
 		 * resulting menu state before this frame is drawn. */
 		nextScreen = VR_IsActiveMode() && CL_VR_UseVirtualScreen();
 		if ( nextScreen != vr.virtual_screen ) {
-			vr.virtual_screen = nextScreen;
+			CL_VRInput_SetVirtualScreen( nextScreen );
 			if ( re.XRSetVirtualScreen ) {
-				re.XRSetVirtualScreen( nextScreen, &xrFrame );
+				re.XRSetVirtualScreen( nextScreen, vr.menuYawLocked, &xrFrame );
 			}
 			if ( !vr.menuYawLocked && xrFrame.screen.visible ) {
 				vr.menuYaw = xrFrame.screen.yaw * 180 / (float)M_PI;
@@ -576,7 +579,8 @@ void CL_VR_ResetForError( void ) {
 		trackingRequested = qfalse;
 	CL_VR_ClearActive();
 	CL_VRInput_Reset();
-	vr.virtual_screen = vr.sp_intermission_active = qfalse;
+	vr.sp_intermission_active = qfalse;
+	CL_VRInput_SetVirtualScreen( qfalse );
 	memset( &xrFrame, 0, sizeof( xrFrame ) );
 }
 void CL_VR_AbortUnwind( qboolean keepRenderer ) {

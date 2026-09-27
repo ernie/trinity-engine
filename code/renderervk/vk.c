@@ -3612,6 +3612,7 @@ static void vk_create_shader_modules( void )
 	// specialized depth-fragment shader
 	vk.modules.floor_grid_fs = SHADER_MODULE( floor_grid_frag_spv );
 	vk.modules.virtualscreen_fs = SHADER_MODULE( virtualscreen_frag_spv );
+	vk.modules.virtualreflect_fs = SHADER_MODULE( virtualreflect_frag_spv );
 	vk.modules.frag.gen0_df = SHADER_MODULE( frag_tx0_df );
 	SET_OBJECT_NAME( vk.modules.frag.gen0_df, "single-texture df fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 
@@ -5088,7 +5089,7 @@ void vk_hud_set_direct( qboolean enabled ) {
 
 static void vk_hud_attachment( VkFormat format, VkImageUsageFlags usage, VkImageAspectFlags aspect,
 							   VkImage *image, VkImageView *view, VkDeviceMemory *memory, int width,
-							   int height ) {
+							   int height, uint32_t mipLevels ) {
 	VkImageCreateInfo ci;
 	VkImageViewCreateInfo vi;
 	VkMemoryRequirements requirements;
@@ -5100,7 +5101,8 @@ static void vk_hud_attachment( VkFormat format, VkImageUsageFlags usage, VkImage
 	ci.extent.width = width;
 	ci.extent.height = height;
 	ci.extent.depth = 1;
-	ci.mipLevels = ci.arrayLayers = 1;
+	ci.mipLevels = mipLevels;
+	ci.arrayLayers = 1;
 	ci.samples = VK_SAMPLE_COUNT_1_BIT;
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
 	ci.usage = usage;
@@ -5120,18 +5122,46 @@ static void vk_hud_attachment( VkFormat format, VkImageUsageFlags usage, VkImage
 	vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
 	vi.format = format;
 	vi.subresourceRange.aspectMask = aspect;
-	vi.subresourceRange.levelCount = vi.subresourceRange.layerCount = 1;
+	vi.subresourceRange.levelCount = mipLevels;
+	vi.subresourceRange.layerCount = 1;
 	VK_CHECK( qvkCreateImageView( vk.device, &vi, NULL, view ) );
 }
 
+/* Enough levels for the reflection's blurred LOD. */
+#define VK_SCREEN_MIP_LEVELS 5
+/* Must match SPAN in virtualreflect.frag. */
+#define VK_SCREEN_REFLECT_SPAN 0.25f
 /* Store the floating screen at per-eye resolution to avoid downsampling menus. */
 typedef struct {
 	image_t image;
+	uint32_t mips;
 	VkDeviceMemory memory;
 	VkRenderPass pass;
 	VkFramebuffer framebuffer;
 } vkScreenTarget_t;
 static vkScreenTarget_t vk_screen;
+
+/* Trilinear with no LOD clamp, so the reflection can sample its blurred mip. */
+static void vk_screen_write_descriptor( void ) {
+	Vk_Sampler_Def def;
+	VkDescriptorImageInfo info;
+	VkWriteDescriptorSet write;
+	Com_Memset( &def, 0, sizeof( def ) );
+	def.address_mode = vk_screen.image.wrapClampMode;
+	def.gl_mag_filter = GL_LINEAR;
+	def.gl_min_filter = GL_LINEAR_MIPMAP_LINEAR;
+	def.noAnisotropy = qtrue;
+	info.sampler = vk_find_sampler( &def );
+	info.imageView = vk_screen.image.view;
+	info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	Com_Memset( &write, 0, sizeof( write ) );
+	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	write.dstSet = vk_screen.image.descriptor;
+	write.descriptorCount = 1;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	write.pImageInfo = &info;
+	qvkUpdateDescriptorSets( vk.device, 1, &write, 0, NULL );
+}
 
 static void vk_screen_target_init( void ) {
 	vk_screen.image.imgName = vk_screen.image.imgName2 = "*virtualScreenBuffer";
@@ -5143,12 +5173,21 @@ static void vk_screen_target_init( void ) {
 	if ( !vk_screen.image.handle ) {
 		VkCommandBuffer initial;
 		VkClearColorValue black = {{0, 0, 0, 1}};
-		VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+		VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1};
+		const VkFormatFeatureFlags mipFeatures = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+												 VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+		VkFormatProperties properties;
 		vk_screen.image.width = vk_screen.image.uploadWidth = vk.sceneWidth;
 		vk_screen.image.height = vk_screen.image.uploadHeight = vk.sceneHeight;
-		vk_hud_attachment( vk.color_format, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+		/* The mips come from linear blits; without them the reflection is sharp instead of blurred. */
+		qvkGetPhysicalDeviceFormatProperties( vk.physical_device, vk.color_format, &properties );
+		vk_screen.mips = (properties.optimalTilingFeatures & mipFeatures) == mipFeatures ? VK_SCREEN_MIP_LEVELS : 1;
+		vk_hud_attachment( vk.color_format,
+						   VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+							   VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 						   VK_IMAGE_ASPECT_COLOR_BIT, &vk_screen.image.handle, &vk_screen.image.view,
-						   &vk_screen.memory, vk_screen.image.uploadWidth, vk_screen.image.uploadHeight );
+						   &vk_screen.memory, vk_screen.image.uploadWidth, vk_screen.image.uploadHeight,
+						   vk_screen.mips );
 		initial = begin_command_buffer();
 		record_image_layout_transition( initial, vk_screen.image.handle, VK_IMAGE_ASPECT_COLOR_BIT,
 										VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -5160,8 +5199,8 @@ static void vk_screen_target_init( void ) {
 										VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 										VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
 		end_command_buffer( initial, __func__ );
-		ri.Printf( PRINT_ALL, "VR virtual screen capture: %dx%d\n", vk_screen.image.uploadWidth,
-				   vk_screen.image.uploadHeight );
+		ri.Printf( PRINT_ALL, "VR virtual screen capture: %dx%d, %u mips\n", vk_screen.image.uploadWidth,
+				   vk_screen.image.uploadHeight, vk_screen.mips );
 	}
 	if ( !vk_screen.pass ) {
 		VkAttachmentDescription attachment = {0};
@@ -5235,7 +5274,7 @@ static void vk_screen_target_init( void ) {
 	vk_screen.image.wrapClampMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 	VK_CHECK( VK_HUD_EnsureDescriptor( vk.device, vk.target_descriptor_pool, vk.set_layout_sampler,
 									   &vk_screen.image.descriptor ) );
-	vk_update_descriptor_set( &vk_screen.image, qfalse );
+	vk_screen_write_descriptor();
 }
 image_t *vk_screen_image( void ) {
 	return vk_screen.image.descriptor ? &vk_screen.image : NULL;
@@ -5301,11 +5340,11 @@ void vk_hud_init( void ) {
 						   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
 							   VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 						   VK_IMAGE_ASPECT_COLOR_BIT, &vk_hud.image.handle, &vk_hud.image.view,
-						   &vk_hud.colorMemory, VK_HUD_WIDTH, VK_HUD_HEIGHT );
+						   &vk_hud.colorMemory, VK_HUD_WIDTH, VK_HUD_HEIGHT, 1 );
 		vk_hud_attachment(
 			vk.depth_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
 			VK_IMAGE_ASPECT_DEPTH_BIT | (glConfig.stencilBits ? VK_IMAGE_ASPECT_STENCIL_BIT : 0),
-			&vk_hud.depth, &vk_hud.depthView, &vk_hud.depthMemory, VK_HUD_WIDTH, VK_HUD_HEIGHT );
+			&vk_hud.depth, &vk_hud.depthView, &vk_hud.depthMemory, VK_HUD_WIDTH, VK_HUD_HEIGHT, 1 );
 		Com_Memset( attachments, 0, sizeof( attachments ) );
 		attachments[0].format = vk.color_format;
 		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
@@ -5402,6 +5441,16 @@ void vk_hud_init( void ) {
 	VK_CHECK( VK_HUD_EnsureDescriptor( vk.device, vk.target_descriptor_pool, vk.set_layout_sampler,
 									   &vk_hud.image.descriptor ) );
 	vk_update_descriptor_set( &vk_hud.image, qfalse );
+}
+
+/* Their samplers don't live in tr.images, so GL_TextureMode's sampler rebuild leaves these two stale. */
+void vk_update_screen_hud_descriptors( void ) {
+	if ( vk_screen.image.view ) {
+		vk_screen_write_descriptor();
+	}
+	if ( vk_hud.image.view ) {
+		vk_update_descriptor_set( &vk_hud.image, qfalse );
+	}
 }
 
 static void vk_hud_invalidate_caches( void ) {
@@ -6389,6 +6438,7 @@ void vk_shutdown( refShutdownCode_t code )
 
 	qvkDestroyShaderModule( vk.device, vk.modules.floor_grid_fs, NULL );
 	qvkDestroyShaderModule( vk.device, vk.modules.virtualscreen_fs, NULL );
+	qvkDestroyShaderModule( vk.device, vk.modules.virtualreflect_fs, NULL );
 	qvkDestroyShaderModule( vk.device, vk.modules.frag.gen0_df, NULL );
 
 	qvkDestroyShaderModule( vk.device, vk.modules.color_fs, NULL );
@@ -7581,10 +7631,15 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 			break;
 
 		case TYPE_VR_SCREEN:
+		case TYPE_VR_REFLECTION:
 		case TYPE_VR_FLOOR_GRID:
 			vs_module = &vertex->ident1[0][0][0];
-			fs_module =
-				def->shader_type == TYPE_VR_SCREEN ? &vk.modules.virtualscreen_fs : &vk.modules.floor_grid_fs;
+			if ( def->shader_type == TYPE_VR_SCREEN )
+				fs_module = &vk.modules.virtualscreen_fs;
+			else if ( def->shader_type == TYPE_VR_REFLECTION )
+				fs_module = &vk.modules.virtualreflect_fs;
+			else
+				fs_module = &vk.modules.floor_grid_fs;
 			break;
 
 		case TYPE_SINGLE_TEXTURE:
@@ -7732,6 +7787,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 			case TYPE_DOT:
 			case TYPE_SINGLE_TEXTURE_DF:
 			case TYPE_VR_SCREEN:
+			case TYPE_VR_REFLECTION:
 			case TYPE_VR_FLOOR_GRID:
 			case TYPE_COLOR_BLACK:
 			case TYPE_COLOR_WHITE:
@@ -7992,6 +8048,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 			break;
 
 		case TYPE_VR_SCREEN:
+		case TYPE_VR_REFLECTION:
 		case TYPE_VR_FLOOR_GRID:
 		case TYPE_SINGLE_TEXTURE_DF:
 		case TYPE_SINGLE_TEXTURE_IDENTITY:
@@ -9956,6 +10013,25 @@ static void vk_render_scope_bands( void ) {
 	qvkCmdClearAttachments( vk.cmd->command_buffer, vk.hdrActive ? 2 : 1, colors, 2, rects );
 }
 
+static void vk_screen_mip_barrier( uint32_t base, uint32_t count, VkImageLayout oldLayout, VkImageLayout newLayout,
+								   VkAccessFlags srcAccess, VkAccessFlags dstAccess, VkPipelineStageFlags dstStage ) {
+	VkImageMemoryBarrier barrier;
+	Com_Memset( &barrier, 0, sizeof( barrier ) );
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.srcAccessMask = srcAccess;
+	barrier.dstAccessMask = dstAccess;
+	barrier.oldLayout = oldLayout;
+	barrier.newLayout = newLayout;
+	barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image = vk_screen.image.handle;
+	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barrier.subresourceRange.baseMipLevel = base;
+	barrier.subresourceRange.levelCount = count;
+	barrier.subresourceRange.layerCount = 1;
+	qvkCmdPipelineBarrier( vk.cmd->command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, dstStage, 0, 0, NULL, 0, NULL, 1,
+						   &barrier );
+}
+
 static void vk_render_virtual_screen( vkMonoTargets_t *source ) {
 	const vrScreenGeometry_t *screen = VK_XR_Screen();
 	VkFormatProperties properties = vk.screenFormatProperties;
@@ -9975,7 +10051,7 @@ static void vk_render_virtual_screen( vkMonoTargets_t *source ) {
 		return;
 	if ( vk.xrDirect ) {
 		struct vkXRDirectTarget_s *t = vk_xr_direct_target();
-		if ( !tr.virtualScreenShader || !vk_screen.image.handle || !t->screen ) {
+		if ( !tr.virtualScreenShader || !tr.virtualReflectionShader || !vk_screen.image.handle || !t->screen ) {
 			ri.Error( ERR_DROP, "Virtual screen requires the Vulkan scene and HUD targets" );
 			return;
 		}
@@ -9997,7 +10073,7 @@ static void vk_render_virtual_screen( vkMonoTargets_t *source ) {
 		srcImage = t->image;
 		composition = t->screen;
 	} else {
-		if ( !vk.fboActive || !tr.virtualScreenShader || !vk_screen.image.handle ) {
+		if ( !vk.fboActive || !tr.virtualScreenShader || !tr.virtualReflectionShader || !vk_screen.image.handle ) {
 			ri.Error( ERR_DROP, "Virtual screen requires the Vulkan scene and HUD targets" );
 			return;
 		}
@@ -10050,10 +10126,31 @@ static void vk_render_virtual_screen( vkMonoTargets_t *source ) {
 					 properties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT
 						 ? VK_FILTER_LINEAR
 						 : VK_FILTER_NEAREST );
-	record_image_layout_transition( vk.cmd->command_buffer, vk_screen.image.handle, VK_IMAGE_ASPECT_COLOR_BIT,
-									VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-									VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-									VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
+	for ( i = 1; i < (int)vk_screen.mips; i++ ) {
+		vk_screen_mip_barrier( i - 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+							   VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT );
+		Com_Memset( &copy, 0, sizeof( copy ) );
+		copy.srcSubresource.aspectMask = copy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		copy.srcSubresource.layerCount = copy.dstSubresource.layerCount = 1;
+		copy.srcSubresource.mipLevel = i - 1;
+		copy.dstSubresource.mipLevel = i;
+		copy.srcOffsets[1].x = MAX( 1, vk_screen.image.uploadWidth >> (i - 1) );
+		copy.srcOffsets[1].y = MAX( 1, vk_screen.image.uploadHeight >> (i - 1) );
+		copy.srcOffsets[1].z = 1;
+		copy.dstOffsets[1].x = MAX( 1, vk_screen.image.uploadWidth >> i );
+		copy.dstOffsets[1].y = MAX( 1, vk_screen.image.uploadHeight >> i );
+		copy.dstOffsets[1].z = 1;
+		qvkCmdBlitImage( vk.cmd->command_buffer, vk_screen.image.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+						 vk_screen.image.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy, VK_FILTER_LINEAR );
+	}
+	/* Every level but the last was a blit source. */
+	if ( vk_screen.mips > 1 )
+		vk_screen_mip_barrier( 0, vk_screen.mips - 1, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+							   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT,
+							   VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT );
+	vk_screen_mip_barrier( vk_screen.mips - 1, 1, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+						   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+						   VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT );
 
 	/* Screen metadata remains live, but subsequent passes consume stereo output. */
 	source->sourceActive = qfalse;
@@ -10090,6 +10187,23 @@ static void vk_render_virtual_screen( vkMonoTargets_t *source ) {
 		tess.depthRange = DEPTH_RANGE_NORMAL;
 		/* Eye matrices already map tracking-space geometry to clip space. */
 		vk_update_mvp( matrix );
+		RB_BeginSurface( tr.virtualReflectionShader, 0 );
+		for ( i = 0; i < segments; i++ ) {
+			float u0 = (float)i / segments, u1 = (float)(i + 1) / segments;
+			vec3_t a, b, origin, left, up = {0, 0, 0};
+			int axis;
+			/* The screen's bottom band mirrored below the floor; t = 1 touches the floor. */
+			VR_ScreenPoint( screen, u0, 1.0f, a );
+			VR_ScreenPoint( screen, u1, 1.0f, b );
+			for ( axis = 0; axis < 3; axis++ ) {
+				origin[axis] = (a[axis] + b[axis]) * 0.5f;
+				left[axis] = (a[axis] - b[axis]) * 0.5f;
+			}
+			origin[1] = -screen->height * VK_SCREEN_REFLECT_SPAN * 0.5f;
+			up[1] = screen->height * VK_SCREEN_REFLECT_SPAN * 0.5f;
+			RB_AddQuadStampExt( origin, left, up, white, u0, 1.0f, u1, 1.0f - VK_SCREEN_REFLECT_SPAN );
+		}
+		RB_EndSurface();
 		RB_BeginSurface( tr.virtualFloorShader, 0 );
 				{
 			vec3_t origin, left = {15, 0, 0}, up = {0, 0, 15};
@@ -10102,12 +10216,14 @@ static void vk_render_virtual_screen( vkMonoTargets_t *source ) {
 			float u0 = (float)i / segments, u1 = (float)(i + 1) / segments;
 			vec3_t a, b, origin, left, up = {0, 0, 0};
 			int axis;
-			VR_ScreenPoint( screen, u0, 0.5f, a );
-			VR_ScreenPoint( screen, u1, 0.5f, b );
+			/* Bottom points sit at y = 0; raise the origin by half the height to their center. */
+			VR_ScreenPoint( screen, u0, 1.0f, a );
+			VR_ScreenPoint( screen, u1, 1.0f, b );
 			for ( axis = 0; axis < 3; axis++ ) {
 				origin[axis] = (a[axis] + b[axis]) * 0.5f;
 				left[axis] = (a[axis] - b[axis]) * 0.5f;
 			}
+			origin[1] = screen->height * 0.5f;
 			up[1] = screen->height * 0.5f;
 			RB_AddQuadStampExt( origin, left, up, white, u0, 0, u1, 1 );
 		}
