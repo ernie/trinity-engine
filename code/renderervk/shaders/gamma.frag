@@ -41,6 +41,7 @@ layout(push_constant) uniform Push {
 	float hdrSaturation; // 0 = brightest emitters go white; 1 = keep full color
 	float hdrSaturationFull; // emitter intensity at which the bleed reaches its max
 	float hdrSoftKnee;  // width of the smooth highlight onset above paper-white
+	int bloomActive;    // the blur ran this frame
 } push;
 
 const vec3 sRGB = { 0.2126, 0.7152, 0.0722 };
@@ -64,7 +65,7 @@ vec3 hdrReconstruct( vec3 base, vec3 emissive, float coverage, bool encoded,
 	// inflates base in halos but never writes the emissive layer (no fringing);
 	// the base term restores 2D occlusion, since 2D composited on top darkens
 	// base below the ceiling even where the emissive layer kept the emitter.
-	// Coverage (eye alpha) turns it off under 2D drawn after the scene.
+	// Coverage (what post-scene draws took from the scene) turns it off under them.
 	float em = max( max( emissive.r, emissive.g ), emissive.b );
 	float clip = smoothstep( 1.0, 1.1, em )
 	           * smoothstep( 0.990, 1.0, max( max( base.r, base.g ), base.b ) ) * ( 1.0 - coverage );
@@ -156,14 +157,17 @@ void main() {
 		return;
 	}
 
-	vec3 base = sceneSample(texture0, frag_tex_coord).rgb;
+	vec4 scene = sceneSample(texture0, frag_tex_coord);
+	vec3 base = scene.rgb;
+	float coverage = 0.0;
 #ifdef USE_BLOOM_COMPOSITE
-	if ( bloomEnabled != 0 ) {
+	if ( bloomEnabled != 0 && push.bloomActive != 0 ) {
 		vec3 bloom = sceneSample(bloom0, frag_tex_coord).rgb + sceneSample(bloom1, frag_tex_coord).rgb
 			+ sceneSample(bloom2, frag_tex_coord).rgb + sceneSample(bloom3, frag_tex_coord).rgb;
-		// The blend pass adds into a UNORM target, which clamps.
-		base = min( base + bloom * bloomFactor, vec3(1.0) );
+		// bloom lands under the post-scene draws: the scene's alpha is what they let through
+		base = min( base + bloom * bloomFactor * scene.a, vec3(1.0) );
 	}
+	coverage = 1.0 - scene.a;
 #endif
 	// Screen content already went through gamma/overbright before capture.
 	if (screenSource != 0) {
@@ -188,7 +192,7 @@ void main() {
 	if ( hdrMode == 1 )
 	{
 		vec3 emissive = sceneSample(texture1, frag_tex_coord).rgb;
-		out_color = vec4( hdrReconstruct( base, emissive, 0.0, false, gamma, obScale,
+		out_color = vec4( hdrReconstruct( base, emissive, coverage, false, gamma, obScale,
 			push.paperWhite, push.hdrPeak, push.hdrHighlight, push.hdrSaturation,
 			push.hdrSaturationFull, push.hdrSoftKnee ), 1.0 );
 		return;
@@ -210,7 +214,7 @@ void main() {
 		out_color.rgb=vec3(VKXR_SdrLinear(out_color.r),VKXR_SdrLinear(out_color.g),VKXR_SdrLinear(out_color.b));
 	}
 #ifdef USE_BLOOM_COMPOSITE
-	// Alpha accumulates post-scene 2D coverage for the HDR mirror.
-	out_color.a = 0.0;
+	// The HDR mirror reads post-scene coverage from the eye image's alpha.
+	out_color.a = coverage;
 #endif
 }

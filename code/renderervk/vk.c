@@ -697,7 +697,7 @@ static void vk_foveation_draw( void ) {
 	qboolean attachment = qfalse;
 	if ( vk_foveation.image && VK_XR_Drawing() && !VK_XR_Screen() && !backEnd.projection2D &&
 		tess.shader != tr.hudShader &&
-		(vk.renderPassIndex == RENDER_PASS_MAIN || vk.renderPassIndex == RENDER_PASS_POST_BLOOM) ) {
+		(vk.renderPassIndex == RENDER_PASS_MAIN || vk.renderPassIndex == RENDER_PASS_POST_SCENE) ) {
 		attachment = qtrue;
 	}
 	vk_foveation_rate( attachment );
@@ -819,6 +819,7 @@ static void vk_create_mono_pipeline( const VkGraphicsPipelineCreateInfo *source,
 static void vk_destroy_mono_framebuffers( vkMonoTargets_t *targets ) {
 	unsigned i;
 	qvkDestroyFramebuffer( vk.device, targets->framebuffer.main, NULL );
+	qvkDestroyFramebuffer( vk.device, targets->framebuffer.post_scene, NULL );
 	qvkDestroyFramebuffer( vk.device, targets->framebuffer.output, NULL );
 	for ( i = 0; i < ARRAY_LEN( targets->framebuffer.blur ); i++ ) {
 		qvkDestroyFramebuffer( vk.device, targets->framebuffer.blur[i], NULL );
@@ -829,6 +830,7 @@ static void vk_destroy_mono_framebuffers( vkMonoTargets_t *targets ) {
 static void vk_destroy_mono_passes( vkMonoTargets_t *targets ) {
 	unsigned i;
 	qvkDestroyRenderPass( vk.device, targets->pass.main, NULL );
+	qvkDestroyRenderPass( vk.device, targets->pass.post_scene, NULL );
 	qvkDestroyRenderPass( vk.device, targets->pass.output, NULL );
 	for ( i = 0; i < ARRAY_LEN( targets->pass.blur ); i++ ) {
 		qvkDestroyRenderPass( vk.device, targets->pass.blur[i], NULL );
@@ -838,7 +840,6 @@ static void vk_destroy_mono_passes( vkMonoTargets_t *targets ) {
 
 static void vk_destroy_mono_pipelines( vkMonoTargets_t *targets ) {
 	unsigned i;
-	qvkDestroyPipeline( vk.device, targets->pipeline.output, NULL );
 	qvkDestroyPipeline( vk.device, targets->pipeline.composite, NULL );
 	for ( i = 0; i < ARRAY_LEN( targets->pipeline.blur ); i++ ) {
 		qvkDestroyPipeline( vk.device, targets->pipeline.blur[i], NULL );
@@ -1363,7 +1364,7 @@ static void vk_create_render_passes( void )
 		attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE; // sampled by the gamma pass
 		attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		// mirror the color attachment so the shared post-bloom pass can LOAD it
+		// mirror the color attachment so the post-scene pass can LOAD it
 		attachments[2].initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		attachments[2].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
@@ -1386,11 +1387,7 @@ static void vk_create_render_passes( void )
 #else
 		attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 #endif
-		if ( !vk.xrDirect && r_bloom->integer ) {
-			attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE; // keep it for post-bloom pass
-		} else {
-			attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // Intermediate storage (not written)
-		}
+		attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // only its resolve is read later
 		attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		attachments[2].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -1416,7 +1413,7 @@ static void vk_create_render_passes( void )
 			attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 			attachments[3].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 			attachments[3].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-			// mirror the color resolve attachment so the shared post-bloom pass can LOAD it
+			// mirror the color resolve attachment so the post-scene pass can LOAD it
 			attachments[3].initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 			attachments[3].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
@@ -1425,11 +1422,7 @@ static void vk_create_render_passes( void )
 			attachments[4].format = VK_FORMAT_R16G16B16A16_SFLOAT;
 			attachments[4].samples = vkSamples;
 			attachments[4].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-			if ( r_bloom->integer ) {
-				attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_STORE; // keep it for post-bloom pass
-			} else {
-				attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // Intermediate storage (not written)
-			}
+			attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 			attachments[4].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 			attachments[4].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 			attachments[4].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -1521,33 +1514,50 @@ static void vk_create_render_passes( void )
 
 	if ( vk.fboActive && r_bloom->integer ) {
 
-		// post-bloom pass
-		// color buffer
-		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // load from previous pass
-		// nothing after bloom depth-tests against the world; later 3D views clear their own
-		attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachments[1].stencilLoadOp = glConfig.stencilBits ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-		attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		if ( vk.msaaActive ) {
-			// msaa render target
-			attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-			attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		}
-		if ( vk.hdrActive ) {
-			if ( vk.msaaActive ) {
-				// keep the emitter energy the main pass accumulated
-				attachments[3].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // emissive resolve
-				attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-				attachments[4].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // msaa emissive
-				attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-			} else {
-				attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // emissive resolve
-				attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-			}
-		}
-		VK_CHECK( vk_foveation_render_pass( &desc, &vk.render_pass.post_bloom ) );
-		SET_OBJECT_NAME( vk.render_pass.post_bloom, "render pass - post_bloom", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
+		// post-scene pass: coronas and 2D blend into the resolved scene image over their own depth
+		VkAttachmentDescription postAttachments[3];
+		const VkAttachmentReference postColors[2] = {{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
+													 {2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}};
+		const VkAttachmentReference postDepth = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+		VkSubpassDescription postSubpass;
+		VkSubpassDependency postDeps[3];
+		VkRenderPassCreateInfo post = desc;
+
+		postAttachments[0] = attachments[0];
+		postAttachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+		// nothing after the scene depth-tests against the world; the pass clears this one for the 3D icons
+		postAttachments[1] = attachments[1];
+		postAttachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+		postAttachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		// keep the emitter energy the main pass accumulated
+		postAttachments[2] = attachments[vk.msaaActive ? 3 : 2];
+		postAttachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+
+		Com_Memset( &postSubpass, 0, sizeof( postSubpass ) );
+		postSubpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		postSubpass.colorAttachmentCount = vk.hdrActive ? 2 : 1;
+		postSubpass.pColorAttachments = postColors;
+		postSubpass.pDepthStencilAttachment = &postDepth;
+
+		postDeps[0] = deps[0];
+		postDeps[1] = deps[1];
+		// last frame's icons wrote the depth this frame clears
+		Com_Memset( &postDeps[2], 0, sizeof( postDeps[2] ) );
+		postDeps[2].srcSubpass = VK_SUBPASS_EXTERNAL;
+		postDeps[2].dstSubpass = 0;
+		postDeps[2].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		postDeps[2].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		postDeps[2].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		postDeps[2].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+		post.attachmentCount = vk.hdrActive ? 3 : 2;
+		post.pAttachments = postAttachments;
+		post.pSubpasses = &postSubpass;
+		post.dependencyCount = ARRAY_LEN( postDeps );
+		post.pDependencies = postDeps;
+		VK_CHECK( vk_foveation_render_pass( &post, &vk.render_pass.post_scene ) );
+		vk_create_mono_pass( &post, qtrue, &vk.mono.pass.post_scene );
+		SET_OBJECT_NAME( vk.render_pass.post_scene, "render pass - post scene", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
 
 		// bloom blur targets
 		desc.attachmentCount = 1;
@@ -1610,12 +1620,7 @@ static void vk_create_render_passes( void )
 
 		VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.render_pass.capture ) );
 		if ( vk.xr_output.image ) {
-			VkSubpassDependency xrDeps[4] = {{0}, {0}, {0}, {0}};
-			VkAttachmentDescription xrAttachments[2];
-			const VkAttachmentReference xrColor = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-			const VkAttachmentReference xrDepth = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-			VkSubpassDescription xrSubpasses[2];
-			const uint32_t xrMasks[2] = {viewMask, viewMask};
+			VkSubpassDependency xrDeps[2] = {{0}, {0}};
 			const VkSubpassDependency *savedDeps = desc.pDependencies;
 			uint32_t savedCount = desc.dependencyCount;
 			// one dependency set serves the blit source and the swapchain target, keeping the passes compatible
@@ -1631,62 +1636,21 @@ static void vk_create_render_passes( void )
 			xrDeps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 			xrDeps[1].dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
 			xrDeps[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-			attachments[0].format = vk.xr_output.format;
+			// the eye pass applies gamma to the finished scene and writes the encoded result through a UNORM view
+			attachments[0].format = vk_unorm_twin( vk.xr_output.format );
 			desc.dependencyCount = 2;
 			desc.pDependencies = xrDeps;
 			vk_multiview_pass( &desc, &views, &viewMask );
-
-			// subpass 0 composites the scene, subpass 1 draws post-scene 2D over its own depth
-			xrAttachments[0] = attachments[0];
-			xrAttachments[0].format = vk_unorm_twin( vk.xr_output.format );
-			xrAttachments[1] = xrAttachments[0];
-			xrAttachments[1].format = vk.depth_format;
-			xrAttachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-			xrAttachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-			xrAttachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-			xrAttachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-			xrAttachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-			Com_Memset( xrSubpasses, 0, sizeof( xrSubpasses ) );
-			xrSubpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-			xrSubpasses[0].colorAttachmentCount = 1;
-			xrSubpasses[0].pColorAttachments = &xrColor;
-			xrSubpasses[1] = xrSubpasses[0];
-			xrSubpasses[1].pDepthStencilAttachment = &xrDepth;
-			xrDeps[1].srcSubpass = 1;
-			xrDeps[2].srcSubpass = VK_SUBPASS_EXTERNAL;
-			xrDeps[2].dstSubpass = 1;
-			xrDeps[2].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-			xrDeps[2].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-			xrDeps[2].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-			xrDeps[2].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-			xrDeps[3].srcSubpass = 0;
-			xrDeps[3].dstSubpass = 1;
-			xrDeps[3].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-			xrDeps[3].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-			xrDeps[3].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-			xrDeps[3].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-			xrDeps[3].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT | VK_DEPENDENCY_VIEW_LOCAL_BIT;
-			desc.pNext = NULL;
-			desc.attachmentCount = 2;
-			desc.pAttachments = xrAttachments;
-			desc.subpassCount = 2;
-			desc.pSubpasses = xrSubpasses;
-			desc.dependencyCount = 4;
-			vk_multiview_pass( &desc, &views, xrMasks );
 			VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.xr_output.pass ) );
 			SET_OBJECT_NAME( vk.xr_output.pass, "render pass - xr output", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
 			vk_create_mono_pass( &desc, qfalse, &vk.mono.pass.output );
 			if ( vk.xr_output.eye_count ) {
 				// xrReleaseSwapchainImage expects the attachment layout
-				xrAttachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+				attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 				VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.xr_output.eye_pass ) );
 				SET_OBJECT_NAME( vk.xr_output.eye_pass, "render pass - xr eye output", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
 			}
 			desc.pNext = NULL;
-			desc.attachmentCount = 1;
-			desc.pAttachments = attachments;
-			desc.subpassCount = 1;
-			desc.pSubpasses = &subpass;
 			desc.dependencyCount = savedCount;
 			desc.pDependencies = savedDeps;
 		}
@@ -3551,6 +3515,7 @@ void vk_update_attachment_descriptors( void ) {
 		desc.dstBinding = 0;
 		qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
 
+		// the composite reads the scene and the emissive layer from its own set; the bloom levels follow below
 		desc.dstSet = vk.composite_descriptor;
 		desc.dstBinding = 1;
 		qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
@@ -3595,16 +3560,12 @@ void vk_update_attachment_descriptors( void ) {
 			}
 		}
 
-		// composite bloom levels: the ones the blend sums, or valid scene placeholders with bloom off
-		{
-			uint32_t i;
-			desc.dstSet = vk.composite_descriptor;
-			for ( i = 0; i < VK_NUM_BLOOM_PASSES; i++ )
-			{
-				info.imageView = r_bloom->integer ? vk.bloom_image_view[(i+1)*2] : vk.color_image_view;
-				desc.dstBinding = 2 + i;
-				qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
-			}
+		// the composite's bloom levels, sampled linearly like the blur's: the ones the blend sums, or scene placeholders
+		desc.dstSet = vk.composite_descriptor;
+		for ( n = 0; n < VK_NUM_BLOOM_PASSES; n++ ) {
+			info.imageView = r_bloom->integer ? vk.bloom_image_view[(n+1)*2] : vk.color_image_view;
+			desc.dstBinding = 2 + n;
+			qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
 		}
 	}
 	else if ( vk.xrDirect && vk.xr_direct.idle.descriptor )
@@ -4200,13 +4161,12 @@ static void vk_create_shader_modules( void )
 
 	vk.modules.blur_extract_fs = SHADER_MODULE( blur_extract_frag_spv );
 	vk.modules.blur_fs = SHADER_MODULE( blur_frag_spv );
-	vk.modules.blend_fs = SHADER_MODULE( blend_frag_spv );
 
 	SET_OBJECT_NAME( vk.modules.blur_extract_fs, "bloom extracting blur fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.blur_fs, "gaussian blur fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
-	SET_OBJECT_NAME( vk.modules.blend_fs, "final bloom blend fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 
 	vk.modules.gamma_fs = SHADER_MODULE( gamma_frag_spv );
+	vk.modules.gamma_composite_fs = SHADER_MODULE( gamma_composite_frag_spv );
 	vk.modules.gamma_vs = SHADER_MODULE( gamma_vert_spv );
 
 	SET_OBJECT_NAME( vk.modules.gamma_fs, "gamma post-processing fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
@@ -4259,8 +4219,6 @@ static void vk_create_shader_modules( void )
 		vk.modules.dot_total_fs_mv = SHADER_MODULE( dot_total_frag_spv );
 		vk.modules.blur_extract_fs_mv = SHADER_MODULE( blur_extract_frag_spv_mv );
 		vk.modules.blur_fs_mv = SHADER_MODULE( blur_frag_spv_mv );
-		vk.modules.blend_fs_mv = SHADER_MODULE( blend_frag_spv_mv );
-		vk.modules.gamma_fs_mv = SHADER_MODULE( gamma_frag_spv_mv );
 		vk.modules.gamma_fs_array = SHADER_MODULE( gamma_frag_spv_array );
 		vk.modules.gamma_composite_fs_mv = SHADER_MODULE( gamma_composite_frag_spv_mv );
 	}
@@ -4523,30 +4481,13 @@ static uint32_t vk_bloom_height( void ) {
 
 void vk_update_post_process_pipelines( void )
 {
-	if ( vk.xr_output.pass ) {
-		// post-scene 2D pipelines bake the eye output chain; they rebuild on next use
-		uint32_t i;
-		vk_wait_idle();
-		for ( i = 0; i < vk.pipelines_count; i++ ) {
-			renderPass_t pass;
-			for ( pass = RENDER_PASS_POST_SCENE_2D; pass <= RENDER_PASS_MONO_POST_SCENE_2D; pass++ ) {
-				if ( vk.pipelines[i].handle[pass] != VK_NULL_HANDLE ) {
-					qvkDestroyPipeline( vk.device, vk.pipelines[i].handle[pass], NULL );
-					vk.pipelines[i].handle[pass] = VK_NULL_HANDLE;
-					vk.pipeline_create_count--;
-				}
-			}
-		}
-	}
 	if ( vk.fboActive ) {
-		// update gamma shader
-		vk_create_post_process_pipeline( VK_POST_GAMMA, 0, 0 );
+		if ( !vk.multiview )
+			vk_create_post_process_pipeline( VK_POST_DESKTOP_COMPOSITE, 0, 0 );
 		if ( vk.xr_output.image ) {
-			vk_create_post_process_pipeline( VK_POST_XR_OUTPUT, vk.sceneWidth, vk.sceneHeight );
 			vk_create_post_process_pipeline( VK_POST_XR_COMPOSITE, vk.sceneWidth, vk.sceneHeight );
 			vk_create_post_process_pipeline( VK_POST_SCREEN_MONO, gls.windowWidth, gls.windowHeight );
 			for ( int eye = 0; eye < 2; eye++ ) {
-				vk_create_post_process_pipeline( VK_POST_EYE_LEFT + eye, gls.windowWidth, gls.windowHeight );
 				vk_create_post_process_pipeline( VK_POST_SCREEN_LEFT + eye, gls.windowWidth,
 												 gls.windowHeight );
 				vk_create_post_process_pipeline( VK_POST_EYE_MIRROR_LEFT + eye, gls.windowWidth,
@@ -4555,8 +4496,8 @@ void vk_update_post_process_pipelines( void )
 			if ( vk.capture.image )
 				vk_create_post_process_pipeline( VK_POST_SCREEN_CAPTURE, gls.captureWidth, gls.captureHeight );
 		}
-		if ( vk.capture.image ) {
-			// update capture pipeline
+		if ( vk.capture.image && !vk.multiview ) {
+			// flatscreen screenshots composite the scene and bloom at the capture size
 			vk_create_post_process_pipeline( VK_POST_CAPTURE, gls.captureWidth, gls.captureHeight );
 		}
 		if ( r_bloom->integer ) {
@@ -4572,15 +4513,14 @@ void vk_update_post_process_pipelines( void )
 				vk_create_blur_pipeline( i + 0, width, height, qtrue ); // horizontal
 				vk_create_blur_pipeline( i + 1, width, height, qfalse ); // vertical
 			}
-
-			vk_create_post_process_pipeline( VK_POST_BLOOM_BLEND, vk.sceneWidth,
-											 vk.sceneHeight ); // bloom blending
 		}
 	} else if ( vk.xrDirect ) {
 		int eye;
 		vk_create_post_process_pipeline( VK_POST_SCREEN_MONO, gls.windowWidth, gls.windowHeight );
 		for ( eye = 0; eye < 2; eye++ )
 			vk_create_post_process_pipeline( VK_POST_SCREEN_LEFT + eye, gls.windowWidth, gls.windowHeight );
+		if ( vk.capture.image )
+			vk_create_post_process_pipeline( VK_POST_SCREEN_CAPTURE, gls.captureWidth, gls.captureHeight );
 	}
 }
 
@@ -4915,8 +4855,12 @@ static void vk_create_attachments( void )
 				vk.xr_output.format,
 				VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 				&vk.xr_output.image, &vk.xr_output.view, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, qfalse, 2 );
-			create_depth_attachment( 0, vk.sceneWidth, vk.sceneHeight, VK_SAMPLE_COUNT_1_BIT, &vk.xr_output.depth,
-									 &vk.xr_output.depth_view, qtrue, 2 );
+		}
+
+		if ( r_bloom->integer ) {
+			// post-scene 3D icons test against their own depth, since the scene's is discarded
+			create_depth_attachment( 0, vk.sceneWidth, vk.sceneHeight, VK_SAMPLE_COUNT_1_BIT, &vk.post_depth,
+									 &vk.post_depth_view, qtrue, (vk.multiview ? 2 : 1) );
 		}
 
 		if ( vk.hdrActive ) {
@@ -4960,8 +4904,8 @@ static void vk_create_attachments( void )
 									 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, qtrue, (vk.multiview ? 2 : 1) );
 		}
 
-		if ( r_ext_supersample->integer || vk.multiview ) {
-			// capture buffer
+		{
+			// capture buffer: screenshots composite into it at the capture size
 			usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 			create_color_attachment( gls.captureWidth, gls.captureHeight, VK_SAMPLE_COUNT_1_BIT,
 									 vk.capture_format, usage, &vk.capture.image, &vk.capture.image_view,
@@ -4981,6 +4925,10 @@ static void vk_create_attachments( void )
 									   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 									   &vk.xr_direct.idle.image, &vk.xr_direct.idle.view,
 									   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, qfalse, 2 );
+		// screenshots take the finished eye image through the capture pass
+		create_color_attachment( gls.captureWidth, gls.captureHeight, VK_SAMPLE_COUNT_1_BIT, vk.capture_format,
+								 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, &vk.capture.image,
+								 &vk.capture.image_view, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, qfalse, 1 );
 	}
 
 	//vk_alloc_attachments();
@@ -5095,7 +5043,7 @@ static void vk_create_framebuffers( void )
 		}
 		else
 		{
-			// same framebuffer configuration for main and post-bloom render passes
+			// same framebuffer configuration for the main and post-scene render passes
 			if ( n == 0 )
 			{
 				desc.width = vk.sceneWidth;
@@ -5109,7 +5057,7 @@ static void vk_create_framebuffers( void )
 				}
 				if ( vk.hdrActive )
 				{
-					// same attachment order the main/post-bloom render passes declare
+					// same attachment order the main/post-scene render passes declare
 					if ( vk.msaaActive )
 					{
 						attachments[3] = vk.emissive_image_view;      // resolve
@@ -5128,15 +5076,26 @@ static void vk_create_framebuffers( void )
 				VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.framebuffers.main[n] ) );
 				SET_OBJECT_NAME( vk.framebuffers.main[n], "framebuffer - main", VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT );
 				if ( vk_fdm_active() ) {
-					// the mono and post-bloom passes carry no density map
-					desc.attachmentCount--;
-					if ( vk.render_pass.post_bloom ) {
-						desc.renderPass = vk.render_pass.post_bloom;
-						VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.framebuffers.post_bloom ) );
-						desc.renderPass = vk.render_pass.main;
-					}
+					desc.attachmentCount--; // the mono pass carries no density map
 				}
 				vk_create_mono_framebuffer( &desc, vk.mono.pass.main, &vk.mono.framebuffer.main );
+				if ( vk.render_pass.post_scene ) {
+					// the resolved scene over its own depth, plus the emissive layer; never the density map
+					desc.renderPass = vk.render_pass.post_scene;
+					desc.attachmentCount = 2;
+					attachments[0] = vk.color_image_view;
+					attachments[1] = vk.post_depth_view;
+					if ( vk.hdrActive ) {
+						attachments[desc.attachmentCount++] = vk.emissive_image_view;
+					}
+					if ( vk_foveation.image && !vk_fdm_active() ) {
+						attachments[desc.attachmentCount++] = vk_foveation.view;
+					}
+					VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.framebuffers.post_scene ) );
+					SET_OBJECT_NAME( vk.framebuffers.post_scene, "framebuffer - post scene", VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT );
+					vk_create_mono_framebuffer( &desc, vk.mono.pass.post_scene, &vk.mono.framebuffer.post_scene );
+					desc.renderPass = vk.render_pass.main;
+				}
 			}
 			else
 			{
@@ -5166,6 +5125,21 @@ static void vk_create_framebuffers( void )
 	}
 	vk_fdm_tile_size( vk.xrDirect ? vk.xr_direct.idle.main : vk.framebuffers.main[0] );
 
+	// screenshots in the FBO and direct-mode flows both draw into the capture image
+	if ( vk.capture.image != VK_NULL_HANDLE )
+	{
+		attachments[0] = vk.capture.image_view;
+
+		desc.renderPass = vk.render_pass.capture;
+		desc.pAttachments = attachments;
+		desc.attachmentCount = 1;
+		desc.width = gls.captureWidth;
+		desc.height = gls.captureHeight;
+
+		VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.framebuffers.capture ) );
+		SET_OBJECT_NAME( vk.framebuffers.capture, "framebuffer - capture", VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT );
+	}
+
 	if ( vk.fboActive )
 	{
 		// screenmap
@@ -5183,24 +5157,9 @@ static void vk_create_framebuffers( void )
 		VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.framebuffers.screenmap ) );
 		SET_OBJECT_NAME( vk.framebuffers.screenmap, "framebuffer - screenmap", VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT );
 
-		if ( vk.capture.image != VK_NULL_HANDLE )
-		{
-			attachments[0] = vk.capture.image_view;
-
-			desc.renderPass = vk.render_pass.capture;
-			desc.pAttachments = attachments;
-			desc.attachmentCount = 1;
-			desc.width = gls.captureWidth;
-			desc.height = gls.captureHeight;
-
-			VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.framebuffers.capture ) );
-			SET_OBJECT_NAME( vk.framebuffers.capture, "framebuffer - capture", VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT );
-		}
-
 		if ( vk.xr_output.image ) {
 			attachments[0] = vk.xr_output.unorm_view;
-			attachments[1] = vk.xr_output.depth_view;
-			desc.attachmentCount = 2;
+			desc.attachmentCount = 1;
 			desc.width = vk.sceneWidth;
 			desc.height = vk.sceneHeight;
 			desc.renderPass = vk.xr_output.pass;
@@ -5373,9 +5332,9 @@ static void vk_destroy_framebuffers( void ) {
 	}
 
 
-	if ( vk.framebuffers.post_bloom != VK_NULL_HANDLE ) {
-		qvkDestroyFramebuffer( vk.device, vk.framebuffers.post_bloom, NULL );
-		vk.framebuffers.post_bloom = VK_NULL_HANDLE;
+	if ( vk.framebuffers.post_scene != VK_NULL_HANDLE ) {
+		qvkDestroyFramebuffer( vk.device, vk.framebuffers.post_scene, NULL );
+		vk.framebuffers.post_scene = VK_NULL_HANDLE;
 	}
 
 	if ( vk.framebuffers.screenmap != VK_NULL_HANDLE ) {
@@ -6533,15 +6492,11 @@ void vk_initialize( void )
 		VkPushConstantRange pp_push_range;
 		pp_push_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		pp_push_range.offset = 0;
-		pp_push_range.size = sizeof( int32_t ) + 6 * sizeof( float ); // hdrCalibrate + paperWhite, hdrPeak, hdrHighlight, hdrSaturation, hdrSaturationFull, hdrSoftKnee
+		pp_push_range.size = 2 * sizeof( int32_t ) + 6 * sizeof( float ); // hdrCalibrate + paperWhite, hdrPeak, hdrHighlight, hdrSaturation, hdrSaturationFull, hdrSoftKnee + bloomActive
 		desc.pushConstantRangeCount = 1;
 		desc.pPushConstantRanges = &pp_push_range;
 
 		VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_post_process ) );
-
-		desc.setLayoutCount = VK_NUM_BLOOM_PASSES;
-
-		VK_CHECK( qvkCreatePipelineLayout( vk.device, &desc, NULL, &vk.pipeline_layout_blend ) );
 
 		desc.setLayoutCount = 1;
 		desc.pSetLayouts = &vk.set_layout_composite;
@@ -6550,8 +6505,6 @@ void vk_initialize( void )
 
 		SET_OBJECT_NAME( vk.pipeline_layout, "pipeline layout - main", VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT );
 		SET_OBJECT_NAME( vk.pipeline_layout_post_process, "pipeline layout - post-processing", VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT );
-		SET_OBJECT_NAME( vk.pipeline_layout_blend, "pipeline layout - blend", VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT );
-		SET_OBJECT_NAME( vk.pipeline_layout_composite, "pipeline layout - composite", VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_LAYOUT_EXT );
 	}
 
 	vk.geometry_buffer_size_new = vk.defaults.geometry_size;
@@ -6700,13 +6653,15 @@ static void vk_destroy_attachments( void )
 		qvkDestroyImageView( vk.device, vk.xr_output.unorm_view, NULL );
 		qvkDestroyImageView( vk.device, vk.xr_output.view, NULL );
 		qvkDestroyImage( vk.device, vk.xr_output.image, NULL );
-		qvkDestroyImageView( vk.device, vk.xr_output.depth_view, NULL );
-		qvkDestroyImage( vk.device, vk.xr_output.depth, NULL );
 		vk.xr_output.image = VK_NULL_HANDLE;
 		vk.xr_output.view = VK_NULL_HANDLE;
 		vk.xr_output.unorm_view = VK_NULL_HANDLE;
-		vk.xr_output.depth = VK_NULL_HANDLE;
-		vk.xr_output.depth_view = VK_NULL_HANDLE;
+	}
+	if ( vk.post_depth ) {
+		qvkDestroyImageView( vk.device, vk.post_depth_view, NULL );
+		qvkDestroyImage( vk.device, vk.post_depth, NULL );
+		vk.post_depth = VK_NULL_HANDLE;
+		vk.post_depth_view = VK_NULL_HANDLE;
 	}
 	if ( vk.xr_direct.idle.image ) {
 		qvkDestroyImageView( vk.device, vk.xr_direct.idle.view, NULL );
@@ -6742,9 +6697,9 @@ static void vk_destroy_render_passes( void )
 		}
 	}
 
-	if ( vk.render_pass.post_bloom != VK_NULL_HANDLE ) {
-		qvkDestroyRenderPass( vk.device, vk.render_pass.post_bloom, NULL );
-		vk.render_pass.post_bloom = VK_NULL_HANDLE;
+	if ( vk.render_pass.post_scene != VK_NULL_HANDLE ) {
+		qvkDestroyRenderPass( vk.device, vk.render_pass.post_scene, NULL );
+		vk.render_pass.post_scene = VK_NULL_HANDLE;
 	}
 
 	if ( vk.render_pass.screenmap != VK_NULL_HANDLE ) {
@@ -6793,22 +6748,17 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 		vk.pipelines_count = 0;
 	}
 
-	if ( vk.gamma_pipeline ) {
-		qvkDestroyPipeline( vk.device, vk.gamma_pipeline, NULL );
-		vk.gamma_pipeline = VK_NULL_HANDLE;
-	}
-
 	if ( vk.capture_pipeline ) {
 		qvkDestroyPipeline( vk.device, vk.capture_pipeline, NULL );
 		vk.capture_pipeline = VK_NULL_HANDLE;
 	}
-	if ( vk.xr_output.pipeline ) {
-		qvkDestroyPipeline( vk.device, vk.xr_output.pipeline, NULL );
-		vk.xr_output.pipeline = VK_NULL_HANDLE;
-	}
 	if ( vk.xr_output.composite_pipeline ) {
 		qvkDestroyPipeline( vk.device, vk.xr_output.composite_pipeline, NULL );
 		vk.xr_output.composite_pipeline = VK_NULL_HANDLE;
+	}
+	if ( vk.gamma_composite_pipeline ) {
+		qvkDestroyPipeline( vk.device, vk.gamma_composite_pipeline, NULL );
+		vk.gamma_composite_pipeline = VK_NULL_HANDLE;
 	}
 	if ( vk.xr_output.screen_mono_pipeline ) {
 		qvkDestroyPipeline( vk.device, vk.xr_output.screen_mono_pipeline, NULL );
@@ -6819,16 +6769,9 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 		vk.xr_output.screen_capture_pipeline = VK_NULL_HANDLE;
 	}
 	for ( i = 0; i < 2; i++ ) {
-		qvkDestroyPipeline( vk.device, vk.gamma_pipeline_eye[i], NULL );
 		qvkDestroyPipeline( vk.device, vk.xr_output.screen_mirror_eye[i], NULL );
 		qvkDestroyPipeline( vk.device, vk.xr_output.eye_mirror[i], NULL );
-		vk.gamma_pipeline_eye[i] = vk.xr_output.screen_mirror_eye[i] = vk.xr_output.eye_mirror[i] = VK_NULL_HANDLE;
-	}
-
-
-	if ( vk.bloom_blend_pipeline != VK_NULL_HANDLE ) {
-		qvkDestroyPipeline( vk.device, vk.bloom_blend_pipeline, NULL );
-		vk.bloom_blend_pipeline = VK_NULL_HANDLE;
+		vk.xr_output.screen_mirror_eye[i] = vk.xr_output.eye_mirror[i] = VK_NULL_HANDLE;
 	}
 
 	for ( i = 0; i < ARRAY_LEN( vk.blur_pipeline ); i++ ) {
@@ -6900,7 +6843,6 @@ void vk_shutdown( refShutdownCode_t code )
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_storage, NULL);
 	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_post_process, NULL);
-	qvkDestroyPipelineLayout(vk.device, vk.pipeline_layout_blend, NULL);
 	qvkDestroyPipelineLayout( vk.device, vk.pipeline_layout_composite, NULL );
 
 #ifdef USE_VBO
@@ -7017,10 +6959,10 @@ void vk_shutdown( refShutdownCode_t code )
 
 	qvkDestroyShaderModule(vk.device, vk.modules.blur_extract_fs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.blur_fs, NULL);
-	qvkDestroyShaderModule(vk.device, vk.modules.blend_fs, NULL);
 
 	qvkDestroyShaderModule(vk.device, vk.modules.gamma_vs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.gamma_fs, NULL);
+	qvkDestroyShaderModule(vk.device, vk.modules.gamma_composite_fs, NULL);
 
 	{
 		VkShaderModule *module = (VkShaderModule *)&vk.modules.vert_mv;
@@ -7033,8 +6975,6 @@ void vk_shutdown( refShutdownCode_t code )
 		qvkDestroyShaderModule( vk.device, vk.modules.dot_total_fs_mv, NULL );
 		qvkDestroyShaderModule( vk.device, vk.modules.blur_extract_fs_mv, NULL );
 		qvkDestroyShaderModule( vk.device, vk.modules.blur_fs_mv, NULL );
-		qvkDestroyShaderModule( vk.device, vk.modules.blend_fs_mv, NULL );
-		qvkDestroyShaderModule( vk.device, vk.modules.gamma_fs_mv, NULL );
 		qvkDestroyShaderModule( vk.device, vk.modules.gamma_fs_array, NULL );
 		qvkDestroyShaderModule( vk.device, vk.modules.gamma_composite_fs_mv, NULL );
 	}
@@ -7523,7 +7463,6 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	VkPipelineMultisampleStateCreateInfo multisample_state;
 	VkPipelineColorBlendStateCreateInfo blend_state;
 	VkPipelineColorBlendAttachmentState attachment_blend_state;
-	VkPipelineColorBlendAttachmentState blend_attachments[2];
 	VkGraphicsPipelineCreateInfo create_info;
 	VkViewport viewport;
 	VkRect2D scissor;
@@ -7535,7 +7474,6 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	VkPipelineLayout layout;
 	VkSampleCountFlagBits samples;
 	const char *pipeline_name;
-	qboolean blend;
 
 	struct FragSpecData {
 		float gamma;
@@ -7557,14 +7495,11 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	} frag_spec_data;
 
 	switch ( program_index ) {
-	case VK_POST_EYE_LEFT:
-	case VK_POST_EYE_RIGHT:
 	case VK_POST_SCREEN_LEFT:
 	case VK_POST_SCREEN_RIGHT:
 	case VK_POST_EYE_MIRROR_LEFT:
 	case VK_POST_EYE_MIRROR_RIGHT:
-		pipeline = program_index < VK_POST_SCREEN_LEFT ? &vk.gamma_pipeline_eye[program_index - VK_POST_EYE_LEFT]
-				   : program_index < VK_POST_EYE_MIRROR_LEFT
+		pipeline = program_index < VK_POST_EYE_MIRROR_LEFT
 					   ? &vk.xr_output.screen_mirror_eye[program_index - VK_POST_SCREEN_LEFT]
 					   : &vk.xr_output.eye_mirror[program_index - VK_POST_EYE_MIRROR_LEFT];
 		fsmodule = vk.modules.gamma_fs_array;
@@ -7572,43 +7507,30 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 		layout = vk.pipeline_layout_post_process;
 		samples = VK_SAMPLE_COUNT_1_BIT;
 		pipeline_name = "eye layer desktop presentation";
-		blend = qfalse;
 		break;
-	case VK_POST_BLOOM_BLEND: // final bloom blend
-		pipeline = &vk.bloom_blend_pipeline;
-		fsmodule = vk.modules.blend_fs;
-		renderpass = vk.render_pass.post_bloom;
-		layout = vk.pipeline_layout_blend;
-		samples = vkSamples;
-		pipeline_name = "bloom blend pipeline";
-		blend = qtrue;
-		break;
-	case VK_POST_CAPTURE: // capture buffer extraction
+	case VK_POST_CAPTURE: // flatscreen screenshots: scene, bloom and gamma into the capture image
 		pipeline = &vk.capture_pipeline;
-		fsmodule = vk.modules.gamma_fs;
+		fsmodule = vk.modules.gamma_composite_fs;
 		renderpass = vk.render_pass.capture;
-		layout = vk.pipeline_layout_post_process;
+		layout = vk.pipeline_layout_composite;
 		samples = VK_SAMPLE_COUNT_1_BIT;
 		pipeline_name = "capture buffer pipeline";
-		blend = qfalse;
 		break;
-	case VK_POST_XR_COMPOSITE: // bloom blend and headset SDR output in one draw
+	case VK_POST_XR_COMPOSITE: // scene, bloom and headset SDR output in one draw
 		pipeline = &vk.xr_output.composite_pipeline;
 		fsmodule = vk.modules.gamma_composite_fs_mv;
 		renderpass = vk.xr_output.pass;
 		layout = vk.pipeline_layout_composite;
 		samples = VK_SAMPLE_COUNT_1_BIT;
 		pipeline_name = "XR bloom composite pipeline";
-		blend = qfalse;
 		break;
-	case VK_POST_XR_OUTPUT: // Headset SDR output, independent of desktop scRGB mode.
-		pipeline = &vk.xr_output.pipeline;
-		fsmodule = vk.modules.gamma_fs;
-		renderpass = vk.xr_output.pass;
-		layout = vk.pipeline_layout_post_process;
+	case VK_POST_DESKTOP_COMPOSITE: // flatscreen scene, bloom and gamma in one draw
+		pipeline = &vk.gamma_composite_pipeline;
+		fsmodule = vk.modules.gamma_composite_fs;
+		renderpass = vk.render_pass.gamma;
+		layout = vk.pipeline_layout_composite;
 		samples = VK_SAMPLE_COUNT_1_BIT;
-		pipeline_name = "XR SDR output pipeline";
-		blend = qfalse;
+		pipeline_name = "desktop bloom composite pipeline";
 		break;
 	case VK_POST_SCREEN_MONO:
 	case VK_POST_SCREEN_CAPTURE: // Already-processed virtual-screen content.
@@ -7619,27 +7541,15 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 		layout = vk.pipeline_layout_post_process;
 		samples = VK_SAMPLE_COUNT_1_BIT;
 		pipeline_name = "virtual screen presentation";
-		blend = qfalse;
 		break;
-	default: // gamma correction
-		pipeline = &vk.gamma_pipeline;
-		fsmodule = vk.modules.gamma_fs;
-		renderpass = vk.render_pass.gamma;
-		layout = vk.pipeline_layout_post_process;
-		samples = VK_SAMPLE_COUNT_1_BIT;
-		pipeline_name = "gamma-correction pipeline";
-		blend = qfalse;
-		break;
+	default:
+		ri.Error( ERR_FATAL, "%s: unknown post-process program %d", __func__, program_index );
+		return;
 	}
 
-	if ( vk.multiview ) {
-		if ( program_index == VK_POST_BLOOM_BLEND )
-			fsmodule = vk.modules.blend_fs_mv;
-		else if ( program_index == VK_POST_XR_OUTPUT )
-			fsmodule = vk.modules.gamma_fs_mv;
-		else if ( program_index != VK_POST_SCREEN_MONO && program_index != VK_POST_XR_COMPOSITE )
-			fsmodule = vk.modules.gamma_fs_array;
-	}
+	// the eye pass composite already has its multiview module; the other multiview outputs sample an array image
+	if ( vk.multiview && program_index != VK_POST_SCREEN_MONO && program_index != VK_POST_XR_COMPOSITE )
+		fsmodule = vk.modules.gamma_fs_array;
 
 	if ( *pipeline != VK_NULL_HANDLE ) {
 		vk_wait_idle();
@@ -7669,8 +7579,8 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	frag_spec_data.dither = r_dither->integer;
 	// Screenshot/video capture and headset output remain SDR.
 	frag_spec_data.hdr_mode =
-		(vk.hdrActive && program_index != VK_POST_CAPTURE && program_index != VK_POST_XR_OUTPUT &&
-		 program_index != VK_POST_XR_COMPOSITE && program_index != VK_POST_SCREEN_CAPTURE)
+		(vk.hdrActive && program_index != VK_POST_CAPTURE && program_index != VK_POST_XR_COMPOSITE &&
+		 program_index != VK_POST_SCREEN_CAPTURE)
 			? ( program_index >= VK_POST_EYE_MIRROR_LEFT ? 3 : 1 )
 			: 0;
 	// the eye pass writes through a UNORM view, so its output stays encoded
@@ -7684,14 +7594,11 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	// the HDR eye mirror reconstructs from the encoded eye image instead of presenting it as is
 	if ( frag_spec_data.hdr_mode == 3 )
 		frag_spec_data.screen_source = 0;
-	frag_spec_data.source_layer = program_index == VK_POST_EYE_RIGHT || program_index == VK_POST_SCREEN_RIGHT ||
-										  program_index == VK_POST_EYE_MIRROR_RIGHT
-									  ? 1
-									  : 0;
+	frag_spec_data.source_layer = program_index == VK_POST_SCREEN_RIGHT || program_index == VK_POST_EYE_MIRROR_RIGHT ? 1 : 0;
 
 	if ( !vk_surface_format_color_depth( vk.present_format.format, &frag_spec_data.depth_r, &frag_spec_data.depth_g, &frag_spec_data.depth_b ) )
 		ri.Printf( PRINT_ALL, "Format %s not recognized, dither to assume 8bpc\n", vk_format_string( vk.base_format.format ) );
-	if ( program_index == VK_POST_XR_OUTPUT || program_index == VK_POST_XR_COMPOSITE ) {
+	if ( program_index == VK_POST_XR_COMPOSITE ) {
 		frag_spec_data.depth_r = frag_spec_data.depth_g = frag_spec_data.depth_b = 255;
 	}
 
@@ -7774,9 +7681,9 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	//
 	// Viewport.
 	//
-	if ( program_index == VK_POST_GAMMA || program_index == VK_POST_SCREEN_MONO ||
-		program_index >= VK_POST_EYE_LEFT ) {
-		// gamma correction
+	if ( program_index == VK_POST_DESKTOP_COMPOSITE || program_index == VK_POST_SCREEN_MONO ||
+		program_index >= VK_POST_SCREEN_LEFT ) {
+		// window output
 		viewport.x = 0.0 + vk.blitX0;
 		viewport.y = 0.0 + vk.blitY0;
 		viewport.width = gls.windowWidth - vk.blitX0 * 2;
@@ -7835,13 +7742,7 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 
 	Com_Memset(&attachment_blend_state, 0, sizeof(attachment_blend_state));
 	attachment_blend_state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-	if ( blend ) {
-		attachment_blend_state.blendEnable = VK_TRUE;
-		attachment_blend_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-		attachment_blend_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-	} else {
-		attachment_blend_state.blendEnable = VK_FALSE;
-	}
+	attachment_blend_state.blendEnable = VK_FALSE;
 
 	blend_state.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
 	blend_state.pNext = NULL;
@@ -7849,18 +7750,8 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	blend_state.logicOpEnable = VK_FALSE;
 	blend_state.logicOp = VK_LOGIC_OP_COPY;
 
-	blend_attachments[0] = attachment_blend_state;
-
-	if ( program_index == VK_POST_BLOOM_BLEND && vk.hdrActive ) {
-		// post_bloom carries the emissive attachment; blend.frag must not write it
-		Com_Memset( &blend_attachments[1], 0, sizeof( blend_attachments[1] ) );
-		blend_attachments[1].blendEnable = VK_FALSE;
-		blend_attachments[1].colorWriteMask = 0;
-		blend_state.attachmentCount = 2;
-	} else {
-		blend_state.attachmentCount = 1;
-	}
-	blend_state.pAttachments = blend_attachments;
+	blend_state.attachmentCount = 1;
+	blend_state.pAttachments = &attachment_blend_state;
 	blend_state.blendConstants[0] = 0.0f;
 	blend_state.blendConstants[1] = 0.0f;
 	blend_state.blendConstants[2] = 0.0f;
@@ -7894,8 +7785,8 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	create_info.pColorBlendState = &blend_state;
 	mirror_dynamic.dynamicStateCount = ARRAY_LEN( mirror_states );
 	mirror_dynamic.pDynamicStates = mirror_states;
-	create_info.pDynamicState = (program_index == VK_POST_GAMMA || program_index == VK_POST_SCREEN_MONO ||
-								 program_index >= VK_POST_EYE_LEFT)
+	create_info.pDynamicState = (program_index == VK_POST_DESKTOP_COMPOSITE || program_index == VK_POST_SCREEN_MONO ||
+								 program_index >= VK_POST_SCREEN_LEFT)
 									? &mirror_dynamic
 									: NULL;
 	create_info.layout = layout;
@@ -7906,16 +7797,8 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 
 	VK_CHECK( qvkCreateGraphicsPipelines( vk.device, VK_NULL_HANDLE, 1, &create_info, NULL, pipeline ) );
 
-	switch ( program_index ) {
-	case VK_POST_XR_OUTPUT:
-		vk_create_mono_pipeline( &create_info, vk.mono.pass.output, &vk.mono.pipeline.output );
-		break;
-	case VK_POST_XR_COMPOSITE:
+	if ( program_index == VK_POST_XR_COMPOSITE )
 		vk_create_mono_pipeline( &create_info, vk.mono.pass.output, &vk.mono.pipeline.composite );
-		break;
-	default:
-		break;
-	}
 
 	SET_OBJECT_NAME( *pipeline, pipeline_name, VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT );
 }
@@ -8133,17 +8016,90 @@ static void push_attr( uint32_t location, uint32_t binding, VkFormat format )
 }
 
 
+static qboolean vk_blend_reads_destination( VkBlendFactor factor ) {
+	return factor == VK_BLEND_FACTOR_DST_COLOR || factor == VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR ||
+		   factor == VK_BLEND_FACTOR_DST_ALPHA || factor == VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA ||
+		   factor == VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
+}
+
+/* Post-scene draws blend into the scene image as they always did; their alpha instead tracks what they let through
+ * (whatever multiplies the destination), so the composite can add bloom underneath them. Exact for scalar
+ * multipliers, through the source's luminance for per-channel ones. Returns the shader's alpha mode. */
+static int vk_transmittance_blend( VkPipelineColorBlendAttachmentState *t ) {
+	const VkBlendFactor src = t->srcColorBlendFactor, dst = t->dstColorBlendFactor;
+	const qboolean srcAlphaColor = src == VK_BLEND_FACTOR_SRC_ALPHA || src == VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA ||
+								   dst == VK_BLEND_FACTOR_SRC_ALPHA || dst == VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	int mode = 0;
+	t->srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	t->alphaBlendOp = VK_BLEND_OP_ADD;
+	if ( t->colorWriteMask )
+		t->colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	if ( !t->blendEnable ) {
+		// opaque: none of the scene shows through
+		t->blendEnable = VK_TRUE;
+		t->srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+		t->dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+		t->colorBlendOp = VK_BLEND_OP_ADD;
+		t->dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+		return 0;
+	}
+	if ( src == VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR && dst == VK_BLEND_FACTOR_ONE ) {
+		// screen: the scene keeps one minus the source
+		t->dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		return 1;
+	}
+	if ( src == VK_BLEND_FACTOR_DST_COLOR && dst == VK_BLEND_FACTOR_ZERO ) {
+		// filter: the scene is multiplied by the source
+		t->dstAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+		return 1;
+	}
+	switch ( dst ) {
+		case VK_BLEND_FACTOR_ZERO:
+		case VK_BLEND_FACTOR_ONE:
+		case VK_BLEND_FACTOR_SRC_ALPHA:
+		case VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA:
+			t->dstAlphaBlendFactor = dst;
+			break;
+		case VK_BLEND_FACTOR_SRC_COLOR:
+		case VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR:
+			if ( srcAlphaColor ) {
+				// the color blend needs the real alpha, so the scene shows through unscaled
+				ri.Printf( PRINT_DEVELOPER, "post-scene blend %i/%i scales the scene per channel; bloom keeps it\n", src, dst );
+				t->dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+			} else {
+				t->dstAlphaBlendFactor = dst == VK_BLEND_FACTOR_SRC_COLOR ? VK_BLEND_FACTOR_SRC_ALPHA
+																		  : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+				mode = 1;
+			}
+			break;
+		default:
+			t->dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+			break;
+	}
+	if ( src == VK_BLEND_FACTOR_DST_COLOR ) {
+		// the destination is scaled by the source plus that factor (the skin shine); over the opaque stage below it
+		// the transmittance is already zero, so keeping it is exact there
+		t->dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		mode = 0;
+	} else if ( vk_blend_reads_destination( src ) || vk_blend_reads_destination( dst ) ) {
+		ri.Printf( PRINT_DEVELOPER, "post-scene blend %i/%i reads the scene; bloom keeps it\n", src, dst );
+		t->dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		mode = 0;
+	}
+	return mode;
+}
+
 VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassIndex, uint32_t def_index ) {
 	const qboolean multiview = VK_PassViewMask( vk.multiview, renderPassIndex ) != 0;
 	vkVertexModules_t *vertex = multiview ? &vk.modules.vert_mv : &vk.modules.vert;
 	VkShaderModule *vs_module = NULL;
 	VkShaderModule *fs_module = NULL;
 	//int32_t vert_spec_data[1]; // clippping
-	floatint_t frag_spec_data[19]; // 0:alpha-test-func, 1:alpha-test-value, 2:depth-fragment,
+	floatint_t frag_spec_data[14]; // 0:alpha-test-func, 1:alpha-test-value, 2:depth-fragment,
 								   // 3:alpha-to-coverage, 4:color_mode, 5:abs_light, 6:multitexture mode,
 								   // 7:discard mode, 8: ident.color, 9 - ident.alpha, 10 - acff,
-								   // 11..12: hud/desktop, 13..18: post-scene 2D eye output chain
-	VkSpecializationMapEntry spec_entries[20];
+								   // 11..12: hud/desktop, 13: post-scene transmittance output
+	VkSpecializationMapEntry spec_entries[15];
 	//VkSpecializationInfo vert_spec_info;
 	VkSpecializationInfo frag_spec_info;
 	VkPipelineVertexInputStateCreateInfo vertex_input_state;
@@ -8169,8 +8125,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	// choice below must agree with the blend-state attachmentCount decision
 	// or the pipeline gets an unconsumed location-1 output
 	const qboolean emissiveActive =
-		(renderPassIndex == RENDER_PASS_MAIN || renderPassIndex == RENDER_PASS_POST_BLOOM ||
-		 renderPassIndex == RENDER_PASS_MONO_MAIN) &&
+		(renderPassIndex == RENDER_PASS_MAIN || renderPassIndex == RENDER_PASS_MONO_MAIN ||
+		 VK_PassIsPostScene( renderPassIndex )) &&
 		vk.hdrActive;
 	const int fs_em = emissiveActive ? 0 : 1;
 
@@ -8611,22 +8567,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 							  vk.present_format.format == VK_FORMAT_R8G8B8A8_SRGB)
 							   ? 2
 							   : 1;
-	for ( uint32_t n = 13; n < 19; n++ ) {
-		spec_entries[n + 1].constantID = n;
-		spec_entries[n + 1].offset = n * sizeof( int32_t );
-		spec_entries[n + 1].size = sizeof( int32_t );
-	}
-	if ( VK_PassIsPostScene2D( renderPassIndex ) ) {
-		frag_spec_data[13].i = 1;
-		frag_spec_data[14].f = 1.0f / r_gamma->value;
-		frag_spec_data[15].f = (float)( 1 << tr.overbrightBits );
-		frag_spec_data[16].f = r_greyscale->value;
-		frag_spec_data[17].i = r_dither->integer;
-		frag_spec_data[18].i = ( state_bits & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) ) == 0;
-	}
-	frag_spec_info.mapEntryCount = 19;
+	spec_entries[14].constantID = 13;
+	spec_entries[14].offset = 13 * sizeof( int32_t );
+	spec_entries[14].size = sizeof( int32_t );
+	frag_spec_data[13].i = 0;
+	frag_spec_info.mapEntryCount = 14;
 	frag_spec_info.pMapEntries = spec_entries + 1;
-	frag_spec_info.dataSize = sizeof( int32_t ) * 19;
+	frag_spec_info.dataSize = sizeof( int32_t ) * 14;
 	frag_spec_info.pData = &frag_spec_data[0];
 	shader_stages[1].pSpecializationInfo = &frag_spec_info;
 
@@ -8988,7 +8935,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 
 	multisample_state.rasterizationSamples = (renderPassIndex == RENDER_PASS_SCREENMAP) ? vk.screenMapSamples : vkSamples;
 	if ( renderPassIndex == RENDER_PASS_HUD || VK_PassIsVRScreen( renderPassIndex ) ||
-		renderPassIndex == RENDER_PASS_DESKTOP || VK_PassIsPostScene2D( renderPassIndex ) ) {
+		renderPassIndex == RENDER_PASS_DESKTOP || VK_PassIsPostScene( renderPassIndex ) ) {
 		multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 	}
 
@@ -9150,29 +9097,39 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		}
 	}
 
-	if ( VK_PassIsPostScene2D( renderPassIndex ) && attachment_blend_state.colorWriteMask ) {
-		// eye alpha accumulates 2D coverage, which gates the HDR mirror's highlight reconstruction
-		// straight and premultiplied alpha blends both cover what they draw over
-		const qboolean over = !attachment_blend_state.blendEnable ||
-			( ( attachment_blend_state.srcColorBlendFactor == VK_BLEND_FACTOR_SRC_ALPHA ||
-				attachment_blend_state.srcColorBlendFactor == VK_BLEND_FACTOR_ONE ) &&
-			  attachment_blend_state.dstColorBlendFactor == VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA );
-		if ( !attachment_blend_state.blendEnable ) {
-			attachment_blend_state.blendEnable = VK_TRUE;
-			attachment_blend_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-			attachment_blend_state.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
-			attachment_blend_state.colorBlendOp = VK_BLEND_OP_ADD;
-			attachment_blend_state.alphaBlendOp = VK_BLEND_OP_ADD;
-		}
-		attachment_blend_state.srcAlphaBlendFactor = over ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ZERO;
-		attachment_blend_state.dstAlphaBlendFactor = over ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA : VK_BLEND_FACTOR_ONE;
-	}
-
 	blend_state.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
 	blend_state.pNext = NULL;
 	blend_state.flags = 0;
 	blend_state.logicOpEnable = VK_FALSE;
 	blend_state.logicOp = VK_LOGIC_OP_COPY;
+
+	if ( VK_PassIsPostScene( renderPassIndex ) ||
+		 ( def->scene_alpha == 3 && ( renderPassIndex == RENDER_PASS_MAIN || renderPassIndex == RENDER_PASS_MONO_MAIN ) ) ) {
+		// the shader's alpha feeds the scene image's transmittance, which gates bloom and HDR highlights in the
+		// composite; 2D drawn in the scene pass (bloom off, frames without a world) lowers it the same way
+		frag_spec_data[13].i = 1 + vk_transmittance_blend( &attachment_blend_state );
+	} else if ( renderPassIndex == RENDER_PASS_MAIN || renderPassIndex == RENDER_PASS_MONO_MAIN ) {
+		// the scene image's alpha is 1 after the scene: full transmittance until post-scene draws lower it.
+		// Stages feeding a later destination-alpha blend keep writing it, and their shader's last stage
+		// writes 1 back, through the shader when its own color blend doesn't read the alpha
+		switch ( def->scene_alpha ) {
+		case 1:
+			break;
+		case 2:
+			if ( attachment_blend_state.srcColorBlendFactor != VK_BLEND_FACTOR_SRC_ALPHA &&
+				 attachment_blend_state.srcColorBlendFactor != VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA &&
+				 attachment_blend_state.dstColorBlendFactor != VK_BLEND_FACTOR_SRC_ALPHA &&
+				 attachment_blend_state.dstColorBlendFactor != VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA )
+				frag_spec_data[11].i = 1;
+			attachment_blend_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+			attachment_blend_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+			attachment_blend_state.alphaBlendOp = VK_BLEND_OP_ADD;
+			break;
+		default:
+			attachment_blend_state.colorWriteMask &= ~VK_COLOR_COMPONENT_A_BIT;
+			break;
+		}
+	}
 
 	blend_attachments[0] = attachment_blend_state;
 
@@ -9242,18 +9199,16 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		create_info.renderPass = vk_hud.pass;
 	else if ( renderPassIndex == RENDER_PASS_SCREENMAP )
 		create_info.renderPass = vk.render_pass.screenmap;
-	else if ( renderPassIndex == RENDER_PASS_POST_SCENE_2D )
-		create_info.renderPass = vk.xr_output.pass;
-	else if ( renderPassIndex == RENDER_PASS_MONO_POST_SCENE_2D )
-		create_info.renderPass = vk.mono.pass.output;
 	else if ( renderPassIndex == RENDER_PASS_VR_SCREEN_EYE )
 		create_info.renderPass = vk.xr_output.pass;
-	else if ( renderPassIndex == RENDER_PASS_POST_BLOOM && vk.render_pass.post_bloom )
-		create_info.renderPass = vk.render_pass.post_bloom; // main carries a density map post-bloom lacks
+	else if ( renderPassIndex == RENDER_PASS_POST_SCENE && vk.render_pass.post_scene )
+		create_info.renderPass = vk.render_pass.post_scene;
+	else if ( renderPassIndex == RENDER_PASS_MONO_POST_SCENE && vk.mono.pass.post_scene )
+		create_info.renderPass = vk.mono.pass.post_scene;
 	else
 		create_info.renderPass = vk.render_pass.main;
 
-	create_info.subpass = ( VK_PassIsPostScene2D( renderPassIndex ) || renderPassIndex == RENDER_PASS_VR_SCREEN_EYE ) ? 1 : 0;
+	create_info.subpass = 0;
 	create_info.basePipelineHandle = VK_NULL_HANDLE;
 	create_info.basePipelineIndex = -1;
 
@@ -9568,7 +9523,9 @@ void vk_clear_color( const vec4_t color ) {
 	attachment.clearValue.color.float32[0] = color[0];
 	attachment.clearValue.color.float32[1] = color[1];
 	attachment.clearValue.color.float32[2] = color[2];
-	attachment.clearValue.color.float32[3] = color[3];
+	// the scene image's alpha is transmittance, not the caller's alpha: a clear hides the scene in the post-scene
+	// pass and is the scene elsewhere
+	attachment.clearValue.color.float32[3] = VK_PassIsPostScene( vk.renderPassIndex ) ? 0.0f : 1.0f;
 	attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
 	get_scissor_rect( &clear_rect.rect );
@@ -10294,6 +10251,8 @@ static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBu
 		// [2|3] - resolved emissive, optional (non-msaa: 2, msaa: 3)
 		// [4] - multisampled emissive, optional (msaa only)
 		Com_Memset( clear_values, 0, sizeof( clear_values ) );
+		// the scene image's alpha starts at full transmittance for the post-scene draws
+		clear_values[0].color.float32[3] = clear_values[2].color.float32[3] = 1.0f;
 #ifndef USE_REVERSED_DEPTH
 		clear_values[1].depthStencil.depth = 1.0;
 #endif
@@ -10349,22 +10308,20 @@ void vk_begin_main_render_pass( void )
 }
 
 
-void vk_begin_post_bloom_render_pass( void )
+static void vk_begin_post_scene_render_pass( void )
 {
-	VkFramebuffer frameBuffer = vk.framebuffers.post_bloom ? vk.framebuffers.post_bloom
-														   : vk.framebuffers.main[vk.cmd->swapchain_image_index];
+	const qboolean mono = vk_mono_source();
 
-	vk.renderPassIndex = RENDER_PASS_POST_BLOOM;
+	vk.renderPassIndex = mono ? RENDER_PASS_MONO_POST_SCENE : RENDER_PASS_POST_SCENE;
 
 	vk.renderWidth = vk.sceneWidth;
 	vk.renderHeight = vk.sceneHeight;
 
-	//vk.renderScaleX = (float)vk.renderWidth / (float)glConfig.vidWidth;
-	//vk.renderScaleY = (float)vk.renderHeight / (float)glConfig.vidHeight;
 	vk.renderScaleX = (float)vk.renderWidth / glConfig.vidWidth;
 	vk.renderScaleY = (float)vk.renderHeight / glConfig.vidHeight;
 
-	vk_begin_render_pass( vk.render_pass.post_bloom, frameBuffer, qtrue,
+	vk_begin_render_pass( mono ? vk.mono.pass.post_scene : vk.render_pass.post_scene,
+						  mono ? vk.mono.framebuffer.post_scene : vk.framebuffers.post_scene, qtrue,
 						  vk.renderWidth, vk.renderHeight );
 }
 
@@ -10683,7 +10640,7 @@ _retry:
 
 	backEnd.screenMapDone = qfalse;
 	vk.mono.sourceActive = vk.multiview && VK_XR_Screen() != NULL;
-	vk.postFlow = ( !vk.fboActive || !vk.xr_output.pass || !VK_XR_Drawing() ) ? VK_POST_FLOW_LEGACY
+	vk.postFlow = ( !vk.fboActive || !vk.multiview || !vk.xr_output.pass ) ? VK_POST_FLOW_LEGACY
 				  : vk.mono.sourceActive ? VK_POST_FLOW_SCREEN : VK_POST_FLOW_WORLD;
 	vk.postOpen = qfalse;
 
@@ -10769,8 +10726,11 @@ static void vk_post_process_push( VkPipelineLayout layout ) {
 		int32_t hdrCalibrate;
 		float paperWhite, hdrPeak, hdrHighlight, hdrSaturation;
 		float hdrSaturationFull, hdrSoftKnee;
+		int32_t bloomActive;
 	} push;
 	push.hdrCalibrate = (vk.hdrActive && r_hdrCalibrate->integer) ? 1 : 0;
+	// the blur ran this frame exactly when the post-scene pass opened
+	push.bloomActive = vk.postOpen ? 1 : 0;
 #ifdef __APPLE__
 	/* EDR is SDR-white-relative, so both values stay on the paper-white/80 scale. */
 	{
@@ -10811,15 +10771,14 @@ static void vk_render_scope_bands( void ) {
 	Com_Memset( colors, 0, sizeof( colors ) );
 	Com_Memset( rects, 0, sizeof( rects ) );
 	colors[0].aspectMask = colors[1].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	colors[0].clearValue.color.float32[3] = 1;
+	// black; in the post-scene pass zero alpha also keeps bloom out of the bands
+	colors[0].clearValue.color.float32[3] = VK_PassIsPostScene( vk.renderPassIndex ) ? 0.0f : 1.0f;
 	colors[1].colorAttachment = 1;
 	rects[0].rect.extent.width = rects[1].rect.extent.width = vk.sceneWidth;
 	rects[0].rect.extent.height = rects[1].rect.extent.height = band;
 	rects[1].rect.offset.y = vk.sceneHeight - band;
 	rects[0].layerCount = rects[1].layerCount = 1;
-	qvkCmdClearAttachments( vk.cmd->command_buffer,
-							( vk.hdrActive && !VK_PassIsPostScene2D( vk.renderPassIndex ) ) ? 2 : 1, colors, 2,
-							rects );
+	qvkCmdClearAttachments( vk.cmd->command_buffer, vk.hdrActive ? 2 : 1, colors, 2, rects );
 }
 
 static void vk_screen_mip_barrier( uint32_t base, uint32_t count, VkImageLayout oldLayout, VkImageLayout newLayout,
@@ -11152,11 +11111,10 @@ static void vk_draw_desktop_mirror( void ) {
 	for ( i = 0; i < plan.count; i++ ) {
 		const vkMirrorDraw_t *draw = &plan.draw[i];
 		if ( !plan.mono ) {
-			/* A virtual-screen or direct-mode source is already processed, so it presents linear/encoded; FBO world views need gamma. */
+			/* Every mirror source is already processed; the world eye image also reconstructs HDR highlights. */
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 								vk.postFlow == VK_POST_FLOW_WORLD ? vk.xr_output.eye_mirror[draw->layer]
-								: ( VK_XR_Screen() || vk.xrDirect ) ? vk.xr_output.screen_mirror_eye[draw->layer]
-																	: vk.gamma_pipeline_eye[draw->layer] );
+																   : vk.xr_output.screen_mirror_eye[draw->layer] );
 		}
 		viewport.x = draw->viewport[0];
 		viewport.y = draw->viewport[1];
@@ -11208,11 +11166,17 @@ static void vk_draw_tracking_status( void ) {
 	vk.renderPassIndex = savedPass;
 }
 
+/* The acquired eye image the eye pass writes, or eye_count for the intermediate; the index is stale while the headset draws nothing. */
+static uint32_t vk_eye_output_index( void ) {
+	const uint32_t index = VK_XR_AcquiredIndex();
+	return ( VK_XR_Drawing() && vk.xr_output.eye_pass && index < vk.xr_output.eye_count ) ? index : vk.xr_output.eye_count;
+}
+
 /* After the eye pass ends: screenshot and desktop mirror from the eye image, then hand it to the runtime. */
 static void vk_finish_eye_frame( qboolean world )
 {
-	const uint32_t index = VK_XR_AcquiredIndex();
-	const qboolean direct = vk.xr_output.eye_pass && index < vk.xr_output.eye_count;
+	const uint32_t index = vk_eye_output_index();
+	const qboolean direct = index < vk.xr_output.eye_count;
 	const VkImage image = direct ? vk.xr_output.eye_image[index] : vk.xr_output.image;
 	const VkImageLayout layout = direct ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 	VkDescriptorSet *eye = direct ? &vk.xr_output.eye_descriptor[index] : &vk.xr_output.descriptor;
@@ -11245,8 +11209,8 @@ static void vk_finish_eye_frame( qboolean world )
 		vk_begin_render_pass( vk.render_pass.gamma, vk.framebuffers.gamma[ vk.cmd->swapchain_image_index ], qfalse, vk.renderWidth, vk.renderHeight );
 		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 							world ? vk.xr_output.eye_mirror[0] : vk.xr_output.screen_mirror_eye[0] );
+		// the world's HDR mirror reconstructs from the eye image and the emissive layer; the composition has no emitters
 		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, eye, 0, NULL );
-		// the world's HDR mirror reconstructs highlights from the emissive layer; the composition has none
 		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 1, 1,
 								  world ? &vk.emissive_descriptor : eye, 0, NULL );
 		vk_post_process_push( vk.pipeline_layout_post_process );
@@ -11298,8 +11262,8 @@ void vk_end_frame( void )
 	if ( vk.postFlow == VK_POST_FLOW_SCREEN )
 	{
 		const vrScreenGeometry_t *screen = VK_XR_Screen();
-		const uint32_t index = VK_XR_AcquiredIndex();
-		const qboolean direct = vk.xr_output.eye_pass && index < vk.xr_output.eye_count;
+		const uint32_t index = vk_eye_output_index();
+		const qboolean direct = index < vk.xr_output.eye_count;
 		const VkFormatProperties properties = vk.screenFormatProperties;
 		VkClearAttachment black;
 		VkClearRect rect;
@@ -11310,7 +11274,7 @@ void vk_end_frame( void )
 			tess.shader = NULL;
 		}
 		vk.cmd->last_pipeline = VK_NULL_HANDLE;
-		vk_begin_screen_post_pass(); // catch: frames without a 2D pass
+		vk_begin_post_scene_pass(); // catch: frames without a 2D pass
 		RB_RenderDeferredFlares();
 		RB_DrawDeferredHud();
 		vk_render_scope_bands();
@@ -11326,16 +11290,24 @@ void vk_end_frame( void )
 			ri.Error( ERR_DROP, "Virtual screen color format does not support capture blit" );
 			return;
 		}
-		vk_capture_screen_source( vk.xr_output.image, properties );
-		/* Screen metadata remains live, but the composition consumes stereo output. */
-		vk.mono.sourceActive = qfalse;
 
+		// the mono output pass composites the mono scene, its bloom and gamma into the screen source
 		vk.renderWidth = vk.sceneWidth;
 		vk.renderHeight = vk.sceneHeight;
 		vk.renderScaleX = (float)vk.sceneWidth / glConfig.vidWidth;
 		vk.renderScaleY = (float)vk.sceneHeight / glConfig.vidHeight;
+		vk_begin_render_pass( vk.mono.pass.output, vk.mono.framebuffer.output, qfalse, vk.sceneWidth, vk.sceneHeight );
+		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.mono.pipeline.composite );
+		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_composite, 0, 1, &vk.composite_descriptor, 0, NULL );
+		vk_post_process_push( vk.pipeline_layout_composite );
+		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
+		vk_end_render_pass();
+		vk_capture_screen_source( vk.xr_output.image, properties );
+		/* Screen metadata remains live, but the composition consumes stereo output. */
+		vk.mono.sourceActive = qfalse;
+
 		vk_begin_render_pass( direct ? vk.xr_output.eye_pass : vk.xr_output.pass,
-							  direct ? vk.xr_output.eye_framebuffer[index] : vk.xr_output.framebuffer, qtrue,
+							  direct ? vk.xr_output.eye_framebuffer[index] : vk.xr_output.framebuffer, qfalse,
 							  vk.sceneWidth, vk.sceneHeight );
 		Com_Memset( &black, 0, sizeof( black ) );
 		Com_Memset( &rect, 0, sizeof( rect ) );
@@ -11345,7 +11317,6 @@ void vk_end_frame( void )
 		rect.rect.extent.height = vk.sceneHeight;
 		rect.layerCount = 1;
 		qvkCmdClearAttachments( vk.cmd->command_buffer, 1, &black, 1, &rect );
-		qvkCmdNextSubpass( vk.cmd->command_buffer, VK_SUBPASS_CONTENTS_INLINE );
 		vk.renderPassIndex = RENDER_PASS_VR_SCREEN_EYE;
 		vk_foveation_invalidate_rate();
 		vk_hud_invalidate_caches();
@@ -11355,29 +11326,42 @@ void vk_end_frame( void )
 	}
 	else if ( vk.postFlow == VK_POST_FLOW_WORLD )
 	{
+		const uint32_t index = vk_eye_output_index();
+		const qboolean direct = index < vk.xr_output.eye_count;
+
 		// a 2D batch still pending when the frame ends without a swap
 		if ( tess.numIndexes ) {
 			RB_EndSurface();
 			tess.shader = NULL;
 		}
 		vk.cmd->last_pipeline = VK_NULL_HANDLE;
-		vk_begin_eye_post_pass(); // catch: frames without a 2D pass
+		vk_begin_post_scene_pass(); // catch: frames without a 2D pass
 		RB_RenderDeferredFlares();
 		RB_DrawDeferredHud();
 		vk_render_scope_bands();
+		vk_end_render_pass();
+
+		// the eye pass composites the finished scene image, its bloom and gamma
+		vk.renderWidth = vk.sceneWidth;
+		vk.renderHeight = vk.sceneHeight;
+		vk.renderScaleX = (float)vk.sceneWidth / glConfig.vidWidth;
+		vk.renderScaleY = (float)vk.sceneHeight / glConfig.vidHeight;
+		vk_begin_render_pass( direct ? vk.xr_output.eye_pass : vk.xr_output.pass,
+							  direct ? vk.xr_output.eye_framebuffer[index] : vk.xr_output.framebuffer, qfalse,
+							  vk.sceneWidth, vk.sceneHeight );
+		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.xr_output.composite_pipeline );
+		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_composite, 0, 1, &vk.composite_descriptor, 0, NULL );
+		vk_post_process_push( vk.pipeline_layout_composite );
+		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 		vk_end_render_pass();
 		vk_finish_eye_frame( qtrue );
 	}
 	else if ( vk.fboActive )
 	{
-		vk.cmd->last_pipeline = VK_NULL_HANDLE; // do not restore clobbered descriptors in vk_bloom()
+		vk.cmd->last_pipeline = VK_NULL_HANDLE; // the post-scene pass rebinds everything
+		vk_begin_post_scene_pass(); // catch: frames without a 2D pass
 
-		if ( r_bloom->integer )
-		{
-			vk_bloom();
-		}
-
-		RB_RenderDeferredFlares(); // catch: draw coronas even if no 2D pass ran
+		RB_RenderDeferredFlares();
 		RB_DrawDeferredHud();
 		vk_render_scope_bands();
 
@@ -11385,15 +11369,11 @@ void vk_end_frame( void )
 		{
 			vk_end_render_pass();
 
-			// render to capture FBO
+			// composite the scene, bloom and gamma into the capture image
 			vk_begin_render_pass( vk.render_pass.capture, vk.framebuffers.capture, qfalse, gls.captureWidth, gls.captureHeight );
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.capture_pipeline );
-			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
-			// gamma_fs always declares texture1 (set 1); bind it even though the
-			// capture pass runs SDR (hdrMode 0) and never samples it
-			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 1, 1, &vk.emissive_descriptor, 0, NULL );
-
-			vk_post_process_push( vk.pipeline_layout_post_process );
+			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_composite, 0, 1, &vk.composite_descriptor, 0, NULL );
+			vk_post_process_push( vk.pipeline_layout_composite );
 			qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 		}
 
@@ -11410,11 +11390,10 @@ void vk_end_frame( void )
 			vk.renderScaleY = 1.0;
 
 			vk_begin_render_pass( vk.render_pass.gamma, vk.framebuffers.gamma[ vk.cmd->swapchain_image_index ], qfalse, vk.renderWidth, vk.renderHeight );
-			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.gamma_pipeline );
-			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
-			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 1, 1, &vk.emissive_descriptor, 0, NULL );
+			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.gamma_composite_pipeline );
+			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_composite, 0, 1, &vk.composite_descriptor, 0, NULL );
 
-			vk_post_process_push( vk.pipeline_layout_post_process );
+			vk_post_process_push( vk.pipeline_layout_composite );
 			vk_draw_desktop_mirror();
 			vk_draw_tracking_status();
 		}
@@ -11422,6 +11401,8 @@ void vk_end_frame( void )
 	else if ( vk.xrDirect )
 	{
 		struct vkXRDirectTarget_s *t = vk_xr_direct_target();
+		const qboolean capture = backEnd.screenshotMask && vk.capture.image;
+		const qboolean sampled = capture || !ri.CL_IsMinimized();
 
 		vk.cmd->last_pipeline = VK_NULL_HANDLE;
 
@@ -11433,6 +11414,21 @@ void vk_end_frame( void )
 
 		vk_end_render_pass();
 
+		// the finished eye image, or idle while no headset image is acquired, feeds the screenshot and the mirror
+		if ( sampled )
+			record_image_layout_transition( vk.cmd->command_buffer, t->image, VK_IMAGE_ASPECT_COLOR_BIT,
+				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
+		if ( capture )
+		{
+			vk_begin_render_pass( vk.render_pass.capture, vk.framebuffers.capture, qfalse, gls.captureWidth, gls.captureHeight );
+			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.xr_output.screen_capture_pipeline );
+			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &t->descriptor, 0, NULL );
+			// gamma_fs declares texture1; the capture runs SDR and never samples it
+			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 1, 1, &t->descriptor, 0, NULL );
+			vk_post_process_push( vk.pipeline_layout_post_process );
+			qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
+			vk_end_render_pass();
+		}
 		if ( !ri.CL_IsMinimized() )
 		{
 			vk.renderWidth = gls.windowWidth;
@@ -11441,8 +11437,6 @@ void vk_end_frame( void )
 			vk_gpu_time_stamp( vk.cmd->command_buffer, 2 );
 			vk.cmd->gpu_time_mirror = vk.cmd->gpu_time_armed;
 
-			record_image_layout_transition( vk.cmd->command_buffer, t->image, VK_IMAGE_ASPECT_COLOR_BIT,
-				VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
 			vk_begin_render_pass( vk.render_pass.gamma, vk.framebuffers.gamma[ vk.cmd->swapchain_image_index ], qfalse, vk.renderWidth, vk.renderHeight );
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.xr_output.screen_mirror_eye[0] );
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1, &t->descriptor, 0, NULL );
@@ -11454,11 +11448,11 @@ void vk_end_frame( void )
 			vk_end_render_pass();
 			if ( vk.cmd->gpu_time_mirror )
 				vk_gpu_time_stamp( vk.cmd->command_buffer, 3 );
-
-			// xrReleaseSwapchainImage requires the attachment layout
+		}
+		// xrReleaseSwapchainImage requires the attachment layout
+		if ( sampled )
 			record_image_layout_transition( vk.cmd->command_buffer, t->image, VK_IMAGE_ASPECT_COLOR_BIT,
 				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 0, 0 );
-		}
 
 		if ( VK_XR_Drawing() )
 			VK_XR_Rendered();
@@ -11635,17 +11629,13 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 	VK_CHECK( qvkWaitForFences( vk.device, 1, &vk.cmd->rendering_finished_fence, VK_FALSE, 1e12 ) );
 
 	if ( vk.fboActive ) {
-		if ( vk.capture.image ) {
-			// dedicated capture buffer
-			srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-			srcImage = vk.capture.image;
-		} else {
-			srcImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-			srcImage = vk.color_image;
-		}
+		// the composited frame, already at the capture size
+		srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		srcImage = vk.capture.image;
 	} else if ( vk.xrDirect ) {
-		Com_Memset( buffer, 0, width * height * 3 );
-		return;
+		// the left eye, drawn into the capture image at the end of the frame
+		srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+		srcImage = vk.capture.image;
 	} else {
 		srcImageLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 		srcImage = vk.swapchain_images[ vk.cmd->swapchain_image_index ];
@@ -11879,173 +11869,28 @@ static void vk_bloom_blur( void )
 	}
 }
 
-/* VR stereo world frames finish in the eye output pass: subpass 0 composites the scene, subpass 1 takes post-scene 2D. */
-void vk_begin_eye_post_pass( void )
+/* Ends the scene pass once bloom has blurred and opens the post-scene pass over the resolved image, where coronas
+ * and 2D blend before gamma and leave their transmittance in alpha. Without bloom the scene pass keeps them. */
+void vk_begin_post_scene_pass( void )
 {
-	const uint32_t index = VK_XR_AcquiredIndex();
-	const qboolean direct = vk.xr_output.eye_pass && index < vk.xr_output.eye_count;
-	const qboolean bloom = r_bloom->integer && backEnd.doneSurfaces;
-
-	if ( vk.postOpen )
+	if ( vk.postOpen || vk.renderPassIndex == RENDER_PASS_SCREENMAP )
 		return;
-
-	vk_end_render_pass(); // end main
-	if ( bloom ) {
-		vk_gpu_time_stamp( vk.cmd->command_buffer, 6 );
-		vk_bloom_blur();
-		vk_gpu_time_stamp( vk.cmd->command_buffer, 8 );
-	}
-
-	// the blur passes leave their own extent behind; scene draws in subpass 1 need the eye's
-	vk.renderWidth = vk.sceneWidth;
-	vk.renderHeight = vk.sceneHeight;
-	vk.renderScaleX = (float)vk.renderWidth / glConfig.vidWidth;
-	vk.renderScaleY = (float)vk.renderHeight / glConfig.vidHeight;
-
-	vk_begin_render_pass( direct ? vk.xr_output.eye_pass : vk.xr_output.pass,
-						  direct ? vk.xr_output.eye_framebuffer[index] : vk.xr_output.framebuffer, qtrue,
-						  vk.sceneWidth, vk.sceneHeight );
-	// the composite writes zero coverage for the HDR mirror; with bloom off it is built without the bloom term
-	if ( bloom || !r_bloom->integer ) {
-		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.xr_output.composite_pipeline );
-		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-								  vk.pipeline_layout_composite, 0, 1, &vk.composite_descriptor, 0, NULL );
-		vk_post_process_push( vk.pipeline_layout_composite );
-	} else {
-		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.xr_output.pipeline );
-		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-								  vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
-		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-								  vk.pipeline_layout_post_process, 1, 1, &vk.emissive_descriptor, 0, NULL );
-		vk_post_process_push( vk.pipeline_layout_post_process );
-	}
-	qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
-	qvkCmdNextSubpass( vk.cmd->command_buffer, VK_SUBPASS_CONTENTS_INLINE );
-
-	vk.renderPassIndex = RENDER_PASS_POST_SCENE_2D;
-	// the composite bound other layouts, so scene draws rebind everything
-	vk_foveation_invalidate_rate();
-	vk_hud_invalidate_caches();
-	vk_update_mvp( NULL );
-
-	backEnd.doneBloom = qtrue;
-	vk.postOpen = qtrue;
-}
-
-/* Menu and virtual-screen frames finish their mono capture in the two-subpass output pass. */
-void vk_begin_screen_post_pass( void )
-{
-	const qboolean bloom = r_bloom->integer && backEnd.doneSurfaces;
-
-	if ( vk.postOpen )
+	if ( !r_bloom->integer || !backEnd.doneSurfaces || !vk.fboActive )
 		return;
-
-	vk_end_render_pass(); // end mono main
-	if ( bloom ) {
-		vk_gpu_time_stamp( vk.cmd->command_buffer, 6 );
-		vk_bloom_blur();
-		vk_gpu_time_stamp( vk.cmd->command_buffer, 8 );
-	}
-
-	// the blur passes leave their own extent behind; 2D in subpass 1 needs the scene's
-	vk.renderWidth = vk.sceneWidth;
-	vk.renderHeight = vk.sceneHeight;
-	vk.renderScaleX = (float)vk.renderWidth / glConfig.vidWidth;
-	vk.renderScaleY = (float)vk.renderHeight / glConfig.vidHeight;
-
-	vk_begin_render_pass( vk.mono.pass.output, vk.mono.framebuffer.output, qtrue, vk.sceneWidth, vk.sceneHeight );
-	if ( bloom || !r_bloom->integer ) {
-		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.mono.pipeline.composite );
-		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-								  vk.pipeline_layout_composite, 0, 1, &vk.composite_descriptor, 0, NULL );
-		vk_post_process_push( vk.pipeline_layout_composite );
-	} else {
-		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.mono.pipeline.output );
-		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-								  vk.pipeline_layout_post_process, 0, 1, &vk.color_descriptor, 0, NULL );
-		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-								  vk.pipeline_layout_post_process, 1, 1, &vk.emissive_descriptor, 0, NULL );
-		vk_post_process_push( vk.pipeline_layout_post_process );
-	}
-	qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
-	qvkCmdNextSubpass( vk.cmd->command_buffer, VK_SUBPASS_CONTENTS_INLINE );
-
-	vk.renderPassIndex = RENDER_PASS_MONO_POST_SCENE_2D;
-	// the composite bound other layouts, so scene draws rebind everything
-	vk_foveation_invalidate_rate();
-	vk_hud_invalidate_caches();
-	vk_update_mvp( NULL );
-
-	backEnd.doneBloom = qtrue;
-	vk.postOpen = qtrue;
-}
-
-qboolean vk_bloom( void )
-{
-	uint32_t i;
-
-	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP )
-	{
-		return qfalse;
-	}
-
-	if ( backEnd.doneBloom || !backEnd.doneSurfaces || !vk.fboActive )
-	{
-		return qfalse;
-	}
 
 	vk_end_render_pass(); // end main
 	vk_gpu_time_stamp( vk.cmd->command_buffer, 6 );
 	vk_bloom_blur();
 	vk_gpu_time_stamp( vk.cmd->command_buffer, 8 );
 
-	vk_begin_post_bloom_render_pass(); // begin post-bloom
-	{
-		VkDescriptorSet dset[VK_NUM_BLOOM_PASSES];
+	// coronas and 2D blend into the scene image here; the composite adds bloom underneath them
+	vk_begin_post_scene_render_pass();
 
-		for ( i = 0; i < VK_NUM_BLOOM_PASSES; i++ )
-		{
-			dset[i] = vk.bloom_image_descriptor[(i+1)*2];
-		}
-
-		// blend downscaled buffers to main fbo
-		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-							vk.bloom_blend_pipeline );
-		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_blend, 0, ARRAY_LEN(dset), dset, 0, NULL );
-		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
-	}
-
-	if ( vk.cmd->last_pipeline != VK_NULL_HANDLE )
-	{
-		// restore last pipeline
-		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.cmd->last_pipeline );
-
-		vk_update_mvp( NULL );
-
-		// force depth range and viewport/scissor updates
-		vk.cmd->depth_range = DEPTH_RANGE_COUNT;
-
-		// restore clobbered descriptor sets
-		for ( i = 0; i < VK_NUM_BLOOM_PASSES; i++ ) {
-			if ( vk.cmd->descriptor_set.current[i] != VK_NULL_HANDLE ) {
-				if ( i == VK_DESC_UNIFORM /*|| i == VK_DESC_STORAGE*/ ) {
-					uint32_t offsets[2] = {vk.cmd->descriptor_set.offset[i], vk.cmd->view_offset};
-					qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-											  vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i],
-											  vk.multiview ? 2 : 1, offsets );
-				} else
-					qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], 0, NULL );
-			}
-		}
-	}
-
-	/* Postprocessing uses incompatible descriptor layouts; with no pipeline to
-	 * restore, the cached scene bindings are invalid. */
-	if ( vk.cmd->last_pipeline == VK_NULL_HANDLE ) {
-		vk_hud_invalidate_caches();
-	}
+	// the blur bound other layouts and the scene pipelines don't fit this pass, so draws rebind everything
+	vk_foveation_invalidate_rate();
+	vk_hud_invalidate_caches();
+	vk_update_mvp( NULL );
 
 	backEnd.doneBloom = qtrue;
-
-	return qtrue;
+	vk.postOpen = qtrue;
 }

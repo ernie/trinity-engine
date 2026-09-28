@@ -3403,6 +3403,7 @@ static shader_t *FinishShader( void ) {
 
 	{
 		Vk_Pipeline_Def def;
+		int lastReader = -1;
 
 		Com_Memset( &def, 0, sizeof( def ) );
 		def.face_culling = shader.cullType;
@@ -3412,12 +3413,27 @@ static shader_t *FinishShader( void ) {
 			def.allow_discard = 1;
 		}
 
+		// the scene image's alpha carries transmittance for bloom, so only stages feeding a later
+		// destination-alpha blend write it, and the shader's last stage puts it back to 1
+		for ( i = 0; i < stage; i++ ) {
+			const uint32_t src = stages[i].stateBits & GLS_SRCBLEND_BITS;
+			const uint32_t dst = stages[i].stateBits & GLS_DSTBLEND_BITS;
+			if ( src == GLS_SRCBLEND_DST_ALPHA || src == GLS_SRCBLEND_ONE_MINUS_DST_ALPHA || src == GLS_SRCBLEND_ALPHA_SATURATE ||
+				 dst == GLS_DSTBLEND_DST_ALPHA || dst == GLS_DSTBLEND_ONE_MINUS_DST_ALPHA )
+				lastReader = i;
+		}
+
 		for ( i = 0; i < stage; i++ ) {
 			int env_mask;
 			shaderStage_t *pStage = &stages[i];
 			def.state_bits = pStage->stateBits;
 			def.hud_coverage = VK_HudCoverage( shader.lightmapIndex == LIGHTMAP_2D,
 				stages[0].stateBits, pStage->stateBits );
+			// 2D materials lower the transmittance wherever they draw, in the scene pass too
+			def.scene_alpha = shader.lightmapIndex == LIGHTMAP_2D ? 3
+							  : i < lastReader					   ? 1
+							  : ( lastReader >= 0 && i == stage - 1 ) ? 2
+																	  : 0;
 
 			if ( pStage->mtEnv3 ) {
 				switch ( pStage->mtEnv3 ) {

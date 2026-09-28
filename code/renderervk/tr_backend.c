@@ -1320,16 +1320,8 @@ static void RB_Begin2D( void ) {
 	if ( vk_hud_recording() || vk.renderPassIndex == RENDER_PASS_DESKTOP ) {
 		return;
 	}
-	// the eye pass opens only after the world, which renders into the pass before it
-	if ( vk.postFlow != VK_POST_FLOW_LEGACY ) {
-		if ( !backEnd.doneSurfaces )
-			return;
-		if ( vk.postFlow == VK_POST_FLOW_WORLD )
-			vk_begin_eye_post_pass();
-		else
-			vk_begin_screen_post_pass();
-	} else if ( r_bloom->integer )
-		vk_bloom();
+	if ( vk.fboActive )
+		vk_begin_post_scene_pass();
 	RB_RenderDeferredFlares();
 	RB_DrawDeferredHud();
 #endif

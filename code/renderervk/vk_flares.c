@@ -823,8 +823,8 @@ void RB_RenderFlares( void ) {
 		return;
 	}
 
-	// probes read world depth, which post-scene 2D doesn't have
-	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP || VK_PassIsPostScene2D( vk.renderPassIndex ) ) {
+	// probes read world depth, which the post-scene pass doesn't have
+	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP || VK_PassIsPostScene( vk.renderPassIndex ) ) {
 		return;
 	}
 
@@ -915,7 +915,7 @@ void RB_RenderFlares( void ) {
 RB_RenderDeferredFlares
 
 Draws main-view (PV_NONE) coronas once per frame at the 3D->2D boundary, after
-vk_bloom()'s bright-pass, so coronas aren't re-bloomed. doneFlares guards the once-per-frame.
+the bloom blur has read the scene, so coronas aren't bloomed. doneFlares guards the once-per-frame.
 ==================
 */
 void RB_RenderDeferredFlares( void ) {

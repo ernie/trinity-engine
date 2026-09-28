@@ -2,7 +2,6 @@ vert color_vert_spv  color.vert mv
 vert dot_vert_spv    dot.vert mv
 vert fog_vert_spv    fog.vert mv
 vert gamma_vert_spv  gamma.vert -
-frag blend_frag_spv  blend.frag mv
 frag blur_frag_spv   blur.frag mv
 frag blur_extract_frag_spv blur.frag mv -DUSE_EXTRACT
 frag color_frag_spv  color.frag -
@@ -12,7 +11,7 @@ frag floor_grid_frag_spv floor_grid.frag -
 frag virtualscreen_frag_spv virtualscreen.frag -
 frag virtualreflect_frag_spv virtualreflect.frag -
 frag fog_frag_spv    fog.frag -
-frag gamma_frag_spv  gamma.frag mv+array
+frag gamma_frag_spv  gamma.frag array
 frag gamma_composite_frag_spv gamma.frag mv -DUSE_BLOOM_COMPOSITE
 frag foveationdebug_frag_spv foveationdebug.frag -
 frag foveationdensity_frag_spv foveationdensity.frag -

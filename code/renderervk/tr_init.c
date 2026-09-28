@@ -1093,13 +1093,6 @@ static void R_ScreenShot_f( void ) {
 	int			typeMask;
 	const char	*ext;
 
-#ifdef USE_VULKAN
-	if ( vk.xrDirect ) {
-		ri.Printf( PRINT_WARNING, "Screenshots read the scene framebuffer; set \\r_fbo 1 and \\vid_restart to take one\n" );
-		return;
-	}
-#endif
-
 	if ( ri.CL_IsMinimized() && !RE_CanMinimize() ) {
 		ri.Printf( PRINT_WARNING, "WARNING: unable to take screenshot when minimized because FBO is not available/enabled.\n" );
 		return;

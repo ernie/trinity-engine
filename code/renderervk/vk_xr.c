@@ -137,6 +137,11 @@ qboolean VK_XR_Drawing( void ) {
 	return active && xr.renderable && !failed;
 }
 
+/* Until the runtime says the session is on the display, a frame's head pose may be a placeholder at the origin. */
+static qboolean VKXR_Shown( void ) {
+	return xr.state == XR_SESSION_STATE_VISIBLE || xr.state == XR_SESSION_STATE_FOCUSED;
+}
+
 void VK_XR_SetVirtualScreen( qboolean enabled, qboolean menuYawLocked, refXRFrame_t *frame ) {
 	/* Frames run before the session goes active, ahead of the cvar lookup. */
 	float curvature = screenCurvature ? screenCurvature->value : VR_SCREEN_REFERENCE_CURVATURE;
@@ -146,8 +151,9 @@ void VK_XR_SetVirtualScreen( qboolean enabled, qboolean menuYawLocked, refXRFram
 	}
 	/* Locked menu yaw (timeline scrub) holds the screen still instead of re-following the head. */
 	follow = virtualScreenMode && virtualScreenMode->integer == 1 && !menuYawLocked;
+	/* the screen takes its size and place from the head when it anchors, so it waits for a real pose */
 	VR_ScreenUpdate( &screenAnchor, &screenGeometry, frame->head.position, frame->head.orientation,
-					 enabled && frame->renderable, follow, curvature );
+					 enabled && frame->renderable && ( screenAnchor.initialized || VKXR_Shown() ), follow, curvature );
 	frame->screen = screenGeometry;
 }
 const vrScreenGeometry_t *VK_XR_Screen( void ) {
@@ -593,7 +599,7 @@ int VK_XR_BeginFrame( refXRFrame_t *frame ) {
 		XrPosef center = VKXR_CenterPose();
 		Com_Memcpy( frame->head.position, &center.position, sizeof( frame->head.position ) );
 		Com_Memcpy( frame->head.orientation, &center.orientation, sizeof( frame->head.orientation ) );
-		if ( VK_XRVK_ConsumeSpaceChange( &xr ) ) {
+		if ( VKXR_Shown() && VK_XRVK_ConsumeSpaceChange( &xr ) ) {
 			/* Rebase STAGE beneath the head and cancel its yaw for the floor.
 			 * In raw-stage coordinates that is this translation. */
 			VectorClear( floorOrigin );

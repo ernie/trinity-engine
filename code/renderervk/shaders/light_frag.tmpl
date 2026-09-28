@@ -39,6 +39,8 @@ layout (constant_id = 1) const float alpha_test_value = 0.0;
 layout (constant_id = 3) const int alpha_to_coverage = 0;
 //layout (constant_id = 4) const int color_mode = 0;
 layout (constant_id = 5) const int abs_light = 0;
+layout (constant_id = 11) const int hud_opaque_coverage = 0;
+layout (constant_id = 13) const int transmit_output = 0; // post-scene: 1 keeps alpha, 2 writes the source luminance
 
 float CorrectAlpha(float threshold, float alpha, vec2 tc)
 {
@@ -124,6 +126,9 @@ void main() {
 	vec4 spec = vec4(pow(specFactor, 10.0)*0.25) * base * 0.8;
 
 	out_color = (base * vec4(diffuse) + spec) * vec4(intens, 1.0);
+	// a scene stage restoring full transmittance writes 1; per-channel destination multipliers reach it through the luminance
+	if (hud_opaque_coverage != 0) out_color.a = 1.0;
+	if (transmit_output == 2) out_color.a = dot(out_color.rgb, vec3(0.2126, 0.7152, 0.0722));
 #ifdef USE_EMISSIVE
 	out_emissive = vec4( out_color.rgb, 1.0 );
 #endif

@@ -89,7 +89,7 @@ void VK_FovDiscardUpload( vkFovResources_t * );
 void VK_FovAttachment( const vkFovResources_t *, uint32_t index, VkAttachmentDescription2 *,
 					   VkAttachmentReference2 *, VkFragmentShadingRateAttachmentInfoKHR * );
 /* Bounded one-subpass bridge from VkRenderPassCreateInfo for the scene and
- * post-bloom passes. Up to five original attachments/color outputs, three deps;
+ * post-scene passes. Up to five original attachments/color outputs, three deps;
  * preserves multiview masks, correlations and dependency offsets;
  * rejects unknown pNext/input attachments instead of dropping semantics. */
 VkResult VK_FovCreateRenderPass( const vkFovResources_t *, const VkRenderPassCreateInfo *,
