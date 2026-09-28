@@ -14,7 +14,7 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 	PFN_xrGetSystem getSystem;
 	PFN_xrEnumerateInstanceExtensionProperties enumerate;
 	XrExtensionProperties extensions[256];
-	const char *enabled[6] = {"XR_KHR_vulkan_enable2", NULL, NULL, NULL, NULL, NULL};
+	const char *enabled[7] = {"XR_KHR_vulkan_enable2", NULL, NULL, NULL, NULL, NULL, NULL};
 	XrInstanceCreateInfo ci;
 	XrSystemGetInfo si;
 	XrResult result;
@@ -71,6 +71,8 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 			ctx->formatList = 1;
 		if ( !strcmp( extensions[i].extensionName, "XR_VALVE_frame_controller_interaction" ) )
 			ctx->frameInteraction = 1;
+		if ( !strcmp( extensions[i].extensionName, "XR_META_vulkan_swapchain_create_info" ) )
+			ctx->createInfoMeta = 1;
 	}
 	if ( !vulkan2 ) {
 		result = XR_ERROR_EXTENSION_NOT_PRESENT;
@@ -92,6 +94,8 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 		enabled[ci.enabledExtensionCount++] = "XR_KHR_vulkan_swapchain_format_list";
 	if ( ctx->frameInteraction )
 		enabled[ci.enabledExtensionCount++] = "XR_VALVE_frame_controller_interaction";
+	if ( ctx->createInfoMeta )
+		enabled[ci.enabledExtensionCount++] = "XR_META_vulkan_swapchain_create_info";
 	ci.enabledExtensionNames = enabled;
 	memcpy( (void *)ctx->enabled, enabled, sizeof( ctx->enabled ) );
 	ctx->enabledCount = ci.enabledExtensionCount;

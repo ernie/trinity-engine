@@ -1237,6 +1237,38 @@ qboolean RB_CaptureDeferredHud( const vec3_t origin, const vec3_t left,
 	return qtrue;
 }
 
+/* Each eye's NDC bounds of the HUD quad, so a density map can keep it sharp; an eye behind any corner reports none. */
+static void RB_ReportHudRect( void ) {
+	float rect[2][4];
+	qboolean valid[2];
+	vec4_t eye, clip;
+	vec3_t corner;
+	int e, i, k;
+	if ( !deferredHud.view.xrMultiview )
+		return;
+	for ( e = 0; e < 2; e++ ) {
+		valid[e] = qtrue;
+		rect[e][0] = rect[e][1] = 1e9f;
+		rect[e][2] = rect[e][3] = -1e9f;
+		for ( i = 0; i < 4; i++ ) {
+			for ( k = 0; k < 3; k++ )
+				corner[k] = deferredHud.origin[k] + ( i & 1 ? 1 : -1 ) * deferredHud.left[k] +
+							( i & 2 ? 1 : -1 ) * deferredHud.up[k];
+			R_TransformModelToClip( corner, deferredHud.view.world.modelMatrix, deferredHud.view.eyeProjection[e], eye,
+									clip );
+			if ( clip[3] <= 0.001f ) {
+				valid[e] = qfalse;
+				break;
+			}
+			rect[e][0] = MIN( rect[e][0], clip[0] / clip[3] );
+			rect[e][1] = MIN( rect[e][1], clip[1] / clip[3] );
+			rect[e][2] = MAX( rect[e][2], clip[0] / clip[3] );
+			rect[e][3] = MAX( rect[e][3], clip[1] / clip[3] );
+		}
+	}
+	vk_foveation_hud_rect( (const float (*)[4])rect, valid );
+}
+
 /* The captured owning view keeps later HUD-icon/2D cameras out of the multiview matrices. */
 void RB_DrawDeferredHud( void ) {
 	viewParms_t savedView;
@@ -1250,6 +1282,7 @@ void RB_DrawDeferredHud( void ) {
 		vk.renderPassIndex == RENDER_PASS_SCREENMAP ||
 		vk.renderPassIndex == RENDER_PASS_DESKTOP ) return;
 	deferredHud.pending = qfalse;
+	RB_ReportHudRect();
 	if ( tess.numIndexes ) RB_EndSurface();
 	savedView = backEnd.viewParms;
 	savedOrientation = backEnd.or;
@@ -1331,6 +1364,7 @@ static const void *RB_StretchPic( const void *data ) {
 	RB_SetGL2D();
 
 	RB_AddQuadStamp2( cmd->x, cmd->y, cmd->w, cmd->h, cmd->s1, cmd->t1, cmd->s2, cmd->t2, backEnd.color2D );
+	vk_hud_keep_2d( cmd->x, cmd->y, cmd->w, cmd->h );
 	return (const void *)(cmd + 1);
 }
 
@@ -1582,6 +1616,7 @@ static const void *RB_DrawSurfs( const void *data ) {
 
 	// clear the z buffer, set the modelview, etc
 	RB_BeginDrawingView();
+	vk_hud_keep_view();
 
 	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
 

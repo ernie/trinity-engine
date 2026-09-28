@@ -21,7 +21,9 @@ VkResult VK_XR_CreateInstance( PFN_vkCreateInstance normal, const VkInstanceCrea
 VkResult VK_XR_CreateDevice( PFN_vkCreateDevice normal, VkPhysicalDevice physical,
 							 const VkDeviceCreateInfo *info, VkDevice *device );
 VkPhysicalDevice VK_XR_PhysicalDevice( VkInstance instance );
-void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device, uint32_t queueFamily );
+/* targetFlags asks the runtime for extra swapchain image create flags; it may refuse them. */
+void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device, uint32_t queueFamily,
+				 VkImageCreateFlags targetFlags );
 void VK_XR_ShutdownSession( void );
 void VK_XR_ShutdownInstance( void );
 void VK_XR_CopyEyes( VkCommandBuffer command, VkImage source, VkFormat format, int width, int height,
@@ -44,6 +46,8 @@ void VK_XR_EyeMatrix( int eye, float matrix[16] );
 void VK_XR_HudMatrix( int eye, float matrix[16] );
 void VK_XR_ScreenMatrix( int eye, float matrix[16] );
 void VK_XR_TargetSize( uint32_t *width, uint32_t *height );
+/* The create flags the runtime accepted for the eye swapchain. */
+VkImageCreateFlags VK_XR_TargetCreateFlags( void );
 void VK_XR_SetZoom( qboolean zoomed, float *level );
 float VK_XR_ScopeScaleY( void );
 qboolean VK_XR_ScopeNeedsBands( void );

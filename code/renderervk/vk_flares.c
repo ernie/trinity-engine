@@ -90,7 +90,8 @@ typedef struct flare_s {
 	int eyeFadeTime[2];
 	float eyeIntensity[2];
 	uint64_t generation;
-	uint32_t result[2];
+	uint32_t result[2], total[2]; // fragments passed and drawn per eye
+	qboolean probePatch; // result came from a patch probe, read as a fraction of total
 } flare_t;
 
 static flare_t	r_flareStructs[ MAX_FLARES ];
@@ -100,6 +101,7 @@ typedef struct {
 	flare_t *flare;
 	uint64_t generation;
 	qboolean sourceVisible[2];
+	qboolean patch;
 } flareProbe_t;
 static flareProbe_t r_flareProbes[NUM_COMMAND_BUFFERS][MAX_FLARES];
 static uint32_t r_flareProbeCount[NUM_COMMAND_BUFFERS];
@@ -119,7 +121,9 @@ void RB_BeginFlareFrame( qboolean completed ) {
 			flare_t *f = probe->flare;
 			if ( f->generation == probe->generation ) {
 				memcpy( f->result, base + i * vk.storage_alignment, sizeof( f->result ) );
+				memcpy( f->total, base + i * vk.storage_alignment + sizeof( f->result ), sizeof( f->total ) );
 				memcpy( f->testedSource, probe->sourceVisible, sizeof( f->testedSource ) );
+				f->probePatch = probe->patch;
 				f->testCount = 1;
 			}
 		}
@@ -127,17 +131,18 @@ void RB_BeginFlareFrame( qboolean completed ) {
 }
 
 /* Unique within a recording even if a later view recycles the same flare. */
-static uint32_t RB_ReserveFlareProbe( flare_t *f ) {
+static uint32_t RB_ReserveFlareProbe( flare_t *f, qboolean patch ) {
 	uint32_t slot = vk.cmd_index, index = r_flareProbeCount[slot];
 	flareProbe_t *probe;
 	if ( index == MAX_FLARES )
 		return UINT32_MAX;
 	memset( vk.storage.buffer_ptr + (slot * MAX_FLARES + index) * vk.storage_alignment, 0,
-			sizeof( f->result ) );
+			sizeof( f->result ) + sizeof( f->total ) );
 	r_flareProbeCount[slot]++;
 	probe = &r_flareProbes[slot][index];
 	probe->flare = f;
 	probe->generation = f->generation;
+	probe->patch = patch;
 	memcpy( probe->sourceVisible, f->sourceVisible, sizeof( probe->sourceVisible ) );
 	return (slot * MAX_FLARES + index) * vk.storage_alignment;
 }
@@ -471,6 +476,11 @@ static float *vk_ortho( float x1, float x2,
 }
 
 
+// Patch probe width in density-map fragments: four always holds a 2x2 grid of fragment samples
+#define FLARE_PATCH_BLOCKS 4
+// Fraction of patch fragments that reads as fully visible; a recessed lamp always loses some to its housing
+#define FLARE_PATCH_FULL_AT 0.25f
+
 /*
 ==================
 RB_TestFlare
@@ -479,28 +489,39 @@ RB_TestFlare
 static void RB_TestMultiviewFlare( flare_t *f ) {
 	uint32_t offset;
 	vec3_t center, direction, left, up;
+	vec4_t eye, clip;
 	static const int corners[6][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, -1}, {1, 1}, {-1, 1}};
 	float distance = -f->eyeZ, radius, scale;
-	int e, i, k;
+	int e, i, k, block = 0;
 	backEnd.pc.c_flareTests++;
 	for ( e = 0; e < 2; e++ ) {
-		qboolean visible = f->testCount && f->testedSource[e] && f->sourceVisible[e] && f->result[e];
-		float step = (backEnd.refdef.time - f->eyeFadeTime[e]) * .001f;
+		float target = 0, step = (backEnd.refdef.time - f->eyeFadeTime[e]) * .001f;
 		/* An untestable center is occluded, never promoted by the other eye. */
+		if ( f->testCount && f->testedSource[e] && f->sourceVisible[e] ) {
+			if ( !f->probePatch )
+				target = f->result[e] ? 1 : 0;
+			else if ( f->total[e] )
+				target = MIN( 1, f->result[e] / (f->total[e] * FLARE_PATCH_FULL_AT) );
+		}
 		f->eyeFadeTime[e] = backEnd.refdef.time;
 		if ( step < 0 )
 			step = 0;
 		else if ( step > .25f )
 			step = .25f;
 		step *= r_flareFade->value;
-		f->eyeIntensity[e] += visible ? step : -step;
-		if ( f->eyeIntensity[e] < 0 )
-			f->eyeIntensity[e] = 0;
-		else if ( f->eyeIntensity[e] > 1 )
-			f->eyeIntensity[e] = 1;
+		// slewing keeps a jump between fragment-grid alignments to a few percent a frame
+		if ( f->eyeIntensity[e] < target )
+			f->eyeIntensity[e] = MIN( target, f->eyeIntensity[e] + step );
+		else
+			f->eyeIntensity[e] = MAX( target, f->eyeIntensity[e] - step );
+		R_TransformModelToClip( f->origin, f->owningView.world.modelMatrix, f->owningView.eyeProjection[e], eye,
+								clip );
+		if ( clip[3] > 0 )
+			block = MAX( block, vk_foveation_block_at( e, clip[0] / clip[3], clip[1] / clip[3] ) );
 	}
 	f->drawIntensity = f->eyeIntensity[0] > f->eyeIntensity[1] ? f->eyeIntensity[0] : f->eyeIntensity[1];
-	offset = RB_ReserveFlareProbe( f );
+	/* Under a foveating density map a pixel probe misses coarse fragment samples and flickers, so it spans a few fragments. */
+	offset = RB_ReserveFlareProbe( f, block > 0 );
 	if ( offset == UINT32_MAX )
 		return;
 	/* Tiny world-space triangles avoid the NVIDIA ViewIndex/PointSize hang.
@@ -510,6 +531,8 @@ static void RB_TestMultiviewFlare( flare_t *f ) {
 	VectorMA( f->origin, .1f, direction, center );
 	scale = fabsf( f->owningView.eyeProjection[0][0] );
 	radius = 2 * (distance < 1 ? 1 : distance) / (scale * (vk.sceneWidth ? vk.sceneWidth : 1));
+	if ( block > 0 )
+		radius *= FLARE_PATCH_BLOCKS * block * .5f;
 	VectorCopy( f->billboardLeft, left );
 	VectorCopy( f->billboardUp, up );
 	VectorNormalizeFast( left );
@@ -528,6 +551,10 @@ static void RB_TestMultiviewFlare( flare_t *f ) {
 	vk_bind_pipeline( vk.dot_pipeline );
 	vk_bind_geometry( TESS_XYZ );
 	vk_draw_dot( offset );
+	if ( block > 0 ) {
+		vk_bind_pipeline( vk.dot_total_pipeline );
+		vk_draw_dot( offset );
+	}
 }
 
 static void RB_TestFlare( flare_t *f ) {
@@ -557,7 +584,7 @@ static void RB_TestFlare( flare_t *f ) {
 		multisampled image will cause multiple fragment shader invocations.
 	*/
 
-	offset = RB_ReserveFlareProbe( f );
+	offset = RB_ReserveFlareProbe( f, qfalse );
 
 	if ( f->testCount ) {
 		if ( f->result[0] )

@@ -314,6 +314,9 @@ void vk_create_pipelines( void );
 
 void vk_clear_color( const vec4_t color );
 void vk_hud_set_direct( qboolean enabled );
+// While the overlay HUD is open: a 2D element's virtual-screen rectangle, and the current 3D icon view
+void vk_hud_keep_2d( float x, float y, float w, float h );
+void vk_hud_keep_view( void );
 image_t *vk_screen_image( void );
 void vk_clear_depth( qboolean clear_stencil );
 void vk_begin_frame( void );
@@ -330,6 +333,8 @@ void vk_bind_geometry( uint32_t flags );
 void vk_bind_lighting( int stage, int bundle );
 void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed );
 void vk_draw_foveation_debug( void );
+int vk_foveation_block_at( int eye, float ndcX, float ndcY );
+void vk_foveation_hud_rect( const float rect[2][4], const qboolean valid[2] );
 void vk_draw_dot( uint32_t storage_offset );
 
 void vk_read_pixels( byte* buffer, uint32_t width, uint32_t height ); // screenshots
@@ -550,6 +555,7 @@ typedef struct {
 	struct {
 		VkFramebuffer blur[VK_NUM_BLOOM_PASSES*2];
 		VkFramebuffer main[MAX_SWAPCHAIN_IMAGES];
+		VkFramebuffer post_bloom; // the main attachments without the density map; null when main serves
 		VkFramebuffer gamma[MAX_SWAPCHAIN_IMAGES];
 		VkFramebuffer screenmap;
 		VkFramebuffer capture;
@@ -615,7 +621,7 @@ typedef struct {
 		VkShaderModule virtualreflect_fs;
 		VkShaderModule color_fs;
 		VkShaderModule color_vs;
-		VkShaderModule color_vs_mv, fog_vs_mv, dot_vs_mv, dot_fs_mv;
+		VkShaderModule color_vs_mv, fog_vs_mv, dot_vs_mv, dot_fs_mv, dot_total_fs_mv;
 		VkShaderModule blur_extract_fs_mv, blur_fs_mv, blend_fs_mv, gamma_fs_mv, gamma_fs_array, gamma_composite_fs_mv;
 
 		VkShaderModule blur_extract_fs;
@@ -685,6 +691,7 @@ typedef struct {
 	uint32_t surface_beam_pipeline;
 	uint32_t surface_axis_pipeline;
 	uint32_t dot_pipeline;
+	uint32_t dot_total_pipeline; // multiview probe that counts every fragment it draws, untested
 
 	VkPipeline gamma_pipeline;
 	VkPipeline gamma_pipeline_eye[2];

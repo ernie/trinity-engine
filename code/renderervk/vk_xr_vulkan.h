@@ -36,6 +36,7 @@ typedef struct {
 	XrSwapchain handle;
 	uint32_t width, height, count, index;
 	int acquired, waited;
+	VkImageCreateFlags createFlags; /* extra flags the runtime accepted */
 	XrSwapchainImageVulkan2KHR images[VK_XRVK_MAX_IMAGES];
 } vkXRVkTarget_t;
 
@@ -56,6 +57,8 @@ typedef struct {
 	int running, lost, frameBegun, renderable;
 	int profileChanged;
 	int formatList;
+	int createInfoMeta;					   /* XR_META_vulkan_swapchain_create_info enabled */
+	VkImageCreateFlags targetCreateFlags; /* extra flags to request; set before Bind */
 	XrTime displayTime;
 	VkFormat format;
 	float renderScale;					/* zero defaults to 1; set before Bind */

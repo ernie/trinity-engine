@@ -126,6 +126,7 @@ qboolean VK_XR_PrepareInit( qboolean enabled ) {
 		VK_XRLive_Close( &live );
 		return qfalse;
 	}
+	xr.createInfoMeta = live.createInfoMeta;
 	return qtrue;
 }
 
@@ -270,7 +271,8 @@ VkResult VK_XR_CreateDevice( PFN_vkCreateDevice normal, VkPhysicalDevice physica
 	return result;
 }
 
-void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device, uint32_t queueFamily ) {
+void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device, uint32_t queueFamily,
+				 VkImageCreateFlags targetFlags ) {
 	XrGraphicsBindingVulkan2KHR binding;
 	VkPhysicalDeviceProperties properties;
 	PFN_vkGetPhysicalDeviceProperties getProperties;
@@ -292,13 +294,15 @@ void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device
 	xr.maxEyeWidth = MIN( properties.limits.maxFramebufferWidth, properties.limits.maxImageDimension2D );
 	xr.maxEyeHeight = MIN( properties.limits.maxFramebufferHeight, properties.limits.maxImageDimension2D );
 	xr.renderScale = atof( ri.Cvar_VariableString( "vr_superSampling" ) );
+	xr.targetCreateFlags = targetFlags;
 	if ( !VKXR_Check( VK_XRVK_Bind( &xr, &binding, formats, ARRAY_LEN( formats ) ), "OpenXR session/swapchains" ) ) {
 		ri.Error( ERR_DROP, "%s", failure );
 		return;
 	}
-	ri.Printf( PRINT_ALL, "OpenXR swapchain %ux%u, 2 layers, %u images, usage 0x%x, format list %s\n",
+	ri.Printf( PRINT_ALL, "OpenXR swapchain %ux%u, 2 layers, %u images, usage 0x%x, format list %s, create flags 0x%x of 0x%x\n",
 			   xr.target.width, xr.target.height, xr.target.count, (unsigned)VK_XRVK_TARGET_USAGE,
-			   xr.formatList ? "enabled" : "unavailable" );
+			   xr.formatList ? "enabled" : "unavailable", (unsigned)xr.target.createFlags,
+			   (unsigned)targetFlags );
 	xrDevice = device;
 	xrPhysical = physical;
 	{
@@ -346,6 +350,10 @@ void VK_XR_TargetSize( uint32_t *width, uint32_t *height ) {
 	}
 	*width = xr.target.width;
 	*height = xr.target.height;
+}
+
+VkImageCreateFlags VK_XR_TargetCreateFlags( void ) {
+	return xr.target.handle ? xr.target.createFlags : 0;
 }
 
 /* Module layouts cache glConfig at registration. A runtime resolution change
@@ -939,6 +947,9 @@ void VK_XR_FoveationMap( vkFovMap_t *map ) {
 		fov[e][1] = xr.views[e].fov.angleRight;
 		fov[e][2] = xr.views[e].fov.angleUp;
 		fov[e][3] = xr.views[e].fov.angleDown;
+		for ( j = 0; j < 4; j++ ) {
+			map->display[e][j] = tanf( fov[e][j] );
+		}
 		if ( xr.scope ) {
 			fov[e][1] = atanf( .935f ) / zoomLevel;
 			fov[e][0] = -fov[e][1];

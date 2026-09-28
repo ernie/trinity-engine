@@ -5,7 +5,7 @@
 
 layout(set = 0, binding = 0) buffer SSBO {
 	#ifdef MULTIVIEW
-	int sampled[2];
+	uint counts[4];
 #else
 	int sampled;
 #endif

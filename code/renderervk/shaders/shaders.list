@@ -7,6 +7,7 @@ frag blur_frag_spv   blur.frag mv
 frag blur_extract_frag_spv blur.frag mv -DUSE_EXTRACT
 frag color_frag_spv  color.frag -
 frag dot_frag_spv    dot.frag mv
+frag dot_total_frag_spv dot.frag - -DMULTIVIEW -DUSE_TOTAL
 frag floor_grid_frag_spv floor_grid.frag -
 frag virtualscreen_frag_spv virtualscreen.frag -
 frag virtualreflect_frag_spv virtualreflect.frag -
@@ -14,6 +15,7 @@ frag fog_frag_spv    fog.frag -
 frag gamma_frag_spv  gamma.frag mv+array
 frag gamma_composite_frag_spv gamma.frag mv -DUSE_BLOOM_COMPOSITE
 frag foveationdebug_frag_spv foveationdebug.frag -
+frag foveationdensity_frag_spv foveationdensity.frag -
 vert vert_light          light_vert.tmpl mv
 vert vert_light_fog      light_vert.tmpl mv -DUSE_FOG
 frag frag_light          light_frag.tmpl - -DUSE_EMISSIVE

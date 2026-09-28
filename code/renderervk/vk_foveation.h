@@ -4,22 +4,37 @@
 #include "vk_foveation_math.h"
 #define VK_FOV_MAX_RATES 32
 #define VK_FOV_MAX_SLOTS 4
+#define VK_FOV_EXT_FDM_OFFSET_EXTENSION_NAME "VK_EXT_fragment_density_map_offset"
+typedef enum { VK_FOV_BACKEND_NONE, VK_FOV_BACKEND_SHADING_RATE, VK_FOV_BACKEND_FDM } vkFovBackend_t;
 typedef struct {
 	int supported;
-	uint32_t texelWidth, texelHeight;
+	vkFovBackend_t backend;
+	uint32_t texelWidth, texelHeight; /* Shading-rate or density-map texel, per backend. */
 	const char *reason; /* Static diagnostic; valid even when unsupported. */
+	const char *fdmReason; /* Why the density map backend was not chosen; NULL when not probed. */
 	uint32_t availableExtensions;
 	vkFovRate_t rates[VK_FOV_MAX_RATES];
 	uint32_t rateCount;
-	const char *extensions[2];
+	const char *extensions[6];
 	uint32_t extensionCount;
 	VkPhysicalDeviceFragmentShadingRateFeaturesKHR feature;
+	/* Fragment density map backend. */
+	int fdm2, fdmOffset, tileProperties;
+	uint32_t fdmTexelMaxWidth, fdmTexelMaxHeight;
+	const char *fdmOffsetExtension;
+	VkExtent2D fdmOffsetGranularity;
+	VkPhysicalDeviceFragmentDensityMapFeaturesEXT fdmFeature;
+	VkPhysicalDeviceFragmentDensityMapOffsetFeaturesQCOM offsetFeature;
+	VkPhysicalDeviceTilePropertiesFeaturesQCOM tileFeature;
 } vkFovCaps_t;
 /* Before VkDevice creation, runtime-selected physical device only. Unsupported
- * hardware returns SUCCESS with supported=0. Caller appends extensions and
- * chains caps.feature into device creation only when supported. */
+ * hardware returns SUCCESS with supported=0. Full shading rate wins, otherwise a
+ * non-subsampled density map. Caller appends extensions and chains
+ * VK_FovFeatures into device creation only when supported. */
 VkResult VK_FovQuery( vkFovCaps_t *, VkInstance, VkPhysicalDevice, PFN_vkGetInstanceProcAddr,
 					  uint32_t apiVersion );
+/* The selected backend's feature structs, chained ahead of next. */
+void *VK_FovFeatures( vkFovCaps_t *, void *next );
 #define VK_FOV_PROCS(X) \
 	X( CreateImage ) \
 	X( DestroyImage ) X( GetImageMemoryRequirements ) X( AllocateMemory ) X( FreeMemory ) X( BindImageMemory ) \
@@ -48,13 +63,20 @@ typedef struct {
 	int uploaded;
 	/* Effective map last recorded into the attachment. Cleared with resources. */
 	vkFovMap_t uploadedMap;
+	/* Density maps: the next map is written to scratch; current is what the image holds. */
+	uint8_t *scratch, *current;
 } vkFovResources_t;
 /* No global Vulkan dispatch or engine allocations. Caller must enable queried
  * feature/extensions before creation. Extents are per-eye; the image always has
  * two layers. Failure fully rolls back resources. */
 VkResult VK_FovCreate( vkFovResources_t *, VkDevice, PFN_vkGetDeviceProcAddr,
 					   const VkPhysicalDeviceMemoryProperties *, const vkFovCaps_t *, uint32_t eyeWidth,
-					   uint32_t eyeHeight, uint32_t slots );
+					   uint32_t eyeHeight, uint32_t slots, VkImageCreateFlags flags );
+/* Density maps: copies current through the slot's staging buffer, leaving the image ready for a pass. */
+void VK_FovCopyDensity( vkFovResources_t *, VkCommandBuffer, uint32_t slot );
+/* Appends the density map as the pass's last attachment; attachments must have room for it. */
+void VK_FovDensityAttachment( VkRenderPassCreateInfo *, VkAttachmentDescription *attachments,
+							  VkRenderPassFragmentDensityMapCreateInfoEXT * );
 /* After the slot fence, before any scene pass. An identical effective map is
  * reused across frames; repeated serials never rewrite in-flight staging.
  * Use one monotonically increasing serial across map loads. */

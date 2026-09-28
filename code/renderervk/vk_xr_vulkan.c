@@ -129,6 +129,7 @@ XrResult VK_XRVK_CreateTarget( vkXRVk_t *ctx, vkXRVkTarget_t *target ) {
 	XrViewConfigurationView views[2];
 	XrSwapchainCreateInfo ci;
 	XrVulkanSwapchainFormatListCreateInfoKHR formats;
+	XrVulkanSwapchainCreateInfoMETA meta;
 	VkFormat viewFormats[2];
 	uint32_t i, count, width[2], height[2];
 	XrResult result;
@@ -198,7 +199,21 @@ XrResult VK_XRVK_CreateTarget( vkXRVk_t *ctx, vkXRVkTarget_t *target ) {
 		formats.viewFormats = viewFormats;
 		ci.next = &formats;
 	}
-	CHECK( ctx->xr.CreateSwapchain( ctx->session, &ci, &target->handle ) );
+	if ( ctx->createInfoMeta && ctx->targetCreateFlags ) {
+		memset( &meta, 0, sizeof( meta ) );
+		meta.type = XR_TYPE_VULKAN_SWAPCHAIN_CREATE_INFO_META;
+		meta.next = ci.next;
+		meta.additionalCreateFlags = ctx->targetCreateFlags;
+		ci.next = &meta;
+		if ( ctx->xr.CreateSwapchain( ctx->session, &ci, &target->handle ) == XR_SUCCESS )
+			target->createFlags = ctx->targetCreateFlags;
+		else {
+			target->handle = XR_NULL_HANDLE;
+			ci.next = meta.next; // the flags are optional; retry without them
+		}
+	}
+	if ( !target->handle )
+		CHECK( ctx->xr.CreateSwapchain( ctx->session, &ci, &target->handle ) );
 	CHECK( ctx->xr.EnumerateSwapchainImages( target->handle, 0, &target->count, NULL ) );
 	if ( !target->count || target->count > VK_XRVK_MAX_IMAGES ) {
 		result = XR_ERROR_LIMIT_REACHED;
