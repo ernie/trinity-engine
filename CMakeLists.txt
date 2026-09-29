@@ -38,6 +38,10 @@ OPTION(USE_RENDERER_DLOPEN "" ON)
 OPTION(USE_VOIP "" ON)
 OPTION(USE_OPENAL "" ON)
 OPTION(USE_OPENAL_DLOPEN "" ON)
+OPTION(TRINITY_FRAME "Steam Frame package: launches in VR without the desktop mirror" OFF)
+IF(TRINITY_FRAME)
+	add_compile_definitions(TRINITY_FRAME)
+ENDIF()
 
 # ===== Emscripten/WebAssembly support =====
 IF(EMSCRIPTEN)

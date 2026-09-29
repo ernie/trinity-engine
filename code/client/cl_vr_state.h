@@ -89,6 +89,7 @@ typedef struct {
 	qboolean		running;		/* inside CL_Vid_Restart */
 	qboolean		xrRenderer;		/* the renderer being built or running is the XR one */
 	qboolean		xrTainted;		/* an error abandoned XR frame state; no XR calls until the next restart */
+	qboolean		resuming;		/* rebuilding VR that was running; only this waits for a missing headset */
 	vrRecoveryCap_t	cap;
 } vrMachine_t;
 
@@ -107,7 +108,6 @@ typedef enum {
 	VREV_HEADSET,			/* value: vrProbe_t from the headset watch */
 	VREV_UNSUPPORTED,
 	VREV_CONNECTION_ENDED,	/* value: qtrue when a cinematic ended */
-	VREV_DIALOG,			/* value: qtrue for Retry, qfalse for Flatscreen on the startup dialog */
 	VREV_REQUEST			/* value: vrPending_t */
 } vrEventType_t;
 

@@ -12,6 +12,8 @@ void VK_XRLive_Close( vkXRLive_t *ctx ) {
 XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 	PFN_xrCreateInstance create;
 	PFN_xrGetSystem getSystem;
+	PFN_xrGetInstanceProperties properties;
+	XrInstanceProperties ip;
 	PFN_xrEnumerateInstanceExtensionProperties enumerate;
 	XrExtensionProperties extensions[256];
 	const char *enabled[7] = {"XR_KHR_vulkan_enable2", NULL, NULL, NULL, NULL, NULL, NULL};
@@ -102,6 +104,14 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 	result = create( &ci, &ctx->instance );
 	if ( XR_FAILED( result ) )
 		goto fail;
+	LIVE_PROC( ctx->instance, xrGetInstanceProperties, properties );
+	memset( &ip, 0, sizeof( ip ) );
+	ip.type = XR_TYPE_INSTANCE_PROPERTIES;
+	result = properties( ctx->instance, &ip );
+	if ( XR_FAILED( result ) )
+		goto fail;
+	memcpy( ctx->runtimeName, ip.runtimeName, sizeof( ctx->runtimeName ) );
+	ctx->runtimeName[sizeof( ctx->runtimeName ) - 1] = 0;
 	LIVE_PROC( ctx->instance, xrGetSystem, getSystem );
 	memset( &si, 0, sizeof( si ) );
 	si.type = XR_TYPE_SYSTEM_GET_INFO;

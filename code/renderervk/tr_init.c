@@ -2067,7 +2067,8 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	R_DoneFreeType();
 
 #ifdef USE_VULKAN
-	if ( r_device->modified ) {
+	// a VR restart that fails in XRPrepareInit unwinds before R_Register, so the cvars may not exist yet
+	if ( r_device && r_device->modified ) {
 		code = REF_UNLOAD_DLL;
 	}
 #endif

@@ -375,6 +375,11 @@ ifeq ($(USE_LOCAL_HEADERS),1)
   BASE_CFLAGS += -DUSE_LOCAL_HEADERS=1
 endif
 
+# Steam Frame package: launches in VR without the desktop mirror (see code/vrcommon/vr_defaults.h)
+ifeq ($(TRINITY_FRAME),1)
+  BASE_CFLAGS += -DTRINITY_FRAME
+endif
+
 ifeq ($(USE_CURL),1)
   BASE_CFLAGS += -DUSE_CURL
   ifeq ($(USE_CURL_DLOPEN),1)

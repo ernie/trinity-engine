@@ -99,6 +99,16 @@ static void VKXR_UpdateRefresh( void ) {
 	}
 }
 
+/* Whether the space-separated rate list holds exactly this rate. */
+static qboolean VKXR_RateListed( const char *list, const char *rate ) {
+	const char *token;
+	while ( ( token = COM_Parse( &list ) )[0] ) {
+		if ( !strcmp( token, rate ) )
+			return qtrue;
+	}
+	return qfalse;
+}
+
 static qboolean VKXR_Check( XrResult result, const char *operation ) {
 	if ( XR_FAILED( result ) ) {
 		Com_sprintf( failure, sizeof( failure ), "%s failed (%d)", operation, (int)result );
@@ -320,6 +330,7 @@ void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device
 		}
 		VK_XRRefresh_FormatRates( &refresh, rates, sizeof( rates ) );
 		ri.Cvar_Set( "vr_refreshrates", rates );
+		ri.Printf( PRINT_ALL, "OpenXR display refresh rates offered: %s\n", rates[0] ? rates : "none" );
 		refreshRequested = -1;
 		VKXR_UpdateRefresh();
 	}
@@ -558,6 +569,17 @@ void VK_XR_ScreenMatrix( int eye, float matrix[16] ) {
 	Com_Memcpy( screenMatrices[eye].matrix, matrix, sizeof( screenMatrices[eye].matrix ) );
 }
 
+/* Event-driven losses fail no call, so the reason comes from the state the poll left behind. */
+static const char *VKXR_LossReason( void ) {
+	switch ( xr.state ) {
+		case XR_SESSION_STATE_EXITING:
+			return "the runtime ended the session";
+		case XR_SESSION_STATE_LOSS_PENDING:
+			return "the runtime is shutting down";
+		default:
+			return "OpenXR instance lost";
+	}
+}
 int VK_XR_BeginFrame( refXRFrame_t *frame ) {
 	int eye;
 	XrResult result;
@@ -569,10 +591,9 @@ int VK_XR_BeginFrame( refXRFrame_t *frame ) {
 	// An unwound frame owes its xrEndFrame before anything else runs.
 	if ( xr.frameBegun )
 		VK_XRVK_End( &xr, 0 );
-	if ( failed || xr.lost ) {
-		return -1;
-	}
-	if ( !VKXR_Check( VK_XRVK_Poll( &xr ), "xrPollEvent" ) || xr.lost ) {
+	if ( failed || xr.lost || !VKXR_Check( VK_XRVK_Poll( &xr ), "xrPollEvent" ) || xr.lost ) {
+		if ( !failure[0] )
+			Q_strncpyz( failure, VKXR_LossReason(), sizeof( failure ) );
 		return -1;
 	}
 	if ( xr.profileChanged ) {
@@ -585,9 +606,20 @@ int VK_XR_BeginFrame( refXRFrame_t *frame ) {
 	if ( !xr.running || !active || !xr.target.handle ) {
 		return 0;
 	}
-	result = VK_XRVK_Begin( &xr );
-	if ( !VKXR_Check( result, "OpenXR frame begin" ) ) {
-		return -1;
+	{
+		const XrDuration period = xr.displayPeriod;
+		result = VK_XRVK_Begin( &xr );
+		if ( !VKXR_Check( result, "OpenXR frame begin" ) ) {
+			return -1;
+		}
+		if ( xr.displayPeriod != period && xr.displayPeriod > 0 ) {
+			char measured[16];
+			Com_sprintf( measured, sizeof( measured ), "%.0f", 1e9 / xr.displayPeriod );
+			// SteamVR lists only its configured rate and refuses requests while the panel runs another; the
+			// menus show the entry nearest the request, so the list must carry the rate the panel actually runs
+			if ( !VKXR_RateListed( ri.Cvar_VariableString( "vr_refreshrates" ), measured ) )
+				ri.Cvar_Set( "vr_refreshrates", measured );
+		}
 	}
 	frame->renderable = active && xr.renderable;
 	if ( !VKXR_Check(

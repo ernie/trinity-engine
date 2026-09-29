@@ -9,6 +9,7 @@
 
 #include "tr_local.h"
 #include "vk_hud_coverage.h"
+#include "../vrcommon/vr_defaults.h"
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -6148,7 +6149,7 @@ void vk_initialize( void )
 
 	vk_set_render_scale();
 
-	vr_mirrorEnabled = ri.Cvar_Get( "vr_mirrorEnabled", "1", 0 );
+	vr_mirrorEnabled = ri.Cvar_Get( "vr_mirrorEnabled", VR_MIRROR_DEFAULT, 0 );
 	vr_desktopContentType = ri.Cvar_Get( "vr_desktopContentType", "0", 0 );
 	vr_desktopContentFit = ri.Cvar_Get( "vr_desktopContentFit", "1", 0 );
 	vr_desktopMenuStyle = ri.Cvar_Get( "vr_desktopMenuStyle", "0", 0 );

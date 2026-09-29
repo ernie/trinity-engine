@@ -8,8 +8,7 @@
 #include <time.h>
 #endif
 
-/* Leaves the runtime a slice to queue the events the next poll consumes. */
-static void VKXR_Sleep( unsigned msec ) {
+void VK_XRVK_Sleep( unsigned msec ) {
 #ifdef _WIN32
 	Sleep( msec );
 #else
@@ -428,6 +427,7 @@ XrResult VK_XRVK_Begin( vkXRVk_t *ctx ) {
 		return VKXR_Result( ctx, result );
 	ctx->frameBegun = 1;
 	ctx->displayTime = frame.predictedDisplayTime;
+	ctx->displayPeriod = frame.predictedDisplayPeriod;
 	if ( result == XR_SESSION_LOSS_PENDING )
 		return VKXR_Result( ctx, result );
 	if ( !frame.shouldRender || !ctx->target.handle )
@@ -560,7 +560,7 @@ void VK_XRVK_Shutdown( vkXRVk_t *ctx ) {
 		ctx->xr.RequestExitSession( ctx->session );
 		/* The poll ends the session and clears running at the STOPPING state. */
 		for ( spins = 0; spins < 100 && ctx->running && !ctx->lost; spins++ ) {
-			VKXR_Sleep( 1 );
+			VK_XRVK_Sleep( 1 ); /* leaves the runtime a slice to queue the events the next poll consumes */
 			VK_XRVK_Poll( ctx );
 		}
 	}

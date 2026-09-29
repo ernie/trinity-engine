@@ -60,6 +60,7 @@ typedef struct {
 	int createInfoMeta;					   /* XR_META_vulkan_swapchain_create_info enabled */
 	VkImageCreateFlags targetCreateFlags; /* extra flags to request; set before Bind */
 	XrTime displayTime;
+	XrDuration displayPeriod; /* the runtime's predicted frame interval, i.e. the display rate it runs the app at */
 	VkFormat format;
 	float renderScale;					/* zero defaults to 1; set before Bind */
 	uint32_t maxEyeWidth, maxEyeHeight; /* optional graphics limits */
@@ -67,6 +68,7 @@ typedef struct {
 	XrView views[2];
 } vkXRVk_t;
 
+void VK_XRVK_Sleep( unsigned msec );
 /* Instance must enable XR_KHR_vulkan_enable2; its owner retains the loader.
  * Init calls the mandatory graphics requirements query before device creation.
  * Use the runtime creation wrappers for BOTH Vulkan objects; this is enable2.

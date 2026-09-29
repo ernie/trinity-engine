@@ -123,6 +123,8 @@ qboolean VRState_BlocksRendering( const vrMachine_t *m ) {
 static vrAction_t VRState_OnError( vrMachine_t *m, const vrEvent_t *ev ) {
 	qboolean resumes = VRState_Resumes( ev->wanted, m->state );
 
+	if ( resumes && m->state == VRSTATE_VR )
+		m->resuming = qtrue;
 	/* A cap restart still rebuilds flat, and the restart after it probes VR again. */
 	if ( resumes )
 		m->pending = VRPENDING_AFTER_ERROR;
@@ -149,6 +151,8 @@ static vrAction_t VRState_OnSwitchBegin( vrMachine_t *m, const vrEvent_t *ev ) {
 	resume = VRState_Resumes( ev->wanted, m->state );
 	if ( !resume && !ev->vrActive && !m->xrRenderer )
 		return VRACT_NONE;
+	if ( resume && m->state == VRSTATE_VR )
+		m->resuming = qtrue;
 	/* CL_ShutdownRef compares this with rendererWasXR to pick the DLL unload. */
 	m->xrRenderer = resume;
 	m->pending = VRPENDING_AT_HUNK_USERS;
@@ -224,7 +228,7 @@ static vrAction_t VRState_OnFailed( vrMachine_t *m, const vrEvent_t *ev ) {
 	return VRACT_CAP;
 }
 
-vrAction_t VRState_Reduce( vrMachine_t *m, const vrEvent_t *ev ) {
+static vrAction_t VRState_ReduceEvent( vrMachine_t *m, const vrEvent_t *ev ) {
 	switch ( ev->type ) {
 		case VREV_ABORT:
 			m->running = qfalse;
@@ -259,8 +263,13 @@ vrAction_t VRState_Reduce( vrMachine_t *m, const vrEvent_t *ev ) {
 				m->state = VRSTATE_TRANSITION;
 				return VRACT_NONE;
 			}
-			m->state = ev->value == VRPROBE_WAIT ? VRSTATE_WAITING_HEADSET : VRSTATE_FLAT;
-			return ev->value == VRPROBE_WAIT ? VRACT_WAIT : VRACT_INCAPABLE;
+			/* A fresh request without a headset falls back like a broken install; only rebuilding VR that ran waits. */
+			if ( ev->value == VRPROBE_WAIT && m->resuming ) {
+				m->state = VRSTATE_WAITING_HEADSET;
+				return VRACT_WAIT;
+			}
+			m->state = VRSTATE_FLAT;
+			return VRACT_INCAPABLE;
 		case VREV_COMPLETE:
 			/* A QVM's VR compatibility is known only after its INIT, when its world is already loaded. */
 			if ( ev->value == VRMOD_FALLBACK )
@@ -282,6 +291,7 @@ vrAction_t VRState_Reduce( vrMachine_t *m, const vrEvent_t *ev ) {
 			}
 			/* The restart probes the runtime and waits for it when it stays away. */
 			m->state = VRSTATE_TRANSITION;
+			m->resuming = qtrue;
 			m->pending = VRState_Request( m->pending, VRPENDING_NOW );
 			return VRACT_TEARDOWN;
 		case VREV_HEADSET:
@@ -309,18 +319,18 @@ vrAction_t VRState_Reduce( vrMachine_t *m, const vrEvent_t *ev ) {
 				m->pending = VRPENDING_NONE;
 			}
 			return VRACT_NONE;
-		case VREV_DIALOG:
-			if ( !ev->value ) {
-				m->state = VRSTATE_FLAT;
-				return VRACT_NONE;
-			}
-			if ( m->state == VRSTATE_FLAT )
-				m->state = VRSTATE_TRANSITION;
-			m->pending = VRState_Request( m->pending, VRPENDING_NOW );
-			return VRACT_NONE;
 		case VREV_REQUEST:
 			m->pending = VRState_Request( m->pending, (vrPending_t)ev->value );
 			return VRACT_NONE;
 	}
 	return VRACT_NONE;
+}
+
+vrAction_t VRState_Reduce( vrMachine_t *m, const vrEvent_t *ev ) {
+	vrAction_t action = VRState_ReduceEvent( m, ev );
+
+	/* Landing flat or in VR ends any recovery, so the next request is a fresh one. */
+	if ( m->state == VRSTATE_FLAT || m->state == VRSTATE_VR )
+		m->resuming = qfalse;
+	return action;
 }

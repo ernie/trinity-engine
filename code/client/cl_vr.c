@@ -5,6 +5,7 @@
 #include "cl_vr_state.h"
 #include "cl_renderer_recovery.h"
 #include "../qcommon/vm_vr.h"
+#include "../vrcommon/vr_defaults.h"
 #include "../vrcommon/vr_state.h"
 #include "../vrcommon/xr_loader.h"
 
@@ -61,8 +62,6 @@ static void CL_VR_CheckTracking( void ) {
 
 static xrLoaderInfo_t cachedProbe;
 static char lastFailure[512];
-static qboolean startupDialog;
-static char dialogText[512];
 
 static qboolean CL_VR_Wanted( void ) {
 	return vr_enabled && (vr_enabled->latchedString ? atoi( vr_enabled->latchedString ) : vr_enabled->integer) != 0;
@@ -135,17 +134,28 @@ static void CL_VR_ErrorPopup( const char *text ) {
 static void CL_VR_Incapable( void ) {
 	XRLoader_WatchEnd();
 	trackingRequested = qfalse;
-	CL_VR_Failure( cachedProbe.vulkanEnable && !cachedProbe.vulkanEnable2 ?
-				   "OpenXR runtime lacks XR_KHR_vulkan_enable2" : cachedProbe.message );
-	if ( forcedStartupAttempt ) {
-		Q_strncpyz( dialogText, lastFailure, sizeof( dialogText ) );
-		startupDialog = qtrue;
+	if ( VRState_Probe( cachedProbe.status, cachedProbe.vulkanEnable2 ) == VRPROBE_WAIT )
+		CL_VR_Failure( "No VR headset found" );
+	else
+		CL_VR_Failure( cachedProbe.vulkanEnable && !cachedProbe.vulkanEnable2 ?
+					   "OpenXR runtime lacks XR_KHR_vulkan_enable2" : cachedProbe.message );
+}
+/* qtrue for Retry. Asked before the game window opens, so Quit exits without one and Flatscreen lasts this session. */
+static qboolean CL_VR_LaunchDialog( void ) {
+	int choice = Sys_VRFailureDialog( lastFailure );
+
+	if ( choice == 1 )
+		return qtrue;
+	if ( choice == 2 ) {
+		Cmd_Clear();
+		Com_Quit_f();
 	}
+	forcedStartupAttempt = qfalse;
+	return qfalse;
 }
 /* CL_VR_Frame's headset watch resumes VR from WAITING_HEADSET, so a wait reports only to the console and vr_status. */
 static void CL_VR_Wait( const char *failure ) {
 	nextHeadsetCheck = cls.realtime + 2000;
-	startupDialog = qfalse;
 	if ( failure ) {
 		CL_VR_Failure( failure );
 		Com_Printf( "VR is waiting for the headset and runtime. Apply flatscreen mode to cancel.\n" );
@@ -215,14 +225,12 @@ void CL_VR_Init( void ) {
 	Cvar_Get( "vr_availableModes", "flat", CVAR_ROM | CVAR_PROTECTED );
 #endif
 	/* Mod changes reset cvars; preserve the selected mode across that reset. */
-	vr_enabled = Cvar_Get( "vr_enabled", "0", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NORESTART );
+	vr_enabled = Cvar_Get( "vr_enabled", VR_ENABLED_DEFAULT, VR_MODE_CVAR_FLAGS );
 	Cvar_CheckRange( vr_enabled, "0", "1", CV_INTEGER );
 
 	nextTargetCheck = cls.realtime + 1000;
 	frame.open = frame.stereo = qfalse;
 	xrFailed = qfalse;
-	startupDialog = qfalse;
-	dialogText[0] = 0;
 	Com_Memset( &machine, 0, sizeof( machine ) );
 	/* The first CL_StartHunkUsers builds the renderer the player's choice asks for. */
 	if ( vr_enabled->integer )
@@ -243,20 +251,32 @@ int CL_VR_Gametype( void ) {
 void CL_VR_RestartBegin( void ) {
 	vrAction_t action;
 
-	vr_enabled = Cvar_Get( "vr_enabled", "0",
-							CVAR_ARCHIVE | CVAR_LATCH | CVAR_NORESTART ); /* apply requested value */
+	vr_enabled = Cvar_Get( "vr_enabled", VR_ENABLED_DEFAULT, VR_MODE_CVAR_FLAGS ); /* apply requested value */
 	action = CL_VR_Step( VREV_BEGIN, 0 );
 	if ( action != VRACT_PROBE || !trackingRequested )
 		trackingSampled = trackingMoved = qfalse;
 	trackingRequested = action == VRACT_PROBE;
 	XRLoader_WatchEnd();
 	if ( action == VRACT_PROBE ) {
-		vrProbe_t probe = re.XRStatus && re.XRStatus() > 0 ? VRPROBE_READY : CL_VR_WatchBegin();
+#ifdef TRINITY_FRAME
+		/* SteamVR always runs on the Frame, so the renderer's own instance answers the probe and the app connects once. */
+		vrProbe_t probe = VRPROBE_READY;
+#else
+		/* A lost session still holds its instance and the loader allows one per process, so the rebuild replaces it instead of probing. */
+		vrProbe_t probe = re.XRStatus && re.XRStatus() != 0 ? VRPROBE_READY : CL_VR_WatchBegin();
+#endif
 
 		action = CL_VR_Step( VREV_PROBED, probe );
 		if ( action == VRACT_INCAPABLE )
 			CL_VR_Incapable();
-		else if ( action == VRACT_WAIT )
+		/* A launch in VR that can't bring OpenXR up asks before any window opens. */
+		while ( action == VRACT_INCAPABLE && forcedStartupAttempt && CL_VR_LaunchDialog() ) {
+			trackingRequested = qtrue;
+			action = CL_VR_Step( VREV_PROBED, CL_VR_WatchBegin() );
+			if ( action == VRACT_INCAPABLE )
+				CL_VR_Incapable();
+		}
+		if ( action == VRACT_WAIT )
 			CL_VR_Wait( NULL );
 	} else if ( action == VRACT_DEFER ) {
 		Com_Printf( "VR resumes at the next match or the main menu.\n" );
@@ -312,7 +332,6 @@ qboolean CL_VR_RestartComplete( void ) {
 			VKeyboard_Show();
 		lastFailure[0] = 0;
 		forcedStartupAttempt = qfalse;
-		startupDialog = qfalse;
 	}
 	nextTargetCheck = cls.realtime + 1000;
 	return qtrue;
@@ -376,24 +395,6 @@ static void CL_VR_FrameChecks( void ) {
 	vrProbe_t probe;
 	const char *reason, *source;
 
-	if ( startupDialog && cls.rendererStarted && uivm ) {
-		int choice;
-		startupDialog = qfalse;
-		choice = Sys_VRFailureDialog( dialogText );
-		if ( choice == 1 ) {
-			Cvar_Set( "vr_enabled", "1" );
-			CL_VR_Step( VREV_DIALOG, qtrue );
-		} else if ( choice == 2 ) {
-			Cbuf_AddText( "quit\n" );
-		} else {
-			/* Flatscreen here is the player's choice to stop asking for VR. */
-			forcedStartupAttempt = qfalse;
-			Cvar_Set2( "vr_enabled", "0", qtrue );
-			XRLoader_WatchEnd();
-			CL_VR_Step( VREV_DIALOG, qfalse );
-		}
-		return;
-	}
 	if ( machine.state == VRSTATE_WAITING_HEADSET ) {
 		/* Respect a staged flat selection immediately. */
 		if ( !CL_VR_Wanted() ) {
@@ -607,7 +608,6 @@ void CL_VR_Shutdown( void ) {
 	trackingRequested = qfalse;
 	XRLoader_WatchEnd();
 	forcedStartupAttempt = qfalse;
-	startupDialog = qfalse;
 	CL_VR_EndFrame();
 	CL_VRModulesReset();
 	CL_VRInput_Reset();

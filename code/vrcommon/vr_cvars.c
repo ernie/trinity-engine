@@ -1,4 +1,5 @@
 #include "vr_cvars.h"
+#include "vr_defaults.h"
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
@@ -47,7 +48,7 @@ cvar_t *vr_foveationStrength = NULL;
 cvar_t *vr_foveationCaps = NULL;
 
 void VR_InitMirrorCvars( void ) {
-	vr_mirrorEnabled = Cvar_Get( "vr_mirrorEnabled", "1", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NORESTART );
+	vr_mirrorEnabled = Cvar_Get( "vr_mirrorEnabled", VR_MIRROR_DEFAULT, VR_MODE_CVAR_FLAGS );
 	vr_mirrorFullscreen = Cvar_Get( "vr_mirrorFullscreen", "0", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NORESTART );
 	vr_mirrorWidth = Cvar_Get( "vr_mirrorWidth", "1280", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NORESTART );
 	vr_mirrorHeight = Cvar_Get( "vr_mirrorHeight", "720", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NORESTART );
@@ -230,10 +231,7 @@ void VR_InitCvars( void )
 	Cvar_Get( "vr_button_map_SECONDARYTHUMBREST", "+alt", CVAR_ARCHIVE ); // Alt modifier
 	Cvar_Get( "vr_button_map_SECONDARYTHUMBREST_ALT", "", CVAR_ARCHIVE );
 
-	// Steam Frame controls; other controllers never press these slots
+	// Steam Frame bumpers; other controllers never press these slots
 	Cvar_Get( "vr_button_map_LBUMPER", "+alt", CVAR_ARCHIVE );
 	Cvar_Get( "vr_button_map_RBUMPER", "+alt", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_DPAD_LEFT", "weapprev", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_DPAD_RIGHT", "weapnext", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_DPAD_UP", "+button3", CVAR_ARCHIVE ); // Gesture
 }

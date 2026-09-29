@@ -12,6 +12,7 @@ typedef struct {
 	int picoInteraction, displayRefresh, eyeGaze, formatList, frameInteraction, createInfoMeta;
 	const char *enabled[7];
 	unsigned enabledCount;
+	char runtimeName[XR_MAX_RUNTIME_NAME_SIZE];
 } vkXRLive_t;
 /* Explicit VR requests only. Instance enables Vulkan2 plus optional extensions it finds.
  * No session/graphics creation. Close after every session/action owner is gone. */
