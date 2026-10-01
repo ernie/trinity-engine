@@ -7,13 +7,15 @@ extern vr_clientinfo_t vr;
 void CL_VRInput_Init( void );
 void CL_VRInput_Shutdown( void );
 void CL_VRInput_Reset( void );
+void CL_VRInput_BindCapture( void );
+void CL_VRInput_CancelCapture( void );
 void CL_VRInput_Frame( const refXRFrame_t *frame );
 void CL_VRInput_SetVirtualScreen( qboolean enabled );
 qboolean CL_VRInput_ApplyMove( usercmd_t *cmd );
 void CL_VRInput_QuaternionAngles( const float quaternion[4], float gripPitch, vec3_t angles );
 float CL_VRInput_StickCurve( float value, float deadzone );
-const char *CL_VRInput_MenuSkipName( void );
-const char *CL_VRInput_MenuCancelName( void );
+/* Bound kbutton state (cl_input.c): buttons, digital moves and walking, as the flatscreen command gets them. */
+void CL_VRInput_KeyState( usercmd_t *cmd );
 void CL_VRInput_HapticEvent( const char *event, int position, int flags, int intensity, float angle, float height );
 void VKeyboard_Show( void );
 void VKeyboard_Hide( void );

@@ -38,10 +38,11 @@ cvar_t *vr_mirrorWidth = NULL;
 cvar_t *vr_mirrorHeight = NULL;
 cvar_t *vr_virtualScreenMode = NULL;
 cvar_t *vr_screenCurvature = NULL;
-cvar_t *vr_weaponAdjust = NULL;
 cvar_t *vr_thumbstickDeadzone = NULL;
 cvar_t *vr_thumbstickFullDeflection = NULL;
 cvar_t *vr_triggerSensitivity = NULL;
+cvar_t *vr_gripThreshold = NULL;
+cvar_t *vr_trackpadThreshold = NULL;
 cvar_t *vr_analogWalk = NULL;
 cvar_t *vr_foveation = NULL;
 cvar_t *vr_foveationStrength = NULL;
@@ -58,12 +59,34 @@ void VR_InitMirrorCvars( void ) {
 	Cvar_CheckRange( vr_mirrorHeight, "240", "16384", CV_INTEGER );
 }
 
+/* Released configs carry VR settings that bindings replaced (button maps, schema, adjust toggle); drop them once. */
+static void VR_UnsetOldButtonMaps( void ) {
+	static const char *slots[] = {
+		"PRIMARYGRIP", "SECONDARYGRIP", "PRIMARYTRIGGER", "SECONDARYTRIGGER",
+		"PRIMARYTHUMBSTICK", "SECONDARYTHUMBSTICK", "A", "B", "X", "Y",
+		"RTHUMBLEFT", "RTHUMBRIGHT", "RTHUMBFORWARD", "RTHUMBBACK",
+		"RTHUMBFORWARDRIGHT", "RTHUMBBACKRIGHT", "RTHUMBBACKLEFT", "RTHUMBFORWARDLEFT",
+		"PRIMARYTRACKPAD", "SECONDARYTRACKPAD", "PRIMARYTHUMBREST", "SECONDARYTHUMBREST",
+		"LBUMPER", "RBUMPER", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT",
+		"PRIMARYGRIPCLICK", "SECONDARYGRIPCLICK"
+	};
+	int i, alternate;
+	for ( i = 0; i < (int)ARRAY_LEN( slots ); i++ )
+		for ( alternate = 0; alternate < 2; alternate++ ) {
+			const char *name = va( "vr_button_map_%s%s", slots[i], alternate ? "_ALT" : "" );
+			if ( Cvar_Flags( name ) & CVAR_USER_CREATED )
+				Cbuf_AddText( va( "unset %s\n", name ) );
+		}
+	if ( Cvar_Flags( "vr_controlSchema" ) & CVAR_USER_CREATED )
+		Cbuf_AddText( "unset vr_controlSchema\n" );
+	if ( Cvar_Flags( "vr_weaponAdjust" ) & CVAR_USER_CREATED )
+		Cbuf_AddText( "unset vr_weaponAdjust\n" );
+}
+
 void VR_InitCvars( void )
 {
 	cvar_t *vr_hudDepth;
-	int controlSchema;
-	qboolean uturnEnabled;
-	qboolean switchThumbsticks;
+	VR_UnsetOldButtonMaps();
 	Cvar_Get( "vr_platform", "pc", CVAR_ROM );	// advertise the VR platform to UI modules
 	vr_worldscale = Cvar_Get( "vr_worldscale", "32.0", CVAR_ARCHIVE );
 	vr_worldscaleScaler = Cvar_Get( "vr_worldscaleScaler", "1.0", CVAR_ARCHIVE );
@@ -104,11 +127,14 @@ void VR_InitCvars( void )
 	vr_virtualScreenMode = Cvar_Get( "vr_virtualScreenMode", "0", CVAR_ARCHIVE ); // 0 - fixed, 1 - follow
 	vr_screenCurvature = Cvar_Get( "vr_screenCurvature", "0.5", CVAR_ARCHIVE ); // 0 - flat, 1 - tightest curve
 	Cvar_CheckRange( vr_screenCurvature, "0", "1", CV_FLOAT );
-	vr_weaponAdjust = Cvar_Get( "vr_weaponAdjust", "0", CVAR_ARCHIVE ); // 0 - disabled, 1 - enabled
 	vr_thumbstickDeadzone = Cvar_Get( "vr_thumbstickDeadzone", "0.15", CVAR_ARCHIVE );
 	vr_thumbstickFullDeflection = Cvar_Get( "vr_thumbstickFullDeflection", "0.85", CVAR_ARCHIVE );
 	vr_triggerSensitivity = Cvar_Get( "vr_triggerSensitivity", "0.25", CVAR_ARCHIVE );
+	vr_gripThreshold = Cvar_Get( "vr_gripThreshold", "0.5", CVAR_ARCHIVE );
+	vr_trackpadThreshold = Cvar_Get( "vr_trackpadThreshold", "0.3", CVAR_ARCHIVE );
 	Cvar_CheckRange( vr_triggerSensitivity, "0.1", "0.9", CV_FLOAT );
+	Cvar_CheckRange( vr_gripThreshold, "0.2", "0.95", CV_FLOAT );
+	Cvar_CheckRange( vr_trackpadThreshold, "0.2", "0.95", CV_FLOAT );
 	vr_analogWalk = Cvar_Get( "vr_analogWalk", "1", CVAR_ARCHIVE ); // 0 - classic always-run, 1 - silent walk below run speed
 
 	// Prefer eye tracking, falling back to fixed foveation or disabled as supported.
@@ -137,101 +163,4 @@ void VR_InitCvars( void )
 	Cvar_Get( "vr_weapon_adjustment_11", "0.8,-5.5,6,0,0,0,0", CVAR_ARCHIVE );
 	Cvar_Get( "vr_weapon_adjustment_12", "0.8,-5.5,6,0,0,0,0", CVAR_ARCHIVE );
 	Cvar_Get( "vr_weapon_adjustment_13", "0.8,-5.5,6,0,0,0,0", CVAR_ARCHIVE );
-
-	Cvar_Get( "vr_uturn", "0", CVAR_ARCHIVE );
-	Cvar_Get( "vr_controlSchema", "0", CVAR_ARCHIVE );
-	uturnEnabled = Cvar_VariableValue( "vr_uturn" ) != 0;
-	controlSchema = (int)Cvar_VariableValue( "vr_controlSchema" ) % 3;
-	if ( controlSchema == 0 ) {
-		// Default schema (weapon wheel on grip)
-		Cvar_Get( "vr_button_map_RTHUMBLEFT", "turnleft", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBRIGHT", "turnright", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBFORWARD", "", CVAR_ARCHIVE );
-		if ( uturnEnabled ) {
-			Cvar_Get( "vr_button_map_RTHUMBBACK", "uturn", CVAR_ARCHIVE );
-		} else {
-			Cvar_Get( "vr_button_map_RTHUMBBACK", "", CVAR_ARCHIVE );
-		}
-		Cvar_Get( "vr_button_map_PRIMARYGRIP", "+weapon_select", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_PRIMARYTHUMBSTICK", "", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBFORWARD_ALT", "", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBRIGHT_ALT", "", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBBACK_ALT", "", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBLEFT_ALT", "", CVAR_ARCHIVE );
-	} else if ( controlSchema == 1 ) {
-		// Weapon wheel on thumbstick - all directions as weapon select (useful for HMD wheel)
-		Cvar_Get( "vr_button_map_RTHUMBFORWARD", "+weapon_select", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBRIGHT", "+weapon_select", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBBACK", "+weapon_select", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBLEFT", "+weapon_select", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_PRIMARYTHUMBSTICK", "+weapon_select", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_PRIMARYGRIP", "+alt", CVAR_ARCHIVE ); // switch to alt layout
-		Cvar_Get( "vr_button_map_RTHUMBLEFT_ALT", "turnleft", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBRIGHT_ALT", "turnright", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBFORWARD_ALT", "blank", CVAR_ARCHIVE );
-		if ( uturnEnabled ) {
-			Cvar_Get( "vr_button_map_RTHUMBBACK_ALT", "uturn", CVAR_ARCHIVE );
-		} else {
-			Cvar_Get( "vr_button_map_RTHUMBBACK_ALT", "blank", CVAR_ARCHIVE );
-		}
-	} else {
-		// Weapon wheel disabled - only prev/next weapon switch is active
-		Cvar_Get( "vr_button_map_RTHUMBLEFT", "turnleft", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBRIGHT", "turnright", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBFORWARD", "weapnext", CVAR_ARCHIVE );
-		if ( uturnEnabled ) {
-			Cvar_Get( "vr_button_map_RTHUMBBACK", "uturn", CVAR_ARCHIVE );
-		} else {
-			Cvar_Get( "vr_button_map_RTHUMBBACK", "weapprev", CVAR_ARCHIVE );
-		}
-		Cvar_Get( "vr_button_map_PRIMARYGRIP", "+alt", CVAR_ARCHIVE ); // switch to alt layout
-		Cvar_Get( "vr_button_map_PRIMARYTHUMBSTICK", "", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBFORWARD_ALT", "", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBRIGHT_ALT", "", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBBACK_ALT", "", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_RTHUMBLEFT_ALT", "", CVAR_ARCHIVE );
-	}
-
-	// Face buttons follow the movement thumbstick: one thumb cannot move and jump at once
-	switchThumbsticks = Cvar_VariableValue( "vr_switchThumbsticks" ) != 0;
-	if ( switchThumbsticks ) {
-		Cvar_Get( "vr_button_map_A", "+button2", CVAR_ARCHIVE ); // Use Item
-		Cvar_Get( "vr_button_map_B", "togglemenu", CVAR_ARCHIVE );
-		Cvar_Get( "vr_button_map_X", "+moveup", CVAR_ARCHIVE ); // Jump
-		Cvar_Get( "vr_button_map_Y", "+movedown", CVAR_ARCHIVE ); // Crouch
-	} else {
-		Cvar_Get( "vr_button_map_A", "+moveup", CVAR_ARCHIVE ); // Jump
-		Cvar_Get( "vr_button_map_B", "+movedown", CVAR_ARCHIVE ); // Crouch
-		Cvar_Get( "vr_button_map_X", "+button2", CVAR_ARCHIVE ); // Use Item
-		Cvar_Get( "vr_button_map_Y", "togglemenu", CVAR_ARCHIVE );
-	}
-
-	//Remaining button mapping (buttons not affected by schemas)
-	Cvar_Get( "vr_button_map_A_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_B_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_X_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_Y_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_SECONDARYTHUMBSTICK", "+scores", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_SECONDARYTHUMBSTICK_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_PRIMARYTHUMBSTICK_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_SECONDARYTRIGGER", "+moveup", CVAR_ARCHIVE ); // Also Jump
-	Cvar_Get( "vr_button_map_SECONDARYTRIGGER_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_PRIMARYTRIGGER", "+attack", CVAR_ARCHIVE ); // Fire
-	Cvar_Get( "vr_button_map_PRIMARYTRIGGER_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_SECONDARYGRIP", "+weapon_stabilise", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_SECONDARYGRIP_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_PRIMARYGRIP_ALT", "", CVAR_ARCHIVE );
-
-	Cvar_Get( "vr_button_map_PRIMARYTRACKPAD", "+scores", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_PRIMARYTRACKPAD_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_SECONDARYTRACKPAD", "togglemenu", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_SECONDARYTRACKPAD_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_PRIMARYTHUMBREST", "+alt", CVAR_ARCHIVE ); // Alt modifier
-	Cvar_Get( "vr_button_map_PRIMARYTHUMBREST_ALT", "", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_SECONDARYTHUMBREST", "+alt", CVAR_ARCHIVE ); // Alt modifier
-	Cvar_Get( "vr_button_map_SECONDARYTHUMBREST_ALT", "", CVAR_ARCHIVE );
-
-	// Steam Frame bumpers; other controllers never press these slots
-	Cvar_Get( "vr_button_map_LBUMPER", "+alt", CVAR_ARCHIVE );
-	Cvar_Get( "vr_button_map_RBUMPER", "+alt", CVAR_ARCHIVE );
 }

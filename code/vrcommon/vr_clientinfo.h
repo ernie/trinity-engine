@@ -66,7 +66,7 @@ typedef struct vr_clientinfo_s {
 	vec3_t offhandoffset;
 	vec3_t offhandposition;
 
-	vec2_t thumbstick_location[2]; //left / right
+	vec2_t thumbstick_location[2]; // by role: VR_STICK_MOVE, VR_STICK_TURN
 
 	qboolean walking;	// analog walk/run: true => assert BUTTON_WALKING (silent walk, no footsteps)
 

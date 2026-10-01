@@ -186,7 +186,7 @@ IF(MINGW AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(A
 	SET_SOURCE_FILES_PROPERTIES(code/asm/snd_mix_x86_64.s PROPERTIES
 		COMPILE_OPTIONS "-x;assembler-with-cpp;-DELF")
 ENDIF()
-list(APPEND CLIENT_SRCS code/vrcommon/vr_cvars.c code/vrcommon/xr_loader.c)
+list(APPEND CLIENT_SRCS code/vrcommon/vr_cvars.c code/vrcommon/vr_bind.c code/vrcommon/xr_loader.c)
 IF(NOT USE_CURL)
 	list(REMOVE_ITEM CLIENT_SRCS code/client/cl_curl.c)
 ENDIF()

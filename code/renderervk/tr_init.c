@@ -2216,6 +2216,7 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.XRSetVirtualScreen = VK_XR_SetVirtualScreen;
 	re.XRSetZoom = VK_XR_SetZoom;
 	re.XRResolutionChanged = VK_XR_ResolutionChanged;
+	re.XREyeSize = VK_XR_EyeSize;
 	re.DesktopTrackingStatus = VK_DesktopTrackingStatus;
 	re.SceneComplete = RE_FinishBloom;
 	re.HUDBufferStart = RE_HUDBufferStart;

@@ -50,13 +50,13 @@ static inline const char *CL_XRProfileComponent( int profile, const char *action
 			return "input/bumper/click";
 		if ( !strcmp( action, "squeeze_click" ) )
 			return "input/squeeze/click";
-		if ( !strcmp( action, "trackpad" ) || !strcmp( action, "thumbrest" ) || !strcmp( action, "simple_menu" ) )
+		if ( !strcmp( action, "trackpad" ) || !strcmp( action, "thumbrest" ) )
 			return NULL;
 	}
 	if ( profile == CL_XRP_SIMPLE ) {
 		if ( !strcmp( action, "trigger" ) )
 			return "input/select/click";
-		if ( !strcmp( action, "simple_menu" ) )
+		if ( !strcmp( action, "menu" ) )
 			return "input/menu/click";
 		return NULL;
 	}
@@ -73,7 +73,7 @@ static inline const char *CL_XRProfileComponent( int profile, const char *action
 	if ( !strcmp( action, "secondary" ) )
 		return hand || profile == CL_XRP_INDEX ? "input/b/click" : "input/y/click";
 	if ( !strcmp( action, "menu" ) )
-		return hand ? NULL : profile == CL_XRP_INDEX ? "input/system/click" : "input/menu/click";
+		return hand || profile == CL_XRP_INDEX ? NULL : "input/menu/click";
 	if ( !strcmp( action, "trackpad" ) )
 		return profile == CL_XRP_INDEX ? "input/trackpad/force" : NULL;
 	if ( !strcmp( action, "thumbrest" ) )
@@ -86,7 +86,7 @@ static inline const char *CL_XRProfileComponent( int profile, const char *action
 
 static const char *xriNames[CL_XRI_ACTIONS] = {
 	"trigger",	 "squeeze",	 "stick",  "stick_click", "primary",   "secondary",	 "menu",
-	"grip_pose", "aim_pose", "haptic", "trackpad",	  "thumbrest", "simple_menu", "bumper",
+	"grip_pose", "aim_pose", "haptic", "trackpad",	  "thumbrest", "bumper",
 	"dpad_up",	 "dpad_down", "dpad_left", "dpad_right", "view", "x", "y", "squeeze_click"};
 static XrResult XRI_Suggest( vkXRInput_t *ctx, int profile ) {
 	XrActionSuggestedBinding bindings[CL_XRI_ACTIONS * 2];
@@ -123,7 +123,7 @@ XrResult VK_XRInput_Init( vkXRInput_t *ctx, XrInstance instance, PFN_xrGetInstan
 		XR_ACTION_TYPE_BOOLEAN_INPUT,	 XR_ACTION_TYPE_BOOLEAN_INPUT, XR_ACTION_TYPE_BOOLEAN_INPUT,
 		XR_ACTION_TYPE_BOOLEAN_INPUT,	 XR_ACTION_TYPE_POSE_INPUT,	   XR_ACTION_TYPE_POSE_INPUT,
 		XR_ACTION_TYPE_VIBRATION_OUTPUT, XR_ACTION_TYPE_FLOAT_INPUT,   XR_ACTION_TYPE_BOOLEAN_INPUT,
-		XR_ACTION_TYPE_BOOLEAN_INPUT,	 XR_ACTION_TYPE_BOOLEAN_INPUT, XR_ACTION_TYPE_BOOLEAN_INPUT,
+		XR_ACTION_TYPE_BOOLEAN_INPUT,	 XR_ACTION_TYPE_BOOLEAN_INPUT,
 		XR_ACTION_TYPE_BOOLEAN_INPUT,	 XR_ACTION_TYPE_BOOLEAN_INPUT, XR_ACTION_TYPE_BOOLEAN_INPUT,
 		XR_ACTION_TYPE_BOOLEAN_INPUT,	 XR_ACTION_TYPE_BOOLEAN_INPUT, XR_ACTION_TYPE_BOOLEAN_INPUT,
 		XR_ACTION_TYPE_BOOLEAN_INPUT};
@@ -269,6 +269,13 @@ float VK_XRInput_PitchCorrection( const vkXRInput_t *ctx, int hand ) {
 	return ctx && ctx->session && hand >= 0 && hand < 2 ? CL_XRProfilePitch( ctx->profile[hand] ) : 0;
 }
 
+/* A neutral sample still names each hand's controller; the bindings need it even while unfocused. */
+static void XRI_ClearSample( const vkXRInput_t *ctx, clXRInputSample_t *sample ) {
+	memset( sample, 0, sizeof( *sample ) );
+	sample->hands[0].profile = ctx ? ctx->profile[0] : -1;
+	sample->hands[1].profile = ctx ? ctx->profile[1] : -1;
+}
+
 XrResult VK_XRInput_Sample( vkXRInput_t *ctx, XrSpace baseSpace, XrTime time, int focused,
 							clXRInputSample_t *sample ) {
 	XrActiveActionSet active;
@@ -277,7 +284,7 @@ XrResult VK_XRInput_Sample( vkXRInput_t *ctx, XrSpace baseSpace, XrTime time, in
 	unsigned hand, i;
 	if ( !sample )
 		return XR_ERROR_VALIDATION_FAILURE;
-	memset( sample, 0, sizeof( *sample ) );
+	XRI_ClearSample( ctx, sample );
 	if ( !ctx || !ctx->session )
 		return XR_ERROR_HANDLE_INVALID;
 	if ( !focused ) {
@@ -315,10 +322,9 @@ XrResult VK_XRInput_Sample( vkXRInput_t *ctx, XrSpace baseSpace, XrTime time, in
 			get.action = ctx->actions[i == 2 ? CL_XRI_TRACKPAD : i ? CL_XRI_SQUEEZE : CL_XRI_TRIGGER];
 			SAMPLE( ctx->xr.GetActionStateFloat( ctx->session, &get, &state ) );
 			if ( state.isActive && VR_FloatFinite( state.currentState ) ) {
-				if ( i == 2 ) {
-					if ( state.currentState > .3f )
-						out->buttons |= CL_XRI_TRACKPAD_BUTTON;
-				} else if ( i )
+				if ( i == 2 )
+					out->trackpad = state.currentState;
+				else if ( i )
 					out->squeeze = state.currentState;
 				else
 					out->trigger = state.currentState;
@@ -352,23 +358,16 @@ XrResult VK_XRInput_Sample( vkXRInput_t *ctx, XrSpace baseSpace, XrTime time, in
 					out->buttons |= bits[i - CL_XRI_STICK_CLICK];
 			}
 		}
-		for ( i = CL_XRI_THUMBREST; i <= CL_XRI_SIMPLE_MENU; i++ ) {
+		{
 			XrActionStateBoolean state;
 			memset( &state, 0, sizeof( state ) );
 			state.type = XR_TYPE_ACTION_STATE_BOOLEAN;
-			get.action = ctx->actions[i];
+			get.action = ctx->actions[CL_XRI_THUMBREST];
 			SAMPLE( ctx->xr.GetActionStateBoolean( ctx->session, &get, &state ) );
 			if ( state.isActive ) {
 				out->active = 1;
-				if ( state.currentState ) {
-					if ( i == CL_XRI_THUMBREST )
-						out->buttons |= CL_XRI_THUMBREST_BUTTON;
-					/* Simple-controller menus map left to A and right to X, the other hand's primary. */
-					else {
-						sample->hands[1 - hand].buttons |= CL_XRI_PRIMARY_BUTTON;
-						sample->hands[1 - hand].active = 1;
-					}
-				}
+				if ( state.currentState )
+					out->buttons |= CL_XRI_THUMBREST_BUTTON;
 			}
 		}
 		for ( i = CL_XRI_BUMPER; i <= CL_XRI_SQUEEZE_CLICK; i++ ) {
@@ -417,7 +416,7 @@ XrResult VK_XRInput_Sample( vkXRInput_t *ctx, XrSpace baseSpace, XrTime time, in
 	ctx->focused = sample->focused = 1;
 	return XR_SUCCESS;
 fail:
-	memset( sample, 0, sizeof( *sample ) );
+	XRI_ClearSample( ctx, sample );
 	VK_XRInput_Reset( ctx );
 	return result;
 #undef SAMPLE

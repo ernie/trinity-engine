@@ -25,6 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cl_renderer_recovery.h"
 #include "cl_vr.h"
 #include "cl_vr_modules.h"
+#include "cl_vr_bind.h"
 #include "../vrcommon/vr_state.h"
 #include "cl_discord.h"
 #include "cl_trinity.h"
@@ -85,6 +86,22 @@ cvar_t	*cl_demoPlayer;
 cvar_t	*cl_tvdOffer;
 cvar_t	*cl_voteYesKey;
 cvar_t	*cl_voteNoKey;
+
+/* The vote prompts name the button that votes: the VR vote binding in VR, else the keyboard's "vote" binds. */
+void CL_ResolveVoteKeys( void ) {
+	static const char *commands[2][2] = {{"vote yes", "+vote_yes"}, {"vote no", "+vote_no"}};
+	static const char *cvars[2] = {"cl_voteYesKey", "cl_voteNoKey"};
+	char name[64];
+	int i, keynum;
+	for ( i = 0; i < 2; i++ ) {
+		if ( VR_IsActiveMode() && CL_VRBind_NameFor( "vote", commands[i][1], name, sizeof( name ) ) ) {
+			Cvar_Set( cvars[i], name );
+			continue;
+		}
+		keynum = Key_GetKey( commands[i][0] );
+		Cvar_Set( cvars[i], keynum >= 0 ? Key_KeynumToString( keynum ) : "" );
+	}
+}
 
 cvar_t	*cl_reconnectArgs;
 
@@ -3277,16 +3294,7 @@ void CL_Frame( int msec, int realMsec ) {
 			Cvar_Set( "cl_tvdOffer", clc.tvDemoPendingLocal );
 
 			// resolve vote key bindings for cgame display
-			{
-				int keynum;
-				const char *name;
-				keynum = Key_GetKey( "vote yes" );
-				name = keynum >= 0 ? Key_KeynumToString( keynum ) : NULL;
-				Cvar_Set( "cl_voteYesKey", name && name[0] ? name : "" );
-				keynum = Key_GetKey( "vote no" );
-				name = keynum >= 0 ? Key_KeynumToString( keynum ) : NULL;
-				Cvar_Set( "cl_voteNoKey", name && name[0] ? name : "" );
-			}
+			CL_ResolveVoteKeys();
 		} else {
 			Com_DPrintf( "TV: sv_dlURL not set, skipping demo download\n" );
 		}

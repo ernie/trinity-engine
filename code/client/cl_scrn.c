@@ -27,6 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cl_vr_modules.h"
 #include "../vrcommon/vr_state.h"
 #include "../vrcommon/vr_screen_geometry.h"
+#include "cl_vr_bind.h"
 
 static qboolean	scr_initialized;		// ready to draw
 
@@ -589,6 +590,11 @@ static void SCR_DrawVRNotice( void ) {
 	qboolean hud = qfalse;
 
 	lines[0] = CL_VRModulesNotice( &lines[1] );
+	if ( !lines[0] && VR_IsActiveMode() && CL_VRBind_Profile() >= 0 &&
+		 VR_ProfileFamily( CL_VRBind_Profile() ) == VRF_SIMPLE ) {
+		lines[0] = "This controller isn't supported for play.";
+		lines[1] = "Use a supported controller or switch to flatscreen.";
+	}
 	if ( !lines[0] ) {
 		return;
 	}

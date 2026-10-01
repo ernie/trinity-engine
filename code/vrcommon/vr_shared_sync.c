@@ -205,4 +205,9 @@ void VR_SharedModuleUnloaded( int writer ) {
 		vr.menuYawLocked = qfalse;
 		vr.scoreboardCursorActive = qfalse;
 	}
+	// cgame owns these; left set, they pin the input router in weapon adjust or a vote after the game is gone
+	if ( writer == VR_WRITER_CGAME ) {
+		vr.weapon_adjust = qfalse;
+		vr.vote_active = qfalse;
+	}
 }

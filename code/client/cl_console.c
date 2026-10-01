@@ -106,6 +106,14 @@ static void Con_ToggleMenu_f( void ) {
 	CL_KeyEvent( K_ESCAPE, qfalse, Sys_Milliseconds() );
 }
 
+/* Closes the console and the in-game menu. Game-view commands run from them, the only way in on headsets without a keyboard. */
+static void Con_ReturnToGame_f( void ) {
+	if ( Key_GetCatcher() & KEYCATCH_CONSOLE )
+		Con_Close();
+	if ( (Key_GetCatcher() & KEYCATCH_UI) && uivm && cls.state == CA_ACTIVE )
+		VM_Call( uivm, 1, UI_SET_ACTIVE_MENU, UIMENU_NONE );
+}
+
 /*
 ================
 Con_MessageMode_f
@@ -423,6 +431,7 @@ void Con_Init( void )
 	Cmd_AddCommand( "messagemode2", Con_MessageMode2_f );
 	Cmd_AddCommand( "messagemode3", Con_MessageMode3_f );
 	Cmd_AddCommand( "messagemode4", Con_MessageMode4_f );
+	Cmd_AddCommand( "returntogame", Con_ReturnToGame_f );
 }
 
 
@@ -441,6 +450,7 @@ void Con_Shutdown( void )
 	Cmd_RemoveCommand( "messagemode2" );
 	Cmd_RemoveCommand( "messagemode3" );
 	Cmd_RemoveCommand( "messagemode4" );
+	Cmd_RemoveCommand( "returntogame" );
 }
 
 

@@ -254,8 +254,17 @@ static void IN_StrafeDown(void) {IN_KeyDown(&in_strafe);}
 static void IN_StrafeUp(void) {IN_KeyUp(&in_strafe);}
 
 #ifdef USE_VOIP
-static void IN_VoipRecordDown(void) { Cvar_Set( "cl_voipCapture", "1" ); }
-static void IN_VoipRecordUp(void) { Cvar_Set( "cl_voipCapture", "0" ); }
+/* Push-to-talk, or with voice activation on, the mute toggle: one binding serves both modes. */
+static void IN_VoipRecordDown(void) {
+	if ( cl_voipUseVAD->integer )
+		Cvar_Set( "cl_voipVADMuted", Cvar_VariableIntegerValue( "cl_voipVADMuted" ) ? "0" : "1" );
+	else
+		Cvar_Set( "cl_voipCapture", "1" );
+}
+static void IN_VoipRecordUp(void) {
+	if ( !cl_voipUseVAD->integer )
+		Cvar_Set( "cl_voipCapture", "0" );
+}
 #endif
 
 static void IN_Button0Down(void) {IN_KeyDown(&in_buttons[0]);}
@@ -328,7 +337,7 @@ CL_KeyMove
 Sets the usercmd_t based on key states
 ================
 */
-static void CL_KeyMove( usercmd_t *cmd ) {
+static void CL_KeyMove( usercmd_t *cmd, qboolean run ) {
 	int		movespeed;
 	int		forward, side, up;
 
@@ -337,7 +346,7 @@ static void CL_KeyMove( usercmd_t *cmd ) {
 	// the walking flag is to keep animations consistent
 	// even during acceleration and deceleration
 	//
-	if ( in_speed.active ^ cl_run->integer ) {
+	if ( run ) {
 		movespeed = 127;
 		cmd->buttons &= ~BUTTON_WALKING;
 	} else {
@@ -568,6 +577,14 @@ static void CL_CmdButtons( usercmd_t *cmd ) {
 }
 
 
+/* VR builds its own command; bound keys still feed buttons and digital movement. */
+void CL_VRInput_KeyState( usercmd_t *cmd ) {
+	CL_CmdButtons( cmd );
+	// Always Run is a keyboard setting; VR walks only while +speed is held
+	CL_KeyMove( cmd, !in_speed.active );
+}
+
+
 /*
 ==============
 CL_FinishMove
@@ -612,7 +629,7 @@ static usercmd_t CL_CreateCmd( void ) {
 	CL_CmdButtons( &cmd );
 
 	// get basic movement from keyboard
-	CL_KeyMove( &cmd );
+	CL_KeyMove( &cmd, in_speed.active ^ cl_run->integer );
 
 	// get basic movement from mouse
 	CL_MouseMove( &cmd );

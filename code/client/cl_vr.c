@@ -5,6 +5,7 @@
 #include "cl_vr_state.h"
 #include "cl_renderer_recovery.h"
 #include "../qcommon/vm_vr.h"
+#include "../vrcommon/vr_bind.h"
 #include "../vrcommon/vr_defaults.h"
 #include "../vrcommon/vr_state.h"
 #include "../vrcommon/xr_loader.h"
@@ -486,6 +487,7 @@ static qboolean CL_VR_UseVirtualScreen( void ) {
 	} else
 		vr.sp_intermission_active = qfalse;
 	vr.in_menu = menu;
+	vr.follow_mode = VR_FollowModeFor( Cvar_VariableIntegerValue( "cg_followMode" ), tvPlay.active );
 	vr.first_person_following = ((cl.snap.ps.pm_flags & PMF_FOLLOW) || clc.demoplaying) &&
 								vr.follow_mode == VRFM_FIRSTPERSON;
 	if ( menu && !(intermission && CL_VR_Gametype() == GT_SINGLE_PLAYER) )

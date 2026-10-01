@@ -458,10 +458,12 @@
     <ClCompile Include="..\..\client\cl_vr_modules.c" />
     <ClCompile Include="..\..\client\cl_vr_state.c" />
     <ClCompile Include="..\..\client\cl_vr_input.c" />
+    <ClCompile Include="..\..\client\cl_vr_bind.c" />
     <ClCompile Include="..\..\client\cl_bhaptics.c" />
     <ClCompile Include="..\..\client\cl_keyboard.c" />
     <ClCompile Include="..\..\client\cl_renderer_recovery.c" />
     <ClCompile Include="..\..\vrcommon\vr_cvars.c" />
+    <ClCompile Include="..\..\vrcommon\vr_bind.c" />
     <ClCompile Include="..\..\vrcommon\xr_loader.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

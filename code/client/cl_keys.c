@@ -745,9 +745,11 @@ Called by the system for both key up and key down events
 */
 void CL_KeyEvent( int key, qboolean down, unsigned time )
 {
-	if ( down )
+	if ( down ) {
+		/* A keyboard or mouse press means the player stopped waiting to bind a VR button. */
+		CL_VRInput_CancelCapture();
 		CL_KeyDownEvent( key, time );
-	else
+	} else
 		CL_KeyUpEvent( key, time );
 }
 

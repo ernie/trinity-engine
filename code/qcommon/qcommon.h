@@ -1217,6 +1217,10 @@ void Key_KeynameCompletion( void(*callback)(const char *s) );
 void Key_WriteBindings( fileHandle_t f );
 // for writing the config files
 
+void CL_VRBind_InitCommands( void );
+void CL_VRBind_Write( fileHandle_t f );
+// VR context bindings, registered with the key commands and saved beside them
+
 void S_ClearSoundBuffer( void );
 // call before filesystem access
 

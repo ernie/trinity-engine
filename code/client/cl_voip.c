@@ -87,7 +87,7 @@ void CL_VoipCvarInit( void )
 	cl_voipMuteTeam = Cvar_Get( "cl_voipMuteTeam", "0", CVAR_ARCHIVE_ND );
 	cl_voipMuteAll = Cvar_Get( "cl_voipMuteAll", "0", CVAR_ARCHIVE_ND );
 	cl_voipVADMuted = Cvar_Get( "cl_voipVADMuted", "0", CVAR_ARCHIVE_ND );
-	Cvar_SetDescription( cl_voipVADMuted, "When set, VAD-captured audio frames are discarded. Inert in PTT mode." );
+	Cvar_SetDescription( cl_voipVADMuted, "When set, VAD-captured audio frames are discarded; +voiprecord toggles it while cl_voipUseVAD is 1. Inert in PTT mode." );
 }
 
 

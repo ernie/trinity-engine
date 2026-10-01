@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "client.h"
 #include "cl_vr_input.h"
+#include "cl_vr_bind.h"
 #include "cl_vr_modules.h"
 #include "../qcommon/vm_vr.h"
 #include "../vrcommon/vr_state.h"
@@ -840,6 +841,16 @@ static qboolean UI_GetValue( char* value, int valueSize, const char* key ) {
 		return qtrue;
 	}
 
+	/* The UI reads these at init, while the VR renderer may still be coming up, so they share RegisterState's gate. */
+	if ( VR_IsActiveMode() || CL_VR_RestartWantsVR() ) {
+		if ( !Q_stricmp( key, "trap_VR_BindCapture" ) ) {
+			Com_sprintf( value, valueSize, "%i", UI_VR_BINDCAPTURE );
+			return qtrue;
+		}
+		if ( !Q_stricmp( key, "vr_keyfirst" ) )
+			return CL_VRBind_GetValue( key, value, valueSize );
+	}
+
 	if ( !Q_stricmp( key, "trap_R_AddRefEntityToScene2" ) ) {
 		Com_sprintf( value, valueSize, "%i", UI_R_ADDREFENTITYTOSCENE2 );
 		return qtrue;
@@ -855,14 +866,8 @@ static qboolean UI_GetValue( char* value, int valueSize, const char* key ) {
 		return qtrue;
 	}
 
-	if ( VR_IsActiveMode() && !Q_stricmp( key, "vr_menu_skip_button" ) ) {
-		Q_strncpyz( value, CL_VRInput_MenuSkipName(), valueSize );
+	if ( VR_IsActiveMode() && CL_VRBind_GetValue( key, value, valueSize ) )
 		return qtrue;
-	}
-	if ( VR_IsActiveMode() && !Q_stricmp( key, "vr_menu_cancel_button" ) ) {
-		Q_strncpyz( value, CL_VRInput_MenuCancelName(), valueSize );
-		return qtrue;
-	}
 
 	return qfalse;
 }
@@ -1283,6 +1288,9 @@ static intptr_t CL_UISystemCalls( intptr_t *args ) {
 		return VR_IsActiveMode() && VKeyboard_HandleKey( args[1] );
 	case UI_VR_REGISTERSTATE:
 		VM_RegisterVRShared( uivm, VR_WRITER_UI, args[1], args[2], args[3], args[4] );
+		return 0;
+	case UI_VR_BINDCAPTURE:
+		CL_VRInput_BindCapture();
 		return 0;
 
 	case UI_TRAP_GETVALUE:

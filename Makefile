@@ -1264,9 +1264,11 @@ Q3OBJ = \
   $(B)/client/cl_vr_modules.o \
   $(B)/client/cl_vr_state.o \
   $(B)/client/cl_vr_input.o \
+  $(B)/client/cl_vr_bind.o \
   $(B)/client/cl_bhaptics.o \
   $(B)/client/cl_keyboard.o \
   $(B)/client/vr_cvars.o \
+  $(B)/client/vr_bind.o \
   $(B)/client/xr_loader.o \
   $(B)/client/cl_renderer_recovery.o \
   $(B)/client/cl_net_chan.o \

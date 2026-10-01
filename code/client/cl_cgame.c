@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "cl_vr.h"
 #include "cl_vr_input.h"
+#include "cl_vr_bind.h"
 #include "cl_vr_modules.h"
 #include "../qcommon/vm_vr.h"
 #include "../vrcommon/vr_state.h"
@@ -252,14 +253,7 @@ static void CL_ConfigstringModified( void ) {
 	if ( index == CS_VOTE_TIME
 		|| index == CS_TEAMVOTE_TIME
 		|| index == CS_TEAMVOTE_TIME + 1 ) {
-		int keynum;
-		const char *name;
-		keynum = Key_GetKey( "vote yes" );
-		name = keynum >= 0 ? Key_KeynumToString( keynum ) : NULL;
-		Cvar_Set( "cl_voteYesKey", name && name[0] ? name : "" );
-		keynum = Key_GetKey( "vote no" );
-		name = keynum >= 0 ? Key_KeynumToString( keynum ) : NULL;
-		Cvar_Set( "cl_voteNoKey", name && name[0] ? name : "" );
+		CL_ResolveVoteKeys();
 	}
 }
 
@@ -493,6 +487,9 @@ static void CL_BuildVoipHexMask( const byte *mask, char *hex, int hexSize ) {
 #endif
 
 static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
+
+	if ( VR_IsActiveMode() && CL_VRBind_GetValue( key, value, valueSize ) )
+		return qtrue;
 
 	if ( !Q_stricmp( key, "trap_R_SceneComplete" ) ) {
 		Com_sprintf( value, valueSize, "%i", CG_R_SCENE_COMPLETE );

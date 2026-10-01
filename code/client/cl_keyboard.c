@@ -787,6 +787,11 @@ static void VKeyboard_DismissWithConsole( void ) {
 	if ( Key_GetCatcher() & KEYCATCH_CONSOLE ) {
 		Con_ToggleConsole_f();
 	}
+	// Chat has no other way to receive input once the keyboard is gone
+	if ( Key_GetCatcher() & KEYCATCH_MESSAGE ) {
+		Key_SetCatcher( Key_GetCatcher() & ~KEYCATCH_MESSAGE );
+		Field_Clear( &chatField );
+	}
 }
 
 /*

@@ -2,49 +2,30 @@
 #include "client.h"
 #include "cl_vr_input.h"
 #include "cl_vr.h"
+#include "cl_vr_bind.h"
 #include "cl_bhaptics.h"
 #include "../vrcommon/vr_state.h"
 #include "../vrcommon/vr_input_types.h"
 
-#define VR_INPUT_SLOTS 30
 static clBHaptics_t suitHaptics;
 static qboolean suitEnabled;
 static cvar_t *vrSensitivity;
 static cvar_t *cgStereoSeparation;
-static const char *bindingSlots[VR_INPUT_SLOTS] = {
-	"PRIMARYGRIP", "SECONDARYGRIP", "PRIMARYTRIGGER", "SECONDARYTRIGGER",
-	"PRIMARYTHUMBSTICK", "SECONDARYTHUMBSTICK", "A", "B", "X", "Y",
-	"RTHUMBLEFT", "RTHUMBRIGHT", "RTHUMBFORWARD", "RTHUMBBACK",
-	"RTHUMBFORWARDRIGHT", "RTHUMBBACKRIGHT", "RTHUMBBACKLEFT", "RTHUMBFORWARDLEFT",
-	"PRIMARYTRACKPAD", "SECONDARYTRACKPAD", "PRIMARYTHUMBREST", "SECONDARYTHUMBREST",
-	"LBUMPER", "RBUMPER", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT",
-	"PRIMARYGRIPCLICK", "SECONDARYGRIPCLICK"
-};
-static cvar_t *bindings[VR_INPUT_SLOTS][2];
 /* The runtime's FOV, before VRInput_PublishFov decides what the frame sees */
 static float rawFovX = 90, rawFovUp = (float)M_PI / 4, rawFovDown = -(float)M_PI / 4;
 static struct {
 	clXRInputSample_t sample;
-	qboolean valid, tracked, menuDown, viewDown;
+	qboolean valid, tracked;
 	int time, previousTime;
-	int navKey, navNext, navAnchorX, navAnchorY;
-	int triggerKey[2], adjustStart, dualGripStart;
-	qboolean triggers[2], triggerDelivered[2], triggerKeyboard[2], dualGripHeld;
-	qboolean physical[VR_INPUT_SLOTS];
-	qboolean faceSpace;
-	qboolean scrubGrip, scrubNeedsRelease, scrubReserved;
 	int hapticEnd[2];
-	int scrubHand;
-	char held[VR_INPUT_SLOTS][128];
-	unsigned heldMask;
 } input;
-
-const char *CL_VRInput_MenuSkipName( void ) {
-	return bindingSlots[6]; // hands[1]'s primary face button, fixed regardless of vr_righthanded
-}
-const char *CL_VRInput_MenuCancelName( void ) {
-	return "MENU";
-}
+/* Controller keys: the hold machine owns every press until its release, whatever the context does meanwhile. */
+static vrHolds_t holds;
+static qboolean holdsReady;
+static vrStack_t stack;
+static unsigned char keysNow[VRK_COUNT];
+static int weaponSelectHeld, stabiliseHeld;
+static int clickKey[VRK_COUNT], navKey[VRK_COUNT], navAnchorX, navAnchorY;
 
 /* The virtual screen is a monitor: the player's cg_fov over a symmetric crop, so its crop and 2D
  * center geometrically; derived from vr.virtual_screen so the two agree within a frame. */
@@ -75,19 +56,7 @@ static float VRInput_Cvar( const cvar_t *cv, float fallback ) {
 }
 
 float CL_VRInput_StickCurve( float value, float deadzone ) {
-	float magnitude;
-	if ( !VR_FloatFinite( value ) || !VR_FloatFinite( deadzone ) )
-		return 0;
-	magnitude = fabsf( value );
-	if ( deadzone < 0 )
-		deadzone = 0;
-	if ( deadzone > .95f )
-		deadzone = .95f;
-	if ( magnitude <= deadzone )
-		return 0;
-	if ( magnitude > 1 )
-		magnitude = 1;
-	return (value < 0 ? -1 : 1) * (magnitude - deadzone) / (1 - deadzone);
+	return VR_StickCurve( value, deadzone );
 }
 
 void CL_VRInput_QuaternionAngles( const float quaternion[4], float gripPitch, vec3_t angles ) {
@@ -125,89 +94,268 @@ void CL_VRInput_QuaternionAngles( const float quaternion[4], float gripPitch, ve
 	angles[ROLL] = atan2f( -rightZ, upZ ) * 180 / (float)M_PI;
 }
 
-static qboolean VRInput_Direct( const char *action ) {
-	return !strcmp( action, "+attack" ) || !strcmp( action, "+moveup" ) || !strcmp( action, "+movedown" ) ||
-			!strncmp( action, "+button", 7 ) || !strcmp( action, "+speed" );
-}
-static void VRInput_Action( const char *action, qboolean down, int slot ) {
-	if ( !action[0] || !strcmp( action, "blank" ) || VRInput_Direct( action ) || !strcmp( action, "+alt" ) ||
-		!strcmp( action, "+weapon_select" ) || !strcmp( action, "+weapon_stabilise" ) )
-		return;
-	if ( action[0] == '+' )
-		Cbuf_AddText( va( "%c%s %d %d\n", down ? '+' : '-', action + 1, 400 + slot, cls.realtime ) );
-	else if ( down ) {
-		if ( !strcmp( action, "turnleft" ) || !strcmp( action, "turnright" ) || !strcmp( action, "uturn" ) ) {
-			float turn = vr_snapturn->integer == 1 ? 45 : VRInput_Cvar( vr_snapturn, 45 );
-			if ( !strcmp( action, "uturn" ) )
-				turn = 180;
-			else if ( VRInput_Cvar( vr_snapturn, 45 ) <= 0 )
-				return;
-			if ( !strcmp( action, "turnright" ) )
-				turn = -turn;
-			cl.viewangles[YAW] += turn;
-		} else
-			Cbuf_AddText( va( "%s\n", action ) );
+
+static void VRInput_HoldsReady( void ) {
+	if ( !holdsReady ) {
+		VR_HoldsInit( &holds );
+		holdsReady = qtrue;
 	}
 }
-enum {
-	HELD_ATTACK = 1 << 0,
-	HELD_MOVEUP = 1 << 1,
-	HELD_MOVEDOWN = 1 << 2,
-	HELD_SPEED = 1 << 3,
-	HELD_WEAPON_SELECT = 1 << 4,
-	HELD_WEAPON_STABILISE = 1 << 5,
-	HELD_BUTTON0 = 1 << 8 // +button0 .. +button11 occupy bits 8 to 19
-};
 
-static unsigned VRInput_Classify( const char *action ) {
-	if ( !strcmp( action, "+attack" ) ) return HELD_ATTACK;
-	if ( !strcmp( action, "+moveup" ) ) return HELD_MOVEUP;
-	if ( !strcmp( action, "+movedown" ) ) return HELD_MOVEDOWN;
-	if ( !strcmp( action, "+speed" ) ) return HELD_SPEED;
-	if ( !strcmp( action, "+weapon_select" ) ) return HELD_WEAPON_SELECT;
-	if ( !strcmp( action, "+weapon_stabilise" ) ) return HELD_WEAPON_STABILISE;
-	if ( !Q_strncmp( action, "+button", 7 ) ) {
-		int n = atoi( action + 7 );
-		char exact[16];
-		// atoi tolerates leading zeros and trailing junk; a round trip keeps this an exact match.
-		Com_sprintf( exact, sizeof( exact ), "+button%d", n );
-		if ( n >= 0 && n < 12 && !strcmp( action, exact ) )
-			return HELD_BUTTON0 << n;
-	}
-	return 0;
+/* Button commands set their input state now, as the old direct path did; the rest run from the command buffer. */
+static qboolean VRInput_Immediate( const char *word ) {
+	static const char *words[] = {"+attack", "+forward", "+back", "+moveleft", "+moveright", "+moveup", "+movedown",
+								  "+left", "+right", "+lookup", "+lookdown", "+strafe", "+speed", "+mlook", "+key",
+								  "+vr_click", "+menunav", "+weapon_select", "+weapon_stabilise", "+alt", "+vote_yes",
+								  "+vote_no", "turnleft", "turnright", "uturn", "vr_recenter"};
+	unsigned i;
+	char plus[64];
+	Com_sprintf( plus, sizeof( plus ), "+%s", word[0] == '-' || word[0] == '+' ? word + 1 : word );
+	if ( !Q_strncmp( plus, "+button", 7 ) )
+		return qtrue;
+	for ( i = 0; i < ARRAY_LEN( words ); i++ )
+		if ( !Q_stricmp( words[i][0] == '+' ? plus : word, words[i] ) )
+			return qtrue;
+	return qfalse;
 }
 
-static unsigned VRInput_HeldMask( void ) {
-	unsigned mask = 0;
+static void VRInput_Run( const vrBindEvent_t *e, qboolean resetting ) {
+	char buf[VR_BINDING_MAX], cmd[MAX_STRING_CHARS], word[64], *p, *end;
 	int i;
-	for ( i = 0; i < VR_INPUT_SLOTS; i++ )
-		mask |= VRInput_Classify( input.held[i] );
-	return mask;
-}
-void CL_VRInput_Reset( void ) {
-	int i;
-	qboolean needsRelease = input.scrubGrip || input.scrubNeedsRelease;
-
-	CL_BHaptics_Stop( &suitHaptics );
-	if ( input.scrubGrip )
-		Cbuf_AddText( "tv_scrub_cancel\n" );
-	for ( i = 0; i < VR_INPUT_SLOTS; i++ )
-		VRInput_Action( input.held[i], qfalse, i );
-	input.heldMask = 0;
-	if ( input.navKey )
-		CL_KeyEvent( input.navKey, qfalse, cls.realtime );
-	if ( input.faceSpace )
-		CL_KeyEvent( K_SPACE, qfalse, cls.realtime );
-	for ( i = 0; i < 2; i++ )
-		if ( input.triggerDelivered[i] ) {
-			if ( input.triggerKeyboard[i] )
-				VKeyboard_HandleOffhandKey( qfalse );
+	Q_strncpyz( buf, e->binding, sizeof( buf ) );
+	for ( p = buf; p; p = end ) {
+		end = strchr( p, ';' );
+		if ( end )
+			*end++ = '\0';
+		while ( *p == ' ' )
+			p++;
+		if ( !*p )
+			continue;
+		if ( *p == '+' ) {
+			/* Losing input mid-scrub cancels it instead of seeking to wherever the pointer was. */
+			if ( resetting && !Q_stricmpn( p, "+tv_scrub", 9 ) && (p[9] == '\0' || p[9] == ' ') )
+				Q_strncpyz( cmd, "tv_scrub_cancel", sizeof( cmd ) );
 			else
-				CL_KeyEvent( input.triggerKey[i], qfalse, cls.realtime );
-		}
+				Com_sprintf( cmd, sizeof( cmd ), "%c%s %d %d", e->type == VRE_PRESS ? '+' : '-', p + 1,
+							 K_VR_WPN_TRIGGER + e->key, com_frameTime );
+		} else if ( e->type == VRE_PRESS )
+			Q_strncpyz( cmd, p, sizeof( cmd ) );
+		else
+			continue;
+		for ( i = 0; cmd[i] && cmd[i] != ' ' && i < (int)sizeof( word ) - 1; i++ )
+			word[i] = cmd[i];
+		word[i] = '\0';
+		if ( VRInput_Immediate( word ) )
+			Cmd_ExecuteString( cmd );
+		else
+			Cbuf_AddText( va( "%s\n", cmd ) );
+	}
+}
+
+static void VRInput_RunEvents( const vrBindEvent_t *events, int count, qboolean resetting ) {
+	int i;
+	for ( i = 0; i < count; i++ )
+		VRInput_Run( &events[i], resetting );
+}
+
+/* The VR key that ran this command, from the key number the dispatcher appends; -1 when typed at the console. */
+static int VRInput_SourceKey( void ) {
+	int key = Cmd_Argc() >= 3 ? atoi( Cmd_Argv( Cmd_Argc() - 2 ) ) - K_VR_WPN_TRIGGER : -1;
+	return key >= 0 && key < VRK_COUNT ? key : -1;
+}
+
+static void VRInput_KeyDown_f( void ) {
+	int target = Key_StringToKeynum( Cmd_Argv( 1 ) );
+	if ( target > 0 )
+		CL_KeyEvent( target, qtrue, com_frameTime );
+}
+static void VRInput_KeyUp_f( void ) {
+	int target = Key_StringToKeynum( Cmd_Argv( 1 ) );
+	if ( target > 0 )
+		CL_KeyEvent( target, qfalse, com_frameTime );
+}
+
+/* A menu press pulses the pressing hand, as on the standalone: 200 ms at 0.8, scaled by vr_hapticIntensity. */
+static void VRInput_Pulse( int hand ) {
+	if ( !re.XRHaptic || cls.realtime < input.hapticEnd[hand] )
+		return;
+	if ( re.XRHaptic( hand, Com_Clamp( 0, 1, .8f * VRInput_Cvar( vr_hapticIntensity, .5f ) ), 200 ) )
+		input.hapticEnd[hand] = cls.realtime + 200;
+}
+
+static void VRInput_Click( qboolean down ) {
+	const int key = VRInput_SourceKey(), slot = key >= 0 ? key : 0;
+	const int menuHand = vr.menuLeftHanded ? 0 : 1;
+	const int hand = key >= 0 ? VR_KeyHand( (vrKey_t)key, vr.right_handed, vr_switchThumbsticks->integer ) : menuHand;
+	if ( !down ) {
+		if ( clickKey[slot] < 0 ) {
+			VKeyboard_HandleOffhandKey( qfalse );
+			vr.vkbOffhandTriggerDown = qfalse;
+		} else if ( clickKey[slot] )
+			CL_KeyEvent( clickKey[slot], qfalse, com_frameTime );
+		clickKey[slot] = 0;
+		return;
+	}
+	if ( VKeyboard_IsActive() && hand != menuHand ) {
+		vr.vkbOffhandTriggerDown = qtrue;
+		VKeyboard_HandleOffhandKey( qtrue );
+		VRInput_Pulse( hand );
+		clickKey[slot] = -1;
+		return;
+	}
+	if ( hand != menuHand ) {
+		/* The clicking hand becomes the pointer; its cursor was tracked as the other one. */
+		int x = vr.menuCursorX, y = vr.menuCursorY;
+		vr.menuCursorX = vr.offhandCursorX;
+		vr.menuCursorY = vr.offhandCursorY;
+		vr.offhandCursorX = x;
+		vr.offhandCursorY = y;
+		vr.menuLeftHanded = hand == 0;
+		if ( Key_GetCatcher() & KEYCATCH_UI )
+			CL_MouseEvent( 0, 0 );
+	}
+	if ( !vr.menuCursorActive && !vr.menuStickNavActive )
+		return;
+	clickKey[slot] = vr.menuStickNavActive && !VKeyboard_IsActive() ? K_ENTER : K_MOUSE1;
+	CL_KeyEvent( clickKey[slot], qtrue, com_frameTime );
+	VRInput_Pulse( vr.menuLeftHanded ? 0 : 1 );
+}
+static void VRInput_ClickDown_f( void ) {
+	VRInput_Click( qtrue );
+}
+static void VRInput_ClickUp_f( void ) {
+	VRInput_Click( qfalse );
+}
+
+static void VRInput_Nav( qboolean down ) {
+	const int key = VRInput_SourceKey(), slot = key >= 0 ? key : 0;
+	const char *dir = Cmd_Argv( 1 );
+	const qboolean console = (Key_GetCatcher() & KEYCATCH_CONSOLE) != 0;
+	int target;
+	if ( !down ) {
+		if ( navKey[slot] )
+			CL_KeyEvent( navKey[slot], qfalse, com_frameTime );
+		navKey[slot] = 0;
+		return;
+	}
+	if ( !Q_stricmp( dir, "up" ) )
+		target = console ? K_PGUP : K_UPARROW;
+	else if ( !Q_stricmp( dir, "down" ) )
+		target = console ? K_PGDN : K_DOWNARROW;
+	else if ( !Q_stricmp( dir, "left" ) )
+		target = K_LEFTARROW;
+	else if ( !Q_stricmp( dir, "right" ) )
+		target = K_RIGHTARROW;
+	else
+		return;
+	if ( !vr.menuStickNavActive ) {
+		navAnchorX = vr.menuCursorX;
+		navAnchorY = vr.menuCursorY;
+	}
+	vr.menuStickNavActive = qtrue;
+	navKey[slot] = target;
+	CL_KeyEvent( target, qtrue, com_frameTime );
+}
+static void VRInput_NavDown_f( void ) {
+	VRInput_Nav( qtrue );
+}
+static void VRInput_NavUp_f( void ) {
+	VRInput_Nav( qfalse );
+}
+
+static void VRInput_SelectDown_f( void ) {
+	weaponSelectHeld++;
+}
+static void VRInput_SelectUp_f( void ) {
+	if ( weaponSelectHeld > 0 )
+		weaponSelectHeld--;
+}
+static void VRInput_StabiliseDown_f( void ) {
+	stabiliseHeld++;
+}
+static void VRInput_StabiliseUp_f( void ) {
+	if ( stabiliseHeld > 0 )
+		stabiliseHeld--;
+}
+/* Alt is read from the holds; the command only has to exist. */
+static void VRInput_Alt_f( void ) {
+}
+static void VRInput_VoteYesDown_f( void ) {
+	vr.vote_holding = 1;
+}
+static void VRInput_VoteNoDown_f( void ) {
+	vr.vote_holding = -1;
+}
+static void VRInput_VoteUp_f( void ) {
+	vr.vote_holding = 0;
+}
+
+static float VRInput_SnapAngle( void ) {
+	return vr_snapturn->integer == 1 ? 45 : VRInput_Cvar( vr_snapturn, 45 );
+}
+static void VRInput_TurnLeft_f( void ) {
+	if ( VRInput_Cvar( vr_snapturn, 45 ) > 0 )
+		cl.viewangles[YAW] += VRInput_SnapAngle();
+}
+static void VRInput_TurnRight_f( void ) {
+	if ( VRInput_Cvar( vr_snapturn, 45 ) > 0 )
+		cl.viewangles[YAW] -= VRInput_SnapAngle();
+}
+static void VRInput_UTurn_f( void ) {
+	cl.viewangles[YAW] += 180;
+}
+
+static void VRInput_Recenter_f( void ) {
+	vr.menuYaw = vr.hmdorientation[YAW];
+	CL_VR_ResetVirtualScreen();
+}
+
+/* Bindings-menu capture arms on the next input frame, so releasing holds never re-enters the UI from its own call. */
+static enum { CAPTURE_IDLE, CAPTURE_ARMING, CAPTURE_ARMED } capture;
+
+void CL_VRInput_BindCapture( void ) {
+	if ( Key_GetCatcher() & KEYCATCH_UI )
+		capture = CAPTURE_ARMING;
+}
+
+void CL_VRInput_CancelCapture( void ) {
+	capture = CAPTURE_IDLE;
+}
+
+/* While armed the UI gets the gesture's key code once its buttons are let go, instead of a binding; qtrue while capture owns the keys. */
+static qboolean VRInput_Capture( void ) {
+	vrBindEvent_t events[VRK_COUNT];
+	const char *global;
+	int key;
+	if ( capture == CAPTURE_IDLE )
+		return qfalse;
+	if ( !uivm || !(Key_GetCatcher() & KEYCATCH_UI) ) {
+		capture = CAPTURE_IDLE;
+		return qfalse;
+	}
+	if ( capture == CAPTURE_ARMING ) {
+		VRInput_RunEvents( events, VR_ReleaseAll( &holds, events, ARRAY_LEN( events ) ), qtrue );
+		capture = CAPTURE_ARMED;
+	}
+	key = VR_CaptureKey( &holds, keysNow );
+	if ( key < 0 )
+		return qtrue;
+	capture = CAPTURE_IDLE;
+	global = CL_VRBind_Lookup( VRC_GLOBAL, 0, (vrKey_t)key, NULL );
+	VM_Call( uivm, 2, UI_KEY_EVENT, global && !Q_stricmp( global, "+key ESCAPE" ) ? K_ESCAPE : K_VR_WPN_TRIGGER + key,
+			 qtrue );
+	return qtrue;
+}
+
+void CL_VRInput_Reset( void ) {
+	vrBindEvent_t events[VRK_COUNT];
+	VRInput_HoldsReady();
+	capture = CAPTURE_IDLE;
+	CL_BHaptics_Stop( &suitHaptics );
+	VRInput_RunEvents( events, VR_ReleaseAll( &holds, events, VRK_COUNT ), qtrue );
 	memset( &input, 0, sizeof( input ) );
-	input.scrubNeedsRelease = needsRelease;
-	input.scrubReserved = needsRelease;
+	memset( keysNow, 0, sizeof( keysNow ) );
+	weaponSelectHeld = stabiliseHeld = 0;
 	vr.weapon_select = vr.weapon_select_using_thumbstick = vr.weapon_select_autoclose = qfalse;
 	vr.weapon_stabilised = vr.walking = vr.vkbOffhandTriggerDown = qfalse;
 	vr.vote_holding = vr.menuStickNavActive = 0;
@@ -222,18 +370,39 @@ void CL_VRInput_Shutdown( void ) {
 	suitEnabled = qfalse;
 }
 void CL_VRInput_Init( void ) {
-	int i, alternate;
+	static const struct {
+		const char *name;
+		xcommand_t fn;
+	} commands[] = {{"+key", VRInput_KeyDown_f},
+					{"-key", VRInput_KeyUp_f},
+					{"+vr_click", VRInput_ClickDown_f},
+					{"-vr_click", VRInput_ClickUp_f},
+					{"+menunav", VRInput_NavDown_f},
+					{"-menunav", VRInput_NavUp_f},
+					{"+weapon_select", VRInput_SelectDown_f},
+					{"-weapon_select", VRInput_SelectUp_f},
+					{"+weapon_stabilise", VRInput_StabiliseDown_f},
+					{"-weapon_stabilise", VRInput_StabiliseUp_f},
+					{"+alt", VRInput_Alt_f},
+					{"-alt", VRInput_Alt_f},
+					{"+vote_yes", VRInput_VoteYesDown_f},
+					{"-vote_yes", VRInput_VoteUp_f},
+					{"+vote_no", VRInput_VoteNoDown_f},
+					{"-vote_no", VRInput_VoteUp_f},
+					{"turnleft", VRInput_TurnLeft_f},
+					{"turnright", VRInput_TurnRight_f},
+					{"uturn", VRInput_UTurn_f},
+					{"vr_recenter", VRInput_Recenter_f}};
+	unsigned i;
 	CL_VRInput_Shutdown();
 	VR_InitCvars();
 	CL_VRInput_Reset();
-	vr.follow_mode = VRFM_THIRDPERSON_1;
+	for ( i = 0; i < ARRAY_LEN( commands ); i++ ) {
+		Cmd_RemoveCommand( commands[i].name );
+		Cmd_AddCommand( commands[i].name, commands[i].fn );
+	}
 	vr.menuCursorX = vr.offhandCursorX = 320;
 	vr.menuCursorY = vr.offhandCursorY = 240;
-	for ( i = 0; i < VR_INPUT_SLOTS; i++ ) {
-		for ( alternate = 0; alternate < 2; alternate++ )
-			bindings[i][alternate] = Cvar_Get(
-				va( "vr_button_map_%s%s", bindingSlots[i], alternate ? "_ALT" : "" ), "", CVAR_ARCHIVE );
-	}
 	/* Share the existing mouse/VR UI setting; keep the engine's default. */
 	vrSensitivity = Cvar_Get( "vr_sensitivity", "100", CVAR_ARCHIVE );
 	cgStereoSeparation = Cvar_Get( "cg_stereoSeparation", "0", 0 );
@@ -340,133 +509,45 @@ static void VRInput_ScreenCursor( const refXRFrame_t *frame, int hand, int *x, i
 	*y = (int)(.5f * targetY + .5f * *y);
 }
 
-static void VRInput_MenuNav( const refXRFrame_t *frame, qboolean menu ) {
-	float ax = fabsf( frame->input.hands[0].stick[0] ) >= fabsf( frame->input.hands[1].stick[0] )
-					? frame->input.hands[0].stick[0]
-					: frame->input.hands[1].stick[0];
-	float ay = fabsf( frame->input.hands[0].stick[1] ) >= fabsf( frame->input.hands[1].stick[1] )
-					? frame->input.hands[0].stick[1]
-					: frame->input.hands[1].stick[1];
-	float magnitude = fmaxf( fabsf( ax ), fabsf( ay ) );
-	int desired = 0;
-	if ( menu ) {
-		if ( fabsf( ax ) >= fabsf( ay ) ) {
-			if ( ax > .5f )
-				desired = K_RIGHTARROW;
-			else if ( ax < -.5f )
-				desired = K_LEFTARROW;
-		} else if ( ay > .5f )
-			desired = Key_GetCatcher() & KEYCATCH_CONSOLE ? K_PGUP : K_UPARROW;
-		else if ( ay < -.5f )
-			desired = Key_GetCatcher() & KEYCATCH_CONSOLE ? K_PGDN : K_DOWNARROW;
-	}
-	if ( input.navKey && (!menu || magnitude < .35f || (desired && desired != input.navKey)) ) {
-		CL_KeyEvent( input.navKey, qfalse, cls.realtime );
-		input.navKey = 0;
-	}
-	if ( !menu ) {
-		vr.menuStickNavActive = qfalse;
-		return;
-	}
-	if ( desired && !input.navKey ) {
-		input.navAnchorX = vr.menuCursorX;
-		input.navAnchorY = vr.menuCursorY;
-		vr.menuStickNavActive = qtrue;
-		input.navKey = desired;
-		input.navNext = cls.realtime + 400;
-		CL_KeyEvent( desired, qtrue, cls.realtime );
-	} else if ( desired && desired == input.navKey && cls.realtime >= input.navNext ) {
-		CL_KeyEvent( desired, qtrue, cls.realtime );
-		input.navNext = cls.realtime + 140;
-	}
-	if ( vr.menuStickNavActive && !input.navKey ) {
-		int dx = vr.menuCursorX - input.navAnchorX, dy = vr.menuCursorY - input.navAnchorY;
-		if ( dx * dx + dy * dy > 3600 )
-			vr.menuStickNavActive = qfalse;
-	}
+static qboolean VRInput_PointerLayer( void ) {
+	return VR_StackHas( &stack, VRC_MENU ) || VR_StackHas( &stack, VRC_SCOREBOARD );
 }
 
-static void VRInput_MenuTriggers( const refXRFrame_t *frame, qboolean menu ) {
-	int hand;
-	float press = 1 - VRInput_Cvar( vr_triggerSensitivity, .25f ), release = fmaxf( .1f, press - .25f );
-	for ( hand = 0; hand < 2; hand++ ) {
-		qboolean down = input.triggers[hand];
-		float value = frame->input.hands[hand].trigger;
-		if ( !frame->input.hands[hand].active || value < release )
-			down = qfalse;
-		else if ( value > press )
-			down = qtrue;
-		if ( input.triggerDelivered[hand] && (!menu || !down) ) {
-			if ( input.triggerKeyboard[hand] ) {
-				VKeyboard_HandleOffhandKey( qfalse );
-				vr.vkbOffhandTriggerDown = qfalse;
-			} else
-				CL_KeyEvent( input.triggerKey[hand], qfalse, cls.realtime );
-			input.triggerDelivered[hand] = qfalse;
-		}
-		if ( menu && down && !input.triggers[hand] ) {
-			qboolean selected = hand == (vr.menuLeftHanded ? 0 : 1);
-			if ( !selected && !VKeyboard_IsActive() )
-				vr.menuLeftHanded = hand == 0;
-			else if ( !frame->screen.visible || vr.menuStickNavActive ||
-						(selected ? vr.menuCursorActive : vr.offhandCursorX >= 0) ) {
-				input.triggerKeyboard[hand] = !selected;
-				input.triggerKey[hand] = vr.menuStickNavActive && !VKeyboard_IsActive() ? K_ENTER : K_MOUSE1;
-				input.triggerDelivered[hand] = qtrue;
-				if ( !selected ) {
-					vr.vkbOffhandTriggerDown = qtrue;
-					VKeyboard_HandleOffhandKey( qtrue );
-				} else
-					CL_KeyEvent( input.triggerKey[hand], qtrue, cls.realtime );
-			}
-		}
-		input.triggers[hand] = down;
-	}
+/* Movement and smooth turn only reach the game from gameplay or an overlay on it. */
+static qboolean VRInput_ModalLayer( void ) {
+	return VRInput_PointerLayer() || VR_StackHas( &stack, VRC_ADJUST ) || VR_StackHas( &stack, VRC_SCRUB );
 }
 
-static qboolean VRInput_MenuPressed( const refXRFrame_t *frame ) {
-	return ((frame->input.hands[0].buttons | frame->input.hands[1].buttons) & CL_XRI_MENU_BUTTON) != 0;
-}
-
-/* Cgame owns the timeline catcher; losing the playback context cancels the seek. */
-static qboolean VRInput_TVScrub( const refXRFrame_t *frame, const qboolean *pressed, int primary ) {
-	qboolean blocked = input.scrubGrip || vr.menuYawLocked;
-	qboolean eligible =
-		tvPlay.active && tvPlay.totalDuration > 0 && !vr.weapon_adjust && !vr.in_menu &&
-		!VKeyboard_IsActive() && !(Key_GetCatcher() & (KEYCATCH_UI | KEYCATCH_CONSOLE | KEYCATCH_MESSAGE)) &&
-		!VRInput_MenuPressed( frame ) && frame->input.hands[primary].active;
-	if ( input.scrubGrip && (!eligible || input.scrubHand != primary) ) {
-		Cbuf_AddText( "tv_scrub_cancel\n" );
-		input.scrubGrip = qfalse;
-		input.scrubNeedsRelease = qtrue;
-	}
-	if ( input.scrubNeedsRelease && frame->input.hands[primary].active &&
-		frame->input.hands[1 - primary].active && !pressed[0] && !pressed[1] )
-		input.scrubNeedsRelease = qfalse;
-	if ( !eligible || input.scrubNeedsRelease )
-		return blocked;
-	if ( pressed[1] && !input.physical[1] ) {
-		if ( input.scrubGrip || vr.menuYawLocked )
-			Cbuf_AddText( "tv_scrub_cancel\n" );
-		input.scrubGrip = qfalse;
-		input.scrubNeedsRelease = qtrue;
-	} else if ( pressed[0] && !input.physical[0] && !vr.menuYawLocked ) {
-		Cbuf_AddText( "+tv_scrub\n" );
-		input.scrubGrip = qtrue;
-		input.scrubHand = primary;
-	}
-	if ( input.scrubGrip && !pressed[0] ) {
-		Cbuf_AddText( "-tv_scrub\n" );
-		input.scrubGrip = qfalse;
-	}
-	return blocked || input.scrubGrip;
+static void VRInput_Signals( vrSignals_t *s ) {
+	const int catcher = Key_GetCatcher();
+	memset( s, 0, sizeof( *s ) );
+	s->textEntry = VKeyboard_IsActive();
+	s->menu = (catcher & (KEYCATCH_UI | KEYCATCH_CONSOLE)) != 0;
+	s->offline = cls.state != CA_ACTIVE;
+	s->adjust = vr.weapon_adjust;
+	s->scrub = vr.menuYawLocked;
+	/* The flag can outlive the cgame catcher that Escape strips; the catcher decides. */
+	s->scoreboard = vr.scoreboardCursorActive && (catcher & KEYCATCH_CGAME);
+	s->vote = vr.vote_active;
+	s->wheel = vr.weapon_select;
+	s->tv = tvPlay.active;
+	s->demo = clc.demoplaying;
+	s->following = (cl.snap.ps.pm_flags & PMF_FOLLOW) != 0;
+	s->intermission = cl.snap.ps.pm_type == PM_INTERMISSION;
+	s->dead = cl.snap.ps.stats[STAT_HEALTH] <= 0;
+	s->spectating = cl.snap.ps.persistant[PERS_TEAM] == TEAM_SPECTATOR;
 }
 
 void CL_VRInput_Frame( const refXRFrame_t *frame ) {
-	qboolean pressed[VR_INPUT_SLOTS], alt, wheel, menu, priorWheel, scrubBlocked, tvGrips;
+	qboolean wheel, priorWheel, menu;
 	vec3_t oldAngles, oldPosition;
-	int i, primary, secondary, turning, altHeld = 0;
+	int i, primary, secondary;
 	const clXRHandInput_t *weapon, *other;
+	vrSignals_t signals;
+	vrThresholds_t thresholds;
+	vrBindEvent_t events[VRK_COUNT * 2];
+	unsigned char previous[VRK_COUNT];
+	VRInput_HoldsReady();
 	if ( !frame || !VR_IsActiveMode() || !frame->running || !frame->renderable ) {
 		CL_VRInput_Reset();
 		return;
@@ -504,14 +585,11 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	vr.right_handed = vr_righthanded->integer != 0;
 	primary = vr.right_handed ? 1 : 0;
 	secondary = 1 - primary;
-	turning = vr_switchThumbsticks->integer ? 0 : 1;
 	weapon = &frame->input.hands[primary];
 	other = &frame->input.hands[secondary];
 	for ( i = 0; i < 2; i++ ) {
 		vr.eye_fov_angle_left[i] = frame->eyes[i].fov[0];
 		vr.eye_fov_angle_right[i] = frame->eyes[i].fov[1];
-		vr.thumbstick_location[i][0] = frame->input.hands[i].stick[0];
-		vr.thumbstick_location[i][1] = frame->input.hands[i].stick[1];
 	}
 	vr.fov_angle_left = (frame->eyes[0].fov[0] + frame->eyes[1].fov[0]) * .5f;
 	vr.fov_angle_right = (frame->eyes[0].fov[1] + frame->eyes[1].fov[1]) * .5f;
@@ -540,6 +618,8 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 		CL_VRInput_QuaternionAngles( weapon->aim.orientation, 0, vr.weaponaimangles );
 	if ( other->aim.orientationValid )
 		CL_VRInput_QuaternionAngles( other->aim.orientation, 0, vr.offhandaimangles );
+	CL_VRBind_SetProfile( frame->input.hands[1].profile >= 0 ? frame->input.hands[1].profile
+															 : frame->input.hands[0].profile );
 	/* A visible session renders valid tracked views without input focus.
 	 * Publishing their FOV/poses is independent of allowing gameplay actions. */
 	if ( !frame->focused || !frame->input.focused ) {
@@ -557,27 +637,26 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 			CL_BHaptics_Close( &suitHaptics );
 	}
 	vr.in_menu = (Key_GetCatcher() & (KEYCATCH_UI | KEYCATCH_CONSOLE)) != 0;
-	menu = vr.in_menu || cls.state != CA_ACTIVE || (vr.virtual_screen && !vr.first_person_following) ||
-			cl.snap.ps.pm_type == PM_INTERMISSION || vr.scoreboardCursorActive;
-	if ( menu || VKeyboard_IsActive() ) {
-		qboolean menuWeapon = primary == (vr.menuLeftHanded ? 0 : 1);
-		vr.menuCursorActive = frame->input.hands[vr.menuLeftHanded ? 0 : 1].aim.orientationValid;
+	VRInput_Signals( &signals );
+	VR_ResolveStack( &signals, &stack );
+	menu = VR_StackHas( &stack, VRC_MENU );
+	if ( VRInput_PointerLayer() ) {
+		const int menuHand = vr.menuLeftHanded ? 0 : 1;
+		const qboolean menuWeapon = primary == menuHand;
+		vr.menuCursorActive = frame->input.hands[menuHand].aim.orientationValid;
 		if ( vr.menuCursorActive ) {
-			/* Smooth once for each tracked controller sample. */
+			/* Smooth once for each tracked controller sample; both hands, so either can take the pointer. */
 			for ( i = 0; i < 2; i++ )
 				if ( frame->input.hands[i].grip.positionValid ) {
 					if ( frame->screen.visible ) {
-						VRInput_ScreenCursor( frame, vr.menuLeftHanded ? 0 : 1, &vr.menuCursorX, &vr.menuCursorY );
-						if ( VKeyboard_IsActive() )
-							VRInput_ScreenCursor( frame, vr.menuLeftHanded ? 1 : 0, &vr.offhandCursorX,
-												  &vr.offhandCursorY );
+						VRInput_ScreenCursor( frame, menuHand, &vr.menuCursorX, &vr.menuCursorY );
+						VRInput_ScreenCursor( frame, 1 - menuHand, &vr.offhandCursorX, &vr.offhandCursorY );
 						continue;
 					}
 					VRInput_Cursor( menuWeapon ? vr.weaponaimangles : vr.offhandaimangles, &vr.menuCursorX,
 									&vr.menuCursorY );
-					if ( VKeyboard_IsActive() )
-						VRInput_Cursor( menuWeapon ? vr.offhandaimangles : vr.weaponaimangles,
-										&vr.offhandCursorX, &vr.offhandCursorY );
+					VRInput_Cursor( menuWeapon ? vr.offhandaimangles : vr.weaponaimangles, &vr.offhandCursorX,
+									&vr.offhandCursorY );
 				}
 		}
 		if ( vr.scoreboardCursorActive ) {
@@ -595,204 +674,75 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 			}
 		}
 	}
-	/* Keep console scrolling and caret navigation available while
-	 * the virtual keyboard is open. It uses pointing, not the thumbsticks. */
-	VRInput_MenuNav( frame, (vr.in_menu || (vr.virtual_screen && !vr.first_person_following)) &&
-								!vr.weapon_adjust && !vr.menuYawLocked );
 	/* The UI refresh draws the pointer, but UI_MOUSE_EVENT updates hover/focus.
-	 * Deliver it before a same-frame trigger click, with stick ownership already
+	 * Deliver it before a same-frame click, with stick ownership already
 	 * published so pointing cannot undo navigation selection. */
 	if ( (Key_GetCatcher() & KEYCATCH_UI) && vr.menuCursorActive && !vr.menuStickNavActive &&
 		!VKeyboard_IsActive() && !vr.weapon_adjust && !vr.menuYawLocked )
 		CL_MouseEvent( 0, 0 );
-	VRInput_MenuTriggers( frame, (menu || VKeyboard_IsActive()) && !vr.weapon_adjust && !vr.menuYawLocked );
-	if ( VRInput_MenuPressed( frame ) && !input.menuDown ) {
-		CL_KeyEvent( K_ESCAPE, qtrue, cls.realtime );
-		CL_KeyEvent( K_ESCAPE, qfalse, cls.realtime );
-	}
-	input.menuDown = VRInput_MenuPressed( frame );
-	// Hard-wired like Menu: slot bindings are suppressed while the console is up, so a slot could not close it
-	if ( (frame->input.hands[0].buttons & CL_XRI_VIEW_BUTTON) && !input.viewDown )
-		Cbuf_AddText( "toggleconsole\n" );
-	input.viewDown = !!(frame->input.hands[0].buttons & CL_XRI_VIEW_BUTTON);
-	pressed[0] = weapon->squeeze > .5f;
-	pressed[1] = other->squeeze > .5f;
-	pressed[2] = input.triggers[primary];
-	pressed[3] = input.triggers[secondary];
-	pressed[4] = !!(weapon->buttons & CL_XRI_STICK_BUTTON);
-	pressed[5] = !!(other->buttons & CL_XRI_STICK_BUTTON);
-	pressed[6] = !!(frame->input.hands[1].buttons & CL_XRI_PRIMARY_BUTTON);
-	pressed[7] = !!(frame->input.hands[1].buttons & CL_XRI_SECONDARY_BUTTON);
-	pressed[8] = !!(frame->input.hands[0].buttons & CL_XRI_PRIMARY_BUTTON);
-	pressed[9] = !!(frame->input.hands[0].buttons & CL_XRI_SECONDARY_BUTTON);
-	for ( i = 10; i < VR_INPUT_SLOTS; i++ )
-		pressed[i] = qfalse;
-	pressed[18] = !!(weapon->buttons & CL_XRI_TRACKPAD_BUTTON);
-	pressed[19] = !!(other->buttons & CL_XRI_TRACKPAD_BUTTON);
-	pressed[20] = !!(weapon->buttons & CL_XRI_THUMBREST_BUTTON);
-	pressed[21] = !!(other->buttons & CL_XRI_THUMBREST_BUTTON);
-	/* The Frame puts X/Y on the right controller; they keep the shared X/Y slots */
-	pressed[8] = pressed[8] || (frame->input.hands[1].buttons & CL_XRI_X_BUTTON);
-	pressed[9] = pressed[9] || (frame->input.hands[1].buttons & CL_XRI_Y_BUTTON);
-	pressed[22] = !!(frame->input.hands[0].buttons & CL_XRI_BUMPER_BUTTON);
-	pressed[23] = !!(frame->input.hands[1].buttons & CL_XRI_BUMPER_BUTTON);
-	pressed[24] = !!(frame->input.hands[0].buttons & CL_XRI_DPAD_UP_BUTTON);
-	pressed[25] = !!(frame->input.hands[0].buttons & CL_XRI_DPAD_DOWN_BUTTON);
-	pressed[26] = !!(frame->input.hands[0].buttons & CL_XRI_DPAD_LEFT_BUTTON);
-	pressed[27] = !!(frame->input.hands[0].buttons & CL_XRI_DPAD_RIGHT_BUTTON);
-	pressed[28] = !!(weapon->buttons & CL_XRI_SQUEEZE_CLICK_BUTTON);
-	pressed[29] = !!(other->buttons & CL_XRI_SQUEEZE_CLICK_BUTTON);
-	for ( i = 0; i < VR_INPUT_SLOTS; i++ )
-		if ( !strcmp( input.held[i], "+alt" ) )
-			altHeld++;
+	thresholds.triggerPress = 1 - VRInput_Cvar( vr_triggerSensitivity, .25f );
+	thresholds.triggerRelease = fmaxf( .1f, thresholds.triggerPress - .25f );
+	thresholds.gripPress = VRInput_Cvar( vr_gripThreshold, .5f );
+	thresholds.gripRelease = thresholds.gripPress - .1f;
+	thresholds.padPress = VRInput_Cvar( vr_trackpadThreshold, .3f );
+	thresholds.padRelease = thresholds.padPress - .1f;
+	thresholds.stickPress = .5f;
+	thresholds.stickRelease = .35f;
+	thresholds.deadzone = VRInput_Cvar( vr_thumbstickDeadzone, .15f );
+	memcpy( previous, keysNow, sizeof( previous ) );
+	VR_SampleKeys( frame->input.hands, vr.right_handed, vr_switchThumbsticks->integer, &thresholds, previous, keysNow );
+	VR_RoleSticks( frame->input.hands, vr.right_handed, vr_switchThumbsticks->integer, thresholds.deadzone,
+				   vr.thumbstick_location[VR_STICK_MOVE], vr.thumbstick_location[VR_STICK_TURN] );
 	{
-		float sx = CL_VRInput_StickCurve( frame->input.hands[turning].stick[0],
-											VRInput_Cvar( vr_thumbstickDeadzone, .15f ) );
-		float sy = CL_VRInput_StickCurve( frame->input.hands[turning].stick[1],
-											VRInput_Cvar( vr_thumbstickDeadzone, .15f ) );
-		qboolean diagonal = qfalse;
-		for ( i = 14; i < 18; i++ ) {
-			const char *binding = bindings[i][altHeld != 0]->string;
-			if ( binding[0] )
-				diagonal = qtrue;
-		}
-		if ( sqrtf( sx * sx + sy * sy ) > .05f ) {
-			float direction = atan2f( sx, sy ) * 180 / (float)M_PI;
-			int sector;
-			if ( direction < 0 )
-				direction += 360;
-			if ( diagonal ) {
-				static const int index[8] = {12, 14, 11, 15, 13, 16, 10, 17};
-				sector = ((int)((direction + 22.5f) / 45)) & 7;
-				pressed[index[sector]] = qtrue;
-			} else {
-				static const int index[4] = {12, 11, 13, 10};
-				sector = ((int)((direction + 45) / 90)) & 3;
-				pressed[index[sector]] = qtrue;
-			}
+		const int alt = VR_HoldsBound( &holds, "+alt" );
+		if ( VR_StickTaken( &stack, alt, VRK_MOVESTICK, CL_VRBind_Lookup, NULL ) )
+			vr.thumbstick_location[VR_STICK_MOVE][0] = vr.thumbstick_location[VR_STICK_MOVE][1] = 0;
+		if ( VR_StickTaken( &stack, alt, VRK_TURNSTICK, CL_VRBind_Lookup, NULL ) )
+			vr.thumbstick_location[VR_STICK_TURN][0] = vr.thumbstick_location[VR_STICK_TURN][1] = 0;
+	}
+	{
+		const int mapping = vr.right_handed | (vr_switchThumbsticks->integer != 0) << 1;
+		/* Role keys change names with handedness, so an open vote prompt must rename them. */
+		if ( holds.mapping >= 0 && holds.mapping != mapping )
+			CL_ResolveVoteKeys();
+		VRInput_RunEvents( events, VR_HoldsSetMapping( &holds, mapping, events, ARRAY_LEN( events ) ), qfalse );
+	}
+	if ( !VRInput_Capture() )
+		VRInput_RunEvents( events,
+						   VR_UpdateHolds( &holds, keysNow, &stack, CL_VRBind_Lookup, NULL, com_frameTime, events,
+										   ARRAY_LEN( events ) ),
+						   qfalse );
+	if ( vr.menuStickNavActive ) {
+		qboolean held = qfalse;
+		for ( i = 0; i < VRK_COUNT; i++ )
+			held |= navKey[i] != 0;
+		if ( !menu )
+			vr.menuStickNavActive = qfalse;
+		else if ( !held ) {
+			int dx = vr.menuCursorX - navAnchorX, dy = vr.menuCursorY - navAnchorY;
+			if ( dx * dx + dy * dy > 3600 )
+				vr.menuStickNavActive = qfalse;
 		}
 	}
-	scrubBlocked = VRInput_TVScrub( frame, pressed, primary );
-	tvGrips = (tvPlay.active && tvPlay.totalDuration > 0) || input.scrubGrip ||
-				(input.scrubReserved && (pressed[0] || pressed[1] || input.scrubNeedsRelease));
-	input.scrubReserved = tvGrips;
-	vr.vote_holding = !vr.vote_active || scrubBlocked || vr.weapon_adjust ? 0
-					: pressed[7] ? -1
-					: pressed[6] ? 1
-					: 0;
-	if ( !tvGrips && !scrubBlocked && vr_weaponAdjust->integer && pressed[0] && pressed[1] ) {
-		if ( !input.dualGripHeld ) {
-			input.dualGripHeld = qtrue;
-			input.dualGripStart = cls.realtime;
-		} else if ( input.dualGripStart && cls.realtime - input.dualGripStart > 1000 ) {
-			Cbuf_AddText( "weapon_adjust\n" );
-			input.dualGripStart = 0;
-		}
-	} else {
-		input.dualGripHeld = qfalse;
-		input.dualGripStart = 0;
-	}
-	if ( vr.weapon_adjust ) {
-		if ( pressed[6] && !input.physical[6] )
-			Cbuf_AddText( "weapon_adjust\n" );
-		if ( pressed[7] ) {
-			if ( !input.physical[7] )
-				input.adjustStart = cls.realtime;
-			else if ( input.adjustStart && cls.realtime - input.adjustStart > 2000 ) {
-				Cbuf_AddText( "weapon_adjust_reset_all\n" );
-				input.adjustStart = 0;
-			}
-		} else {
-			if ( input.physical[7] && input.adjustStart )
-				Cbuf_AddText( "weapon_adjust_reset\n" );
-			input.adjustStart = 0;
-		}
-	} else if ( !scrubBlocked ) {
-		input.adjustStart = 0;
-		if ( pressed[5] && !input.physical[5] )
-			vr.realign = 3;
-		if ( pressed[4] && !input.physical[4] && (clc.demoplaying || tvPlay.active) )
-			Cbuf_AddText( "demopause\n" );
-		if ( pressed[6] && !input.physical[6] ) {
-			if ( cl.snap.ps.pm_flags & PMF_FOLLOW )
-				Cbuf_AddText( "cmd team spectator\n" );
-			else if ( tvPlay.active )
-				Cbuf_AddText( "tv_view_next\n" );
-		}
-		if ( pressed[7] && !input.physical[7] ) {
-			if ( ((cl.snap.ps.pm_flags & PMF_FOLLOW) || clc.demoplaying) &&
-				(vr.follow_mode == VRFM_THIRDPERSON_1 || vr.follow_mode == VRFM_THIRDPERSON_2) )
-				vr.recenter_follow_camera = qtrue;
-			else {
-				vr.menuYaw = vr.hmdorientation[YAW];
-				CL_VR_ResetVirtualScreen();
-			}
-		}
-		if ( pressed[8] && !input.physical[8] && ((cl.snap.ps.pm_flags & PMF_FOLLOW) || clc.demoplaying) ) {
-			vr.follow_mode++;
-			if ( vr.follow_mode >= VRFM_NUM_FOLLOWMODES )
-				vr.follow_mode = VRFM_THIRDPERSON_1;
-			if ( vr.follow_mode == VRFM_THIRDPERSON_1 && !tvPlay.active )
-				Cbuf_AddText( "follow\n" );
-			vr.realign = 3;
-		}
-	}
-	if ( menu && !vr.weapon_adjust && !scrubBlocked && pressed[6] != input.faceSpace ) {
-		CL_KeyEvent( K_SPACE, pressed[6], cls.realtime );
-		input.faceSpace = pressed[6];
-	} else if ( (!menu || vr.weapon_adjust || scrubBlocked) && input.faceSpace ) {
-		CL_KeyEvent( K_SPACE, qfalse, cls.realtime );
-		input.faceSpace = qfalse;
-	}
-	memcpy( input.physical, pressed, sizeof( pressed ) );
-	if ( tvGrips )
-		pressed[0] = pressed[1] = qfalse;
-	if ( (cl.snap.ps.pm_flags & PMF_FOLLOW) || tvPlay.active )
-		pressed[6] = qfalse;
-	if ( (cl.snap.ps.pm_flags & PMF_FOLLOW) || clc.demoplaying )
-		pressed[8] = qfalse;
 	priorWheel = vr.weapon_select;
-	{
-		qboolean changed = qfalse;
-		for ( i = 0; i < VR_INPUT_SLOTS; i++ ) {
-			char action[128];
-			alt = altHeld != 0;
-			Q_strncpyz( action, bindings[i][alt]->string, sizeof( action ) );
-			if ( alt && !action[0] )
-				Q_strncpyz( action, bindings[i][0]->string, sizeof( action ) );
-			if ( !pressed[i] || menu || vr.weapon_adjust || scrubBlocked )
-				action[0] = 0;
-			if ( strcmp( action, input.held[i] ) ) {
-				if ( !strcmp( input.held[i], "+alt" ) )
-					altHeld--;
-				if ( !strcmp( action, "+alt" ) )
-					altHeld++;
-				VRInput_Action( input.held[i], qfalse, i );
-				Q_strncpyz( input.held[i], action, sizeof( input.held[i] ) );
-				VRInput_Action( action, qtrue, i );
-				changed = qtrue;
-			}
-		}
-		if ( changed )
-			input.heldMask = VRInput_HeldMask();
-	}
-	wheel = (input.heldMask & HELD_WEAPON_SELECT) && !clc.demoplaying && !(cl.snap.ps.pm_flags & PMF_FOLLOW);
+	wheel = weaponSelectHeld > 0 && !clc.demoplaying && !(cl.snap.ps.pm_flags & PMF_FOLLOW);
 	vr.weapon_select = wheel;
 	vr.weapon_select_using_thumbstick = wheel && vr_weaponSelectorMode->integer == WS_HMD;
 	vr.weapon_select_autoclose =
-		vr.weapon_select_using_thumbstick && (pressed[10] || pressed[11] || pressed[12] || pressed[13]);
+		vr.weapon_select_using_thumbstick && (keysNow[VRK_TURNSTICK_UP] || keysNow[VRK_TURNSTICK_DOWN] ||
+											  keysNow[VRK_TURNSTICK_LEFT] || keysNow[VRK_TURNSTICK_RIGHT]);
 	if ( priorWheel && !wheel && !menu )
 		Cbuf_AddText( "weapon_select\n" );
 	vr.weapon_stabilised = qfalse;
-	if ( (input.heldMask & HELD_WEAPON_STABILISE) && weapon->grip.positionValid && other->grip.positionValid ) {
+	if ( stabiliseHeld > 0 && weapon->grip.positionValid && other->grip.positionValid ) {
 		vec3_t distance;
 		VectorSubtract( vr.weaponposition, vr.offhandposition, distance );
 		vr.weapon_stabilised = VectorLength( distance ) < .4f;
 	}
-	vr.weapon_zoomed = !menu && vr_weaponScope->integer && vr.weapon_stabilised &&
-						cl.snap.ps.weapon == WP_RAILGUN && VectorLength( vr.weaponoffset ) < .24f &&
-						cl.snap.ps.stats[STAT_HEALTH] > 0;
-	if ( !menu && vr_twoHandedWeapons->integer && vr.weapon_stabilised ) {
+	vr.weapon_zoomed = !VRInput_PointerLayer() && vr_weaponScope->integer && vr.weapon_stabilised &&
+					   cl.snap.ps.weapon == WP_RAILGUN && VectorLength( vr.weaponoffset ) < .24f &&
+					   cl.snap.ps.stats[STAT_HEALTH] > 0;
+	if ( !VRInput_PointerLayer() && vr_twoHandedWeapons->integer && vr.weapon_stabilised ) {
 		vec3_t direction;
 		if ( vr_twoHandedWeapons->integer == 2 ) {
 			float yaw = -vr.hmdorientation[YAW] * (float)M_PI / 180;
@@ -813,16 +763,13 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 			vr.weaponangles[ROLL] = vr_twoHandedWeapons->integer == 2 ? 0 : vr.weaponangles[ROLL] * .5f;
 		}
 	}
-	if ( VRInput_Cvar( vr_snapturn, 45 ) <= 0 && !menu && input.previousTime ) {
+	if ( VRInput_Cvar( vr_snapturn, 45 ) <= 0 && !VRInput_ModalLayer() && !Key_GetCatcher() && input.previousTime &&
+		 !vr.weapon_select_using_thumbstick ) {
 		float elapsed = Com_Clamp( 0, 100, input.time - input.previousTime ) * .001f;
-		if ( !wheel && !vr.weapon_adjust && !scrubBlocked && vr_weaponSelectorMode->integer != WS_HMD ) {
-			float axis = CL_VRInput_StickCurve( frame->input.hands[turning].stick[0],
-												VRInput_Cvar( vr_thumbstickDeadzone, .15f ) );
-			/* VR sensitivity is independent of mouse sensitivity; 100 is normal speed.
-			 * The reference full-stick rate is 32767 * .022 degrees/second. */
-			cl.viewangles[YAW] -=
-				axis * (32767.0f * .022f) * (VRInput_Cvar( vrSensitivity, 100 ) / 100.0f) * elapsed;
-		}
+		/* VR sensitivity is independent of mouse sensitivity; 100 is normal speed.
+		 * The reference full-stick rate is 32767 * .022 degrees/second. */
+		cl.viewangles[YAW] -= vr.thumbstick_location[VR_STICK_TURN][0] * (32767.0f * .022f) *
+							  (VRInput_Cvar( vrSensitivity, 100 ) / 100.0f) * elapsed;
 	}
 	{
 		float yaw = cl.viewangles[YAW] - vr.hmdorientation[YAW];
@@ -847,9 +794,13 @@ static void CL_VRInput_FinalizePose( usercmd_t *cmd ) {
 qboolean CL_VRInput_ApplyMove( usercmd_t *cmd ) {
 	float side, forward, angle, x, magnitude;
 	vec3_t angles;
-	int moveHand, primary, i, catcher;
+	usercmd_t keys;
+	int primary, i, catcher;
 	if ( !VR_IsActiveMode() )
 		return qfalse;
+	/* Read every frame so a press made while neutral cannot fire afterwards. */
+	memset( &keys, 0, sizeof( keys ) );
+	CL_VRInput_KeyState( &keys );
 	memset( cmd, 0, sizeof( *cmd ) );
 	cmd->weapon = cl.cgameUserCmdValue;
 	cmd->serverTime = cl.serverTime;
@@ -862,18 +813,15 @@ qboolean CL_VRInput_ApplyMove( usercmd_t *cmd ) {
 		cmd->buttons |= BUTTON_TALK;
 	if ( !input.valid || cls.realtime - input.time > 250 )
 		return qtrue;
-	if ( catcher || vr.weapon_adjust || vr.menuYawLocked || input.scrubGrip || vr.scoreboardCursorActive ||
+	if ( catcher || VRInput_ModalLayer() || vr.weapon_adjust || vr.menuYawLocked ||
 		(vr.virtual_screen && !vr.first_person_following) ) {
 		CL_VRInput_FinalizePose( cmd );
 		return qtrue;
 	}
 	vr.clientNum = cl.snap.ps.clientNum;
-	moveHand = vr_switchThumbsticks->integer ? 1 : 0;
 	primary = vr.right_handed ? 1 : 0;
-	side = CL_VRInput_StickCurve( input.sample.hands[moveHand].stick[0],
-									VRInput_Cvar( vr_thumbstickDeadzone, .15f ) );
-	forward = CL_VRInput_StickCurve( input.sample.hands[moveHand].stick[1],
-									VRInput_Cvar( vr_thumbstickDeadzone, .15f ) );
+	side = vr.thumbstick_location[VR_STICK_MOVE][0];
+	forward = vr.thumbstick_location[VR_STICK_MOVE][1];
 	angle = vr_directionMode->integer ? vr.offhandangles[YAW] : vr.hmdorientation[YAW];
 	if ( vr.use_6dof )
 		angle -= vr.hmdorientation[YAW];
@@ -897,22 +845,16 @@ qboolean CL_VRInput_ApplyMove( usercmd_t *cmd ) {
 			forward /= maximum;
 		}
 	}
-	cmd->rightmove = (signed char)Com_Clamp( -127, 127, side * 127 );
-	cmd->forwardmove = (signed char)Com_Clamp( -127, 127, forward * 127 );
-	if ( input.heldMask & HELD_MOVEUP )
-		cmd->upmove = 127;
-	if ( input.heldMask & HELD_MOVEDOWN )
-		cmd->upmove = -127;
+	cmd->rightmove = (signed char)Com_Clamp( -127, 127, side * 127 + keys.rightmove );
+	cmd->forwardmove = (signed char)Com_Clamp( -127, 127, forward * 127 + keys.forwardmove );
+	cmd->upmove = keys.upmove;
 	if ( vr.use_6dof && cl.snap.ps.pm_type == PM_SPECTATOR && !(cl.snap.ps.pm_flags & PMF_FOLLOW) ) {
 		float pitch = vr.offhandangles[PITCH] * (float)M_PI / 180;
 		int original = cmd->forwardmove;
 		cmd->forwardmove = (signed char)Com_Clamp( -127, 127, original * cosf( pitch ) );
 		cmd->upmove = (signed char)Com_Clamp( -127, 127, cmd->upmove - original * sinf( pitch ) );
 	}
-	if ( (input.heldMask & HELD_ATTACK) && input.sample.hands[primary].aim.orientationValid &&
-		input.sample.hands[primary].grip.positionValid )
-		cmd->buttons |= BUTTON_ATTACK;
-	cmd->buttons |= (input.heldMask >> 8) & 0xFFF; // +button0..11 map to bits 0..11
+	cmd->buttons |= keys.buttons & 0xFFF & ~BUTTON_TALK; // bits 12-25 carry the head pose
 	if ( !input.sample.hands[primary].aim.orientationValid || !input.sample.hands[primary].grip.positionValid )
 		cmd->buttons &= ~BUTTON_ATTACK;
 	if ( vr_analogWalk->integer ) {
@@ -923,7 +865,7 @@ qboolean CL_VRInput_ApplyMove( usercmd_t *cmd ) {
 			vr.walking = qtrue;
 	} else
 		vr.walking = qfalse;
-	if ( vr.walking || (input.heldMask & HELD_SPEED) )
+	if ( vr.walking || (keys.buttons & BUTTON_WALKING) )
 		cmd->buttons |= BUTTON_WALKING;
 	if ( !vr.use_6dof && input.sample.hands[primary].aim.orientationValid ) {
 		if ( vr.realign > 0 && --vr.realign == 0 )

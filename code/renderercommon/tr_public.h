@@ -150,6 +150,8 @@ typedef struct {
 
 	/* Query between frames; changed logical eye dimensions require vid_restart. */
 	qboolean (*XRResolutionChanged)( void );
+	/* The per-eye size the runtime recommends and the largest it allows; false outside a VR session. */
+	qboolean (*XREyeSize)( int *recW, int *recH, int *maxW, int *maxH );
 	void (*DesktopTrackingStatus)( qboolean visible, qhandle_t font, qhandle_t icon );
 	void (*XRInfo)( void );
 } refexport_t;

@@ -17,9 +17,9 @@
 #define VR_API_STR(x) VR_API_STR2(x)
 #define VR_API_SENTINEL "TRINITY_VR_API/" VR_API_STR(VR_API_MAJOR) "." VR_API_STR(VR_API_MINOR)
 
-// thumbstick_location[] index constants (module-facing)
-#define THUMB_LEFT  0
-#define THUMB_RIGHT 1
+// thumbstick_location[] holds the sticks by role, deadzone-processed
+#define VR_STICK_MOVE 0
+#define VR_STICK_TURN 1
 
 typedef struct vr_shared_s {
 	int structSize;     // sizeof(vr_shared_t), set by the module before registering

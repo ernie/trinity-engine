@@ -7,6 +7,7 @@ void VK_DesktopTrackingStatus( qboolean visible, qhandle_t font, qhandle_t icon 
 qboolean VK_XR_PrepareInit( qboolean enabled );
 qboolean VK_XR_SetActive( qboolean active );
 qboolean VK_XR_ResolutionChanged( void );
+qboolean VK_XR_EyeSize( int *recW, int *recH, int *maxW, int *maxH );
 int VK_XR_BeginFrame( refXRFrame_t *frame );
 int VK_XR_EndFrame( void );
 void VK_XR_Submitted( void );

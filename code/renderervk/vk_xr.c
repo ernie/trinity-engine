@@ -373,6 +373,36 @@ VkImageCreateFlags VK_XR_TargetCreateFlags( void ) {
 	return xr.target.handle ? xr.target.createFlags : 0;
 }
 
+/* The larger eye's recommended size and its limit, clamped by the GPU like the render target is. */
+qboolean VK_XR_EyeSize( int *recW, int *recH, int *maxW, int *maxH ) {
+	XrViewConfigurationView views[2];
+	uint32_t count, i;
+	if ( !active || !xr.session || failed || xr.lost )
+		return qfalse;
+	Com_Memset( views, 0, sizeof( views ) );
+	views[0].type = views[1].type = XR_TYPE_VIEW_CONFIGURATION_VIEW;
+	if ( xr.xr.EnumerateViewConfigurationViews( xr.instance, xr.system, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 2,
+												&count, views ) != XR_SUCCESS || count != 2 )
+		return qfalse;
+	*recW = *recH = *maxW = *maxH = 0;
+	for ( i = 0; i < 2; i++ ) {
+		uint32_t mw = views[i].maxImageRectWidth, mh = views[i].maxImageRectHeight;
+		if ( !mw )
+			mw = views[i].recommendedImageRectWidth;
+		if ( !mh )
+			mh = views[i].recommendedImageRectHeight;
+		if ( xr.maxEyeWidth && xr.maxEyeWidth < mw )
+			mw = xr.maxEyeWidth;
+		if ( xr.maxEyeHeight && xr.maxEyeHeight < mh )
+			mh = xr.maxEyeHeight;
+		*recW = MAX( *recW, (int)views[i].recommendedImageRectWidth );
+		*recH = MAX( *recH, (int)views[i].recommendedImageRectHeight );
+		*maxW = MAX( *maxW, (int)mw );
+		*maxH = MAX( *maxH, (int)mh );
+	}
+	return *recW > 0 && *recH > 0;
+}
+
 /* Module layouts cache glConfig at registration. A runtime resolution change
  * must rebuild them through vid_restart, not just replace GPU attachments. */
 qboolean VK_XR_ResolutionChanged( void ) {
