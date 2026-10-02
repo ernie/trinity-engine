@@ -38,6 +38,7 @@ cvar_t *vr_mirrorWidth = NULL;
 cvar_t *vr_mirrorHeight = NULL;
 cvar_t *vr_virtualScreenMode = NULL;
 cvar_t *vr_screenCurvature = NULL;
+cvar_t *vr_controllerModels = NULL;
 cvar_t *vr_thumbstickDeadzone = NULL;
 cvar_t *vr_thumbstickFullDeflection = NULL;
 cvar_t *vr_triggerSensitivity = NULL;
@@ -111,6 +112,7 @@ void VR_InitCvars( void )
 	vr_hudScale = Cvar_Get( "vr_hudScale", "1", CVAR_ARCHIVE );
 	vr_sendRollToServer = Cvar_Get( "vr_sendRollToServer", "1", CVAR_ARCHIVE );
 	Cvar_Get( "vr_lasersight", "0", CVAR_ARCHIVE );
+	vr_controllerModels = Cvar_Get( "vr_controllerModels", "1", CVAR_ARCHIVE ); // the pointer ray, its pool of light and the runtime's controller models on the virtual screen
 	vr_hapticIntensity = Cvar_Get( "vr_hapticIntensity", "0.5", CVAR_ARCHIVE );
 	vr_bhaptics = Cvar_Get( "vr_bhaptics", "0", CVAR_ARCHIVE );
 	Cvar_Get( "vr_comfortVignette", "0.0", CVAR_ARCHIVE );

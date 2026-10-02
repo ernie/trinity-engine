@@ -21,6 +21,11 @@
 #define VR_STICK_MOVE 0
 #define VR_STICK_TURN 1
 
+// pointerMode
+#define VR_POINTER_CURSOR 0 // the ray moves the hover; the module draws its cursor
+#define VR_POINTER_STICK  1 // a thumbstick moves the selection: no hover, no cursor, no ray
+#define VR_POINTER_DRAWN  2 // the ray moves the hover; the engine draws the ray and its pool of light
+
 typedef struct vr_shared_s {
 	int structSize;     // sizeof(vr_shared_t), set by the module before registering
 	int apiVersion;     // VR_API_MAJOR the module was built against
@@ -90,7 +95,7 @@ typedef struct vr_shared_s {
 	int   single_player;
 
 	// ---- engine-written, appended at tail (trap ABI: keep last) ----
-	int   menuStickNavActive;   // engine: thumbstick is driving menu nav -> UI freezes hover + hides cursor
+	int   pointerMode;          // VR_POINTER_*: who presents the menu selection
 } vr_shared_t;
 
 // Block-start field markers. The ABI asserts in vr_shared_sync.c pin their

@@ -104,6 +104,7 @@ with `vid_restart`.
 | `vr_desktopContentFit` | `0` contain, `1` fill/crop |
 | `vr_desktopMenuStyle` | `0` desktop menu view, `1` VR view |
 | `vr_screenCurvature` | Virtual screen curvature; `0` is flat, `0.5` is the default curve, `1` is the tightest |
+| `vr_controllerModels` | `1` draws the menu pointer in the headset while the virtual screen is up: a red ray from the pointing hand, a pool of light where it meets the screen, and the runtime's own controller models on runtimes that provide them. `0` goes back to the menus' own cursor with no ray and no controllers. The menus' HUD & Display page has it as "Virtual screen controllers" |
 | `vr_sensitivity` | Smooth thumbstick turning speed; `100` is normal, independent of mouse `sensitivity` |
 | `vr_snapturn` | Positive values select the snap-turn angle in degrees, with `1` meaning 45; nonpositive values enable smooth turning |
 

@@ -317,6 +317,7 @@ void vk_hud_keep_view( void );
 image_t *vk_screen_image( void );
 void vk_clear_depth( qboolean clear_stencil );
 void vk_begin_frame( void );
+void vk_prepare_xr_models( void );
 void vk_end_frame( void );
 void vk_present_frame( void );
 
@@ -493,6 +494,10 @@ typedef struct {
 		VkDescriptorSet eye_descriptor[VK_XR_DIRECT_MAX_IMAGES];
 		VkDescriptorSet descriptor;			// the blit fallback image
 		VkFramebuffer eye_framebuffer[VK_XR_DIRECT_MAX_IMAGES];
+		// the virtual-screen composition writes the same targets over a depth buffer
+		VkRenderPass screen_pass, screen_eye_pass;
+		VkFramebuffer screen_framebuffer;
+		VkFramebuffer screen_eye_framebuffer[VK_XR_DIRECT_MAX_IMAGES];
 	} xr_output;
 	// Direct mode: one target per XR swapchain image; idle stands in while none is acquired.
 	struct {
@@ -521,7 +526,7 @@ typedef struct {
 	VkImage depth_image;
 	VkImageView depth_image_view;
 
-	VkImage post_depth;			// transient single-sample depth for post-scene 3D icons
+	VkImage post_depth;			// transient single-sample depth for post-scene 3D icons and the virtual-screen composition
 	VkImageView post_depth_view;
 
 	VkImage msaa_image;

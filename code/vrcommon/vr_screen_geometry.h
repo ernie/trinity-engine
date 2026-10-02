@@ -173,15 +173,17 @@ static inline void VR_ScreenModelMatrix( const vrScreenGeometry_t *screen, int m
 	m[14] = screen->position[2];
 	m[15] = 1;
 }
-static inline int VR_ScreenRay( const vrScreenGeometry_t *screen, const float origin[3], const float direction[3], float uv[2] ) {
+/* Where a ray meets the screen's surface carried on past its edges: the ray in the screen's own space, and how
+ * far along it each crossing lies, nearer first. Returns how many there are. */
+static inline int VR_ScreenSurface( const vrScreenGeometry_t *screen, const float origin[3], const float direction[3],
+	float o[3], float d[3], float roots[2] ) {
 	float c = cosf( screen->yaw ), s = sinf( screen->yaw ), ox = origin[0] - screen->position[0], oz = origin[2] - screen->position[2];
-	float o[3] = { c * ox - s * oz, origin[1] - screen->position[1], s * ox + c * oz };
-	float d[3] = { c * direction[0] - s * direction[2], direction[1], s * direction[0] + c * direction[2] };
-	float roots[2], x, y, z, u, v;
-	int n = 1, i;
-	if ( !screen->visible ) {
-		return 0;
-	}
+	o[0] = c * ox - s * oz;
+	o[1] = origin[1] - screen->position[1];
+	o[2] = s * ox + c * oz;
+	d[0] = c * direction[0] - s * direction[2];
+	d[1] = direction[1];
+	d[2] = s * direction[0] + c * direction[2];
 	if ( screen->curved ) {
 		float a = d[0] * d[0] + d[2] * d[2], b = 2 * (o[0] * d[0] + o[2] * d[2]);
 		float cc = o[0] * o[0] + o[2] * o[2] - screen->radius * screen->radius, disc = b * b - 4 * a * cc;
@@ -190,13 +192,36 @@ static inline int VR_ScreenRay( const vrScreenGeometry_t *screen, const float or
 		}
 		roots[0] = (-b - sqrtf( disc )) / (2 * a);
 		roots[1] = (-b + sqrtf( disc )) / (2 * a);
-		n = 2;
-	} else {
-		if ( fabsf( d[2] ) < 0.00000001f ) {
-			return 0;
-		}
-		roots[0] = -o[2] / d[2];
+		return 2;
 	}
+	if ( fabsf( d[2] ) < 0.00000001f ) {
+		return 0;
+	}
+	roots[0] = -o[2] / d[2];
+	return 1;
+}
+/* How long to draw a ray that misses the screen: as far as the surface would be had it gone on past its edges,
+ * and no more than half again the distance to the screen's middle. direction is a unit vector. */
+static inline float VR_ScreenReach( const vrScreenGeometry_t *screen, const float origin[3], const float direction[3] ) {
+	float o[3], d[3], roots[2], middle[3], limit;
+	int n;
+	VR_ScreenPoint( screen, 0.5f, 0.5f, middle );
+	limit = 1.5f * sqrtf( (middle[0] - origin[0]) * (middle[0] - origin[0]) + (middle[1] - origin[1]) * (middle[1] - origin[1]) +
+						  (middle[2] - origin[2]) * (middle[2] - origin[2]) );
+	n = VR_ScreenSurface( screen, origin, direction, o, d, roots );
+	/* a curved screen is the far wall of its cylinder */
+	if ( n && roots[n - 1] > 0 && roots[n - 1] < limit ) {
+		return roots[n - 1];
+	}
+	return limit;
+}
+static inline int VR_ScreenRay( const vrScreenGeometry_t *screen, const float origin[3], const float direction[3], float uv[2] ) {
+	float o[3], d[3], roots[2], x, y, z, u, v;
+	int n, i;
+	if ( !screen->visible ) {
+		return 0;
+	}
+	n = VR_ScreenSurface( screen, origin, direction, o, d, roots );
 	for ( i = 0; i < n; i++ ) {
 		if ( roots[i] <= 0 ) {
 			continue;

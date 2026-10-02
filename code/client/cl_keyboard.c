@@ -8,6 +8,7 @@
 #include "client.h"
 #include "cl_vr_input.h"
 #include "../vrcommon/vr_clientinfo.h"
+#include "../vrcommon/vr_shared.h"
 
 extern vr_clientinfo_t vr;
 
@@ -568,8 +569,8 @@ void VKeyboard_Draw( void ) {
 		}
 	}
 
-	// Blue = left physical hand, red = right physical hand
-	{
+	// Blue = left physical hand, red = right physical hand; the pointers' pools of light stand in for the dots
+	if ( vr.pointerMode != VR_POINTER_DRAWN ) {
 		#define CURSOR_DOT_SIZE	6
 
 		// menuLeftHanded means the left physical hand drives the primary cursor

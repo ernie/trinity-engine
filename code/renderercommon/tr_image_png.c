@@ -206,7 +206,15 @@ struct BufferedFile
 	int   Length;
 	byte *Ptr;
 	int   BytesLeft;
+	qboolean Borrowed;
 };
+
+/*
+ *  A PNG already in memory, read in place of the named file.
+ */
+
+static const byte *MemoryPNG;
+static int MemoryPNGLength;
 
 /*
  *  Read a file into a buffer.
@@ -252,8 +260,17 @@ static struct BufferedFile *ReadBufferedFile(const char *name)
 	 *  Read the file.
 	 */
 
-	BF->Length = ri.FS_ReadFile((char *) name, &buffer.v);
-	BF->Buffer = buffer.b;
+	BF->Borrowed = MemoryPNG != NULL;
+	if(BF->Borrowed)
+	{
+		BF->Length = MemoryPNGLength;
+		BF->Buffer = (byte *) MemoryPNG;
+	}
+	else
+	{
+		BF->Length = ri.FS_ReadFile((char *) name, &buffer.v);
+		BF->Buffer = buffer.b;
+	}
 
 	/*
 	 *  Did we get it? Is it big enough?
@@ -284,7 +301,7 @@ static void CloseBufferedFile(struct BufferedFile *BF)
 {
 	if(BF)
 	{
-		if(BF->Buffer)
+		if(BF->Buffer && !BF->Borrowed)
 		{
 			ri.FS_FreeFile(BF->Buffer);
 		}
@@ -2485,4 +2502,16 @@ void R_LoadPNG(const char *name, byte **pic, int *width, int *height)
 	 */
 
 	CloseBufferedFile(ThePNG);
+}
+
+/*
+ *  The PNG loader for an image already in memory. name only labels messages.
+ */
+
+void R_DecodePNG(const char *name, const byte *data, int size, byte **pic, int *width, int *height)
+{
+	MemoryPNG = data;
+	MemoryPNGLength = size;
+	R_LoadPNG(name, pic, width, height);
+	MemoryPNG = NULL;
 }

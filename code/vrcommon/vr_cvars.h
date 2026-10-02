@@ -35,6 +35,7 @@ extern cvar_t *vr_mirrorHeight;
 void VR_InitMirrorCvars( void );
 extern cvar_t *vr_virtualScreenMode;
 extern cvar_t *vr_screenCurvature;
+extern cvar_t *vr_controllerModels;
 extern cvar_t *vr_thumbstickDeadzone;
 extern cvar_t *vr_thumbstickFullDeflection;
 extern cvar_t *vr_triggerSensitivity;

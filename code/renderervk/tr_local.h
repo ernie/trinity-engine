@@ -1240,6 +1240,22 @@ typedef struct {
 	shader_t				*sunShader;
 	shader_t *hudShader;
 	shader_t *virtualScreenShader, *virtualFloorShader, *virtualReflectionShader;
+	shader_t *xrPointerShader;
+	// drawing resources for the runtime's controller models; they live here so a renderer restart rebuilds them
+	struct {
+		byte cacheId[16];		// the asset these were built from; a device that returns brings the same one
+		qboolean loaded;		// qfalse for a free entry
+		size_t packed;			// VR_ModelPack's size: a returning model has to match it as well as the ID
+		shader_t *shaders[16];	// by image; NULL where the model has none or it won't decode
+		shader_t *plain;		// for what draws untextured
+		VkBuffer buffer;		// positions, texture coordinates and indices, as VR_ModelPack lays them out
+		VkDeviceMemory memory;
+		unsigned *offsets;		// each primitive's start in the buffer
+	} xrAssets[8];
+	struct {
+		unsigned serial;		// the loaded model the entry was found for; 0 for none
+		int asset;				// in xrAssets, or -1 when they were all taken
+	} xrModels[8];
 
 	int						numLightmaps;
 	image_t					**lightmaps;

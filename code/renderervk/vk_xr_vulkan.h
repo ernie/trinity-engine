@@ -56,6 +56,7 @@ typedef struct {
 	XrEnvironmentBlendMode blend;
 	int running, lost, frameBegun, renderable;
 	int profileChanged;
+	int modelsChanged; /* the set of controller models changed during the last action sync */
 	int formatList;
 	int createInfoMeta;					   /* XR_META_vulkan_swapchain_create_info enabled */
 	VkImageCreateFlags targetCreateFlags; /* extra flags to request; set before Bind */

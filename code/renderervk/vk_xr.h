@@ -1,6 +1,7 @@
 #ifndef VK_XR_H
 #define VK_XR_H
 #include "vk_xr_vulkan.h"
+#include "vk_xr_models.h"
 #include "vk_foveation_math.h"
 
 void VK_DesktopTrackingStatus( qboolean visible, qhandle_t font, qhandle_t icon );
@@ -41,6 +42,22 @@ void VK_XR_SetupView( refdef_t *view, viewParms_t *parms );
 qboolean VK_XR_Drawing( void );
 void VK_XR_SetVirtualScreen( qboolean enabled, qboolean menuYawLocked, refXRFrame_t *frame );
 const vrScreenGeometry_t *VK_XR_Screen( void );
+/* The menu pointers: a ray in tracking space and its cursor on the virtual screen. The client names them once a
+ * frame, after its input runs. */
+typedef struct {
+	qboolean active, pool, blue;
+	vec3_t origin, end;
+	float cursor[2]; /* the pool's place on the screen, 0..1 across and down */
+} vkXRPointer_t;
+void VK_XR_SetPointer( int hand, const float *origin, const float *end, const float *cursor, qboolean blue );
+const vkXRPointer_t *VK_XR_Pointer( int hand ); /* NULL while the hand has none */
+/* Frontend, once a frame after the client has set the virtual screen. True when it asked the runtime for new models. */
+qboolean VK_XR_UpdateModels( void );
+/* A loaded controller model, or NULL for an empty slot; draw it only while its drawable flag is set. */
+const vkXRModel_t *VK_XR_Model( int index );
+/* The models' allocator; pixels decoded into a model's images come from it. */
+void *VK_XR_ModelAlloc( size_t size );
+void VK_XR_HeadPosition( vec3_t position );
 void VK_XR_FloorOrigin( vec3_t origin );
 void VK_XR_ScreenCaptureRect( int eyeWidth, int eyeHeight, int rect[4] );
 void VK_XR_EyeMatrix( int eye, float matrix[16] );

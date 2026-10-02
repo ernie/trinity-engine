@@ -6,6 +6,7 @@
 #include "vk_xr_input.h"
 #include "vk_xr_refresh.h"
 #include "vk_xr_gaze.h"
+#include "vk_xr_models.h"
 #include "../vrcommon/vr_float.h"
 #include "../vrcommon/vr_render_extent.h"
 
@@ -17,6 +18,10 @@ static vkXRLive_t live;
 static vkXRVk_t xr;
 static vkXRInput_t input;
 static vkXRGaze_t gaze;
+static vkXRModels_t models;
+static cvar_t *controllerModels;
+static vkXRPointer_t pointers[2];
+static qboolean inputFocused; /* this frame's controller input was sampled */
 static float gazeDirection[3];
 static int gazeValid;
 static vkFovCenters_t foveationCenters;
@@ -128,6 +133,7 @@ qboolean VK_XR_PrepareInit( qboolean enabled ) {
 	if ( live.instance ) {
 		return qtrue;
 	}
+	controllerModels = ri.Cvar_Get( "vr_controllerModels", "1", CVAR_ARCHIVE );
 	if ( !VKXR_Check( VK_XRLive_Open( &live ), "OpenXR loader/system" ) ) {
 		return qfalse;
 	}
@@ -168,6 +174,50 @@ void VK_XR_SetVirtualScreen( qboolean enabled, qboolean menuYawLocked, refXRFram
 }
 const vrScreenGeometry_t *VK_XR_Screen( void ) {
 	return VK_XR_Drawing() && screenGeometry.visible ? &screenGeometry : NULL;
+}
+void VK_XR_SetPointer( int hand, const float *origin, const float *end, const float *cursor, qboolean blue ) {
+	if ( hand < 0 || hand > 1 )
+		return;
+	pointers[hand].active = origin && end && VR_FloatsFinite( origin, 3 ) && VR_FloatsFinite( end, 3 );
+	pointers[hand].pool = pointers[hand].active && cursor && VR_FloatsFinite( cursor, 2 );
+	pointers[hand].blue = blue;
+	if ( pointers[hand].active ) {
+		VectorCopy( origin, pointers[hand].origin );
+		VectorCopy( end, pointers[hand].end );
+	}
+	if ( pointers[hand].pool ) {
+		pointers[hand].cursor[0] = cursor[0];
+		pointers[hand].cursor[1] = cursor[1];
+	}
+}
+const vkXRPointer_t *VK_XR_Pointer( int hand ) {
+	return pointers[hand].active ? &pointers[hand] : NULL;
+}
+static void VKXR_ModelLog( const char *line ) {
+	ri.Printf( PRINT_ALL, "%s\n", line );
+}
+/* Models load and are located only while the screen that shows them is up, so a controller waking mid-match
+ * costs nothing until the next menu. */
+qboolean VK_XR_UpdateModels( void ) {
+	const qboolean wanted = VK_XR_Screen() && controllerModels && controllerModels->integer;
+	const qboolean refresh = wanted && xr.modelsChanged;
+	if ( refresh ) {
+		xr.modelsChanged = 0;
+		VK_XRModels_Refresh( &models );
+	}
+	return VK_XRModels_Update( &models, xr.space, xr.displayTime, wanted && inputFocused ) || refresh;
+}
+void *VK_XR_ModelAlloc( size_t size ) {
+	/* plain malloc: the models outlive the renderer's own memory, which every map load frees */
+	return malloc( size );
+}
+const vkXRModel_t *VK_XR_Model( int index ) {
+	return index >= 0 && index < VK_XR_MODELS_MAX && models.models[index].handle ? &models.models[index] : NULL;
+}
+void VK_XR_HeadPosition( vec3_t position ) {
+	position[0] = ( xr.views[0].pose.position.x + xr.views[1].pose.position.x ) * 0.5f;
+	position[1] = ( xr.views[0].pose.position.y + xr.views[1].pose.position.y ) * 0.5f;
+	position[2] = ( xr.views[0].pose.position.z + xr.views[1].pose.position.z ) * 0.5f;
 }
 void VK_XR_FloorOrigin( vec3_t origin ) {
 	VectorCopy( floorOrigin, origin );
@@ -354,6 +404,17 @@ void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device
 	if ( XR_FAILED( VK_XRGaze_Attach( &gaze, xr.session ) ) ) {
 		VK_XRGaze_Shutdown( &gaze );
 	}
+	{
+		XrResult result = VK_XRModels_Init( &models, live.instance, xr.session, live.getproc, live.models,
+											VK_XR_ModelAlloc, free, VKXR_ModelLog );
+		if ( XR_FAILED( result ) ) {
+			ri.Printf( PRINT_WARNING, "OpenXR controller models unavailable (%d)\n", (int)result );
+		}
+		if ( live.modelsRefused ) {
+			ri.Printf( PRINT_WARNING, "OpenXR controller models: the runtime lists the extensions but refused an instance with them (%d)\n",
+					   (int)live.modelsRefused );
+		}
+	}
 	barrier = (PFN_vkCmdPipelineBarrier)getVkProc( instance, "vkCmdPipelineBarrier" );
 	blit = (PFN_vkCmdBlitImage)getVkProc( instance, "vkCmdBlitImage" );
 	waitIdle = (PFN_vkDeviceWaitIdle)getVkProc( instance, "vkDeviceWaitIdle" );
@@ -448,6 +509,7 @@ qboolean VK_XR_SetActive( qboolean enabled ) {
 		hudDepth = ri.Cvar_Get( "vr_currentHudDepth", "3", 0 );
 		hudOffset = ri.Cvar_Get( "vr_hudYOffset", "0", 0 );
 		screenCurvature = ri.Cvar_Get( "vr_screenCurvature", "0.5", 0 );
+		controllerModels = ri.Cvar_Get( "vr_controllerModels", "1", CVAR_ARCHIVE );
 		refreshRate = ri.Cvar_Get( "vr_refreshrate", "90", 0 );
 		virtualScreenMode = ri.Cvar_Get( "vr_virtualScreenMode", "0", 0 );
 		worldscale = ri.Cvar_Get( "vr_worldscale", "32.0", 0 );
@@ -459,6 +521,7 @@ qboolean VK_XR_SetActive( qboolean enabled ) {
 		VK_XRInput_Reset( &input );
 		xr.scope = 0;
 		zoomLevel = 1;
+		Com_Memset( pointers, 0, sizeof( pointers ) );
 	}
 	/* Multiview supplies both eyes in one centered client frame. */
 	glConfig.stereoEnabled = qfalse;
@@ -615,6 +678,9 @@ int VK_XR_BeginFrame( refXRFrame_t *frame ) {
 	XrResult result;
 	Com_Memset( frame, 0, sizeof( *frame ) );
 	copied = submitted = qfalse;
+	/* the client names this frame's pointers after its input runs; a frame without input has none */
+	Com_Memset( pointers, 0, sizeof( pointers ) );
+	inputFocused = qfalse;
 	if ( !xr.session ) {
 		return 0;
 	}
@@ -657,6 +723,7 @@ int VK_XR_BeginFrame( refXRFrame_t *frame ) {
 			"OpenXR input sample" ) ) {
 		return -1;
 	}
+	inputFocused = frame->renderable && frame->input.focused;
 	{
 		XrPosef center = VKXR_CenterPose();
 		Com_Memcpy( frame->head.position, &center.position, sizeof( frame->head.position ) );
@@ -711,6 +778,8 @@ void VK_XR_ShutdownSession( void ) {
 		waitIdle( xrDevice );
 	}
 	VK_XRGaze_Shutdown( &gaze );
+	VK_XRModels_Shutdown( &models );
+	Com_Memset( pointers, 0, sizeof( pointers ) );
 	VK_XRInput_Shutdown( &input );
 	if ( xr.frameBegun )
 		VK_XRVK_End( &xr, 0 );
@@ -756,10 +825,26 @@ void VK_XR_Info( void ) {
 		 XR_SUCCEEDED( ((PFN_xrGetInstanceProperties)fn)( live.instance, &props ) ) )
 		ri.Printf( PRINT_ALL, "Runtime: %s %u.%u.%u\n", props.runtimeName, XR_VERSION_MAJOR( props.runtimeVersion ),
 				   XR_VERSION_MINOR( props.runtimeVersion ), XR_VERSION_PATCH( props.runtimeVersion ) );
+	ri.Printf( PRINT_ALL, "OpenXR API: %u.%u\n", (unsigned)XR_VERSION_MAJOR( live.apiVersion ),
+			   (unsigned)XR_VERSION_MINOR( live.apiVersion ) );
 	ri.Printf( PRINT_ALL, "Enabled extensions:\n" );
 	for ( i = 0; i < live.enabledCount; i++ )
 		ri.Printf( PRINT_ALL, "  %s\n", live.enabled[i] );
 	ri.Printf( PRINT_ALL, "Eye gaze: %s\n", live.eyeGaze ? "extension enabled" : "not offered" );
+	if ( live.models ) {
+		int loaded = 0, drawn = 0, triangles = 0;
+		for ( hand = 0; hand < VK_XR_MODELS_MAX; hand++ )
+			if ( models.models[hand].handle ) {
+				loaded++;
+				drawn += models.models[hand].drawable;
+				triangles += models.models[hand].model.triangleCount;
+			}
+		ri.Printf( PRINT_ALL, "Controller models: %d loaded (%d triangles), %d tracked%s\n", loaded, triangles, drawn,
+				   controllerModels && controllerModels->integer ? "" : "; turned off" );
+	} else if ( live.modelsRefused )
+		ri.Printf( PRINT_ALL, "Controller models: refused by the runtime (%d)\n", (int)live.modelsRefused );
+	else
+		ri.Printf( PRINT_ALL, "Controller models: not offered by the runtime\n" );
 	for ( hand = 0; hand < 2; hand++ ) {
 		const char *name = VK_XRInput_ProfileName( &input, hand );
 		ri.Printf( PRINT_ALL, "%s hand: %s, pitch correction %g\n", hand ? "Right" : "Left",

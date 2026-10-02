@@ -265,6 +265,8 @@
     <ClCompile Include="..\..\renderervk\vk_xr_input.c" />
     <ClCompile Include="..\..\renderervk\vk_xr_refresh.c" />
     <ClCompile Include="..\..\renderervk\vk_xr_gaze.c" />
+    <ClCompile Include="..\..\renderervk\vk_xr_models.c" />
+    <ClCompile Include="..\..\vrcommon\vr_model.c" />
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="..\..\asm\common_x64.asm">

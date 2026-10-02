@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_types.h"
 #include "vulkan/vulkan.h"
 
-#define	REF_API_VERSION		14
+#define	REF_API_VERSION		15
 
 //
 // these are the functions exported by the refresh module
@@ -143,6 +143,9 @@ typedef struct {
 	const char *(*XRLastError)( void );
 	qboolean (*XRHaptic)( int hand, float amplitude, int durationMs );
 	void (*XRSetVirtualScreen)( qboolean enabled, qboolean menuYawLocked, refXRFrame_t *frame );
+	// this frame's menu pointer for a hand: the ray in tracking space, and where on the virtual screen (0..1 across
+	// and down) its cursor's pool of light falls, NULL for none; a NULL origin hides both; blue draws it blue, not red
+	void (*XRSetPointer)( int hand, const float *origin, const float *end, const float *cursor, qboolean blue );
 	void (*XRSetZoom)( qboolean zoomed, float *level );
 	void (*SceneComplete)( void );
 	void (*HUDBufferStart)( qboolean clear );
@@ -238,6 +241,8 @@ typedef struct {
 	size_t	(*CL_SaveJPGToBuffer)( byte *buffer, size_t bufSize, int quality, int image_width, int image_height, byte *image_buffer, int padding );
 	void	(*CL_SaveJPG)( const char *filename, int quality, int image_width, int image_height, byte *image_buffer, int padding );
 	void	(*CL_LoadJPG)( const char *filename, unsigned char **pic, int *width, int *height );
+	// a JPEG already in memory; name only labels messages, and a bad image leaves *pic NULL
+	void	(*CL_DecodeJPG)( const char *name, const unsigned char *data, int size, unsigned char **pic, int *width, int *height );
 
 	qboolean (*CL_IsMinimized)( void );
 	void	(*CL_SetScaling)( float factor, int captureWidth, int captureHeight );

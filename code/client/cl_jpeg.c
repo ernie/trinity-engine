@@ -79,6 +79,10 @@ static void CL_JPGOutputMessage(j_common_ptr cinfo)
 }
 
 
+// a JPEG already in memory, decoded in place of the named file
+static const byte *jpgMemory;
+static int jpgMemoryLength;
+
 void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *height )
 {
 	/* This struct contains the JPEG decompression parameters and pointers to
@@ -117,7 +121,12 @@ void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
 	 * requires it in order to read binary files.
 	*/
 
-	len = FS_ReadFile( ( char * ) filename, &fbuffer.v );
+	if ( jpgMemory ) {
+		fbuffer.b = (byte *)jpgMemory;
+		len = jpgMemoryLength;
+	} else {
+		len = FS_ReadFile( ( char * ) filename, &fbuffer.v );
+	}
 	if ( !fbuffer.b || len < 0 ) {
 		return;
 	}
@@ -140,7 +149,8 @@ void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
 		* We need to clean up the JPEG object, close the input file, and return.
 		*/
 		jpeg_destroy_decompress( &cinfo );
-		FS_FreeFile( fbuffer.v );
+		if ( !jpgMemory )
+			FS_FreeFile( fbuffer.v );
 
 		/* Append the filename to the error for easier debugging */
 		Com_Printf( ", loading file %s\n", filename );
@@ -193,10 +203,15 @@ void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
       || pixelcount > 0x1FFFFFFF || cinfo.output_components != 3
     )
   {
+    // an image the runtime handed over is skipped rather than dropping the client
+    if ( jpgMemory ) {
+      jpeg_destroy_decompress(&cinfo);
+      return;
+    }
     // Free the memory to make sure we don't leak memory
     FS_FreeFile( fbuffer.v );
     jpeg_destroy_decompress(&cinfo);
-  
+
     Com_Error( ERR_DROP, "LoadJPG: %s has an invalid image format: %dx%d*4=%d, components: %d", filename,
 		    cinfo.output_width, cinfo.output_height, pixelcount * 4, cinfo.output_components);
   }
@@ -258,13 +273,25 @@ void CL_LoadJPG( const char *filename, unsigned char **pic, int *width, int *hei
    * so as to simplify the setjmp error logic above.  (Actually, I don't
    * think that jpeg_destroy can do an error exit, but why assume anything...)
    */
-  FS_FreeFile( fbuffer.v );
+  if ( !jpgMemory )
+    FS_FreeFile( fbuffer.v );
 
   /* At this point you may want to check to see whether any corrupt-data
    * warnings occurred (test whether jerr.pub.num_warnings is nonzero).
    */
 
   /* And we're done! */
+}
+
+
+void CL_DecodeJPG( const char *name, const unsigned char *data, int size, unsigned char **pic, int *width, int *height )
+{
+	*pic = NULL;
+	*width = *height = 0;
+	jpgMemory = data;
+	jpgMemoryLength = size;
+	CL_LoadJPG( name, pic, width, height );
+	jpgMemory = NULL;
 }
 
 

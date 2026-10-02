@@ -1157,6 +1157,8 @@ Q3RENDVOBJ = \
   $(B)/rendv/vk_xr_input.o \
   $(B)/rendv/vk_xr_refresh.o \
   $(B)/rendv/vk_xr_gaze.o \
+  $(B)/rendv/vk_xr_models.o \
+  $(B)/rendv/vr_model.o \
   $(B)/rendv/vk_flares.o \
   $(B)/rendv/vk_vbo.o \
 

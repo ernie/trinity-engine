@@ -1651,6 +1651,36 @@ static void vk_create_render_passes( void )
 				VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.xr_output.eye_pass ) );
 				SET_OBJECT_NAME( vk.xr_output.eye_pass, "render pass - xr eye output", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
 			}
+			{
+				// the virtual-screen composition alone pays for a depth buffer; the world's output stays color-only
+				const VkAttachmentReference screenDepth = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+				attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+				attachments[0].finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+				attachments[1].flags = 0;
+				attachments[1].format = depth_format;
+				attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+				attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+				attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+				attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+				attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+				attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+				attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+				xrDeps[0].srcStageMask |= VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+				xrDeps[0].srcAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+				xrDeps[0].dstStageMask |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+				xrDeps[0].dstAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+				subpass.pDepthStencilAttachment = &screenDepth;
+				desc.attachmentCount = 2;
+				VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.xr_output.screen_pass ) );
+				SET_OBJECT_NAME( vk.xr_output.screen_pass, "render pass - xr screen", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
+				if ( vk.xr_output.eye_count ) {
+					attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+					VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.xr_output.screen_eye_pass ) );
+					SET_OBJECT_NAME( vk.xr_output.screen_eye_pass, "render pass - xr eye screen", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
+				}
+				subpass.pDepthStencilAttachment = NULL;
+				desc.attachmentCount = 1;
+			}
 			desc.pNext = NULL;
 			desc.dependencyCount = savedCount;
 			desc.pDependencies = savedDeps;
@@ -3837,6 +3867,62 @@ static void vk_create_storage_buffer( uint32_t size )
 }
 
 
+/* A device-local vertex and index buffer filled through the staging buffer. */
+static void vk_create_static_buffer( const byte *data, VkDeviceSize size, VkBuffer *buffer, VkDeviceMemory *memory )
+{
+	VkMemoryRequirements vb_mem_reqs;
+	VkMemoryAllocateInfo alloc_info;
+	VkBufferCreateInfo desc;
+	VkCommandBuffer command_buffer;
+	VkBufferCopy copyRegion[1];
+	VkDeviceSize uploadDone;
+
+	desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	desc.pNext = NULL;
+	desc.flags = 0;
+	desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	desc.queueFamilyIndexCount = 0;
+	desc.pQueueFamilyIndices = NULL;
+
+	// device-local buffer
+	desc.size = size;
+	desc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+	VK_CHECK( qvkCreateBuffer( vk.device, &desc, NULL, buffer ) );
+
+	// memory requirements
+	qvkGetBufferMemoryRequirements( vk.device, *buffer, &vb_mem_reqs );
+
+	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	alloc_info.pNext = NULL;
+	alloc_info.allocationSize = vb_mem_reqs.size;
+	alloc_info.memoryTypeIndex = find_memory_type( vb_mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, memory ) );
+	qvkBindBufferMemory( vk.device, *buffer, *memory, 0 );
+
+	// staging buffers
+
+#ifdef USE_UPLOAD_QUEUE
+	vk_flush_staging_buffer( qfalse );
+#endif
+	// utilize existing staging buffer
+	uploadDone = 0;
+	while ( uploadDone < size ) {
+		VkDeviceSize uploadSize = vk.staging_buffer.size;
+		if ( uploadDone + uploadSize > size ) {
+			uploadSize = size - uploadDone;
+		}
+		memcpy(vk.staging_buffer.ptr + 0, data + uploadDone, uploadSize);
+		command_buffer = begin_command_buffer();
+		copyRegion[0].srcOffset = 0;
+		copyRegion[0].dstOffset = uploadDone;
+		copyRegion[0].size = uploadSize;
+		qvkCmdCopyBuffer( command_buffer, vk.staging_buffer.handle, *buffer, 1, &copyRegion[0] );
+		end_command_buffer( command_buffer, __func__ );
+		uploadDone += uploadSize;
+	}
+}
+
+
 #ifdef USE_VBO
 void vk_release_vbo( void )
 {
@@ -3852,64 +3938,9 @@ void vk_release_vbo( void )
 
 qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size )
 {
-	VkMemoryRequirements vb_mem_reqs;
-	VkMemoryAllocateInfo alloc_info;
-	VkBufferCreateInfo desc;
-	VkDeviceSize vertex_buffer_offset;
-	VkDeviceSize allocationSize;
-	uint32_t memory_type_bits;
-	VkCommandBuffer command_buffer;
-	VkBufferCopy copyRegion[1];
-	VkDeviceSize uploadDone;
-
 	vk_release_vbo();
 
-	desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	desc.pNext = NULL;
-	desc.flags = 0;
-	desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-	desc.queueFamilyIndexCount = 0;
-	desc.pQueueFamilyIndices = NULL;
-
-	// device-local buffer
-	desc.size = vbo_size;
-	desc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-	VK_CHECK( qvkCreateBuffer( vk.device, &desc, NULL, &vk.vbo.vertex_buffer ) );
-
-	// memory requirements
-	qvkGetBufferMemoryRequirements( vk.device, vk.vbo.vertex_buffer, &vb_mem_reqs );
-	vertex_buffer_offset = 0;
-	allocationSize = vertex_buffer_offset + vb_mem_reqs.size;
-	memory_type_bits = vb_mem_reqs.memoryTypeBits;
-
-	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc_info.pNext = NULL;
-	alloc_info.allocationSize = allocationSize;
-	alloc_info.memoryTypeIndex = find_memory_type( memory_type_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &vk.vbo.buffer_memory ) );
-	qvkBindBufferMemory( vk.device, vk.vbo.vertex_buffer, vk.vbo.buffer_memory, vertex_buffer_offset );
-
-	// staging buffers
-
-#ifdef USE_UPLOAD_QUEUE
-	vk_flush_staging_buffer( qfalse );
-#endif
-	// utilize existing staging buffer
-	uploadDone = 0;
-	while ( uploadDone < vbo_size ) {
-		VkDeviceSize uploadSize = vk.staging_buffer.size;
-		if ( uploadDone + uploadSize > vbo_size ) {
-			uploadSize = vbo_size - uploadDone;
-		}
-		memcpy(vk.staging_buffer.ptr + 0, vbo_data + uploadDone, uploadSize);
-		command_buffer = begin_command_buffer();
-		copyRegion[0].srcOffset = 0;
-		copyRegion[0].dstOffset = uploadDone;
-		copyRegion[0].size = uploadSize;
-		qvkCmdCopyBuffer( command_buffer, vk.staging_buffer.handle, vk.vbo.vertex_buffer, 1, &copyRegion[0] );
-		end_command_buffer( command_buffer, __func__ );
-		uploadDone += uploadSize;
-	}
+	vk_create_static_buffer( vbo_data, vbo_size, &vk.vbo.vertex_buffer, &vk.vbo.buffer_memory );
 
 	SET_OBJECT_NAME( vk.vbo.vertex_buffer, "static VBO", VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT );
 	SET_OBJECT_NAME( vk.vbo.buffer_memory, "static VBO memory", VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT );
@@ -4858,8 +4889,8 @@ static void vk_create_attachments( void )
 				&vk.xr_output.image, &vk.xr_output.view, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, qfalse, 2 );
 		}
 
-		if ( r_bloom->integer ) {
-			// post-scene 3D icons test against their own depth, since the scene's is discarded
+		if ( r_bloom->integer || vk.multiview ) {
+			// post-scene 3D icons and the virtual screen's controllers test against their own depth, since the scene's is discarded
 			create_depth_attachment( 0, vk.sceneWidth, vk.sceneHeight, VK_SAMPLE_COUNT_1_BIT, &vk.post_depth,
 									 &vk.post_depth_view, qtrue, (vk.multiview ? 2 : 1) );
 		}
@@ -4930,6 +4961,9 @@ static void vk_create_attachments( void )
 		create_color_attachment( gls.captureWidth, gls.captureHeight, VK_SAMPLE_COUNT_1_BIT, vk.capture_format,
 								 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, &vk.capture.image,
 								 &vk.capture.image_view, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, qfalse, 1 );
+		// the virtual screen's controllers; the scene depth may be multisampled
+		create_depth_attachment( 0, vk.sceneWidth, vk.sceneHeight, VK_SAMPLE_COUNT_1_BIT, &vk.post_depth,
+								 &vk.post_depth_view, qtrue, 2 );
 	}
 
 	//vk_alloc_attachments();
@@ -5171,6 +5205,16 @@ static void vk_create_framebuffers( void )
 				attachments[0] = vk.xr_output.eye_view[n];
 				VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.xr_output.eye_framebuffer[n] ) );
 			}
+			attachments[0] = vk.xr_output.unorm_view;
+			attachments[1] = vk.post_depth_view;
+			desc.attachmentCount = 2;
+			desc.renderPass = vk.xr_output.screen_pass;
+			VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.xr_output.screen_framebuffer ) );
+			desc.renderPass = vk.xr_output.screen_eye_pass;
+			for ( n = 0; n < vk.xr_output.eye_count; n++ ) {
+				attachments[0] = vk.xr_output.eye_view[n];
+				VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.xr_output.screen_eye_framebuffer[n] ) );
+			}
 		}
 
 		if ( r_bloom->integer )
@@ -5308,10 +5352,18 @@ static void vk_destroy_framebuffers( void ) {
 		qvkDestroyFramebuffer( vk.device, vk.xr_output.framebuffer, NULL );
 		vk.xr_output.framebuffer = VK_NULL_HANDLE;
 	}
+	if ( vk.xr_output.screen_framebuffer ) {
+		qvkDestroyFramebuffer( vk.device, vk.xr_output.screen_framebuffer, NULL );
+		vk.xr_output.screen_framebuffer = VK_NULL_HANDLE;
+	}
 	for ( n = 0; n < vk.xr_output.eye_count; n++ ) {
 		if ( vk.xr_output.eye_framebuffer[n] ) {
 			qvkDestroyFramebuffer( vk.device, vk.xr_output.eye_framebuffer[n], NULL );
 			vk.xr_output.eye_framebuffer[n] = VK_NULL_HANDLE;
+		}
+		if ( vk.xr_output.screen_eye_framebuffer[n] ) {
+			qvkDestroyFramebuffer( vk.device, vk.xr_output.screen_eye_framebuffer[n], NULL );
+			vk.xr_output.screen_eye_framebuffer[n] = VK_NULL_HANDLE;
 		}
 	}
 	// the target views outlive this: they are rebuilt only with the XR swapchain
@@ -5678,28 +5730,40 @@ static void vk_screen_target_init( void ) {
 				   vk_screen.image.uploadHeight, vk_screen.mips );
 	}
 	if ( !vk_screen.pass ) {
-		VkAttachmentDescription attachment = {0};
+		VkAttachmentDescription attachments[2] = {{0}, {0}};
 		VkAttachmentReference color = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+		VkAttachmentReference depth = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+		VkImageView views[2];
 		VkSubpassDescription subpass = {0};
 		VkRenderPassCreateInfo pass = {0};
-		VkRenderPassMultiviewCreateInfo views;
+		VkRenderPassMultiviewCreateInfo multiview;
 		const uint32_t mask = VK_PassViewMask( qtrue, RENDER_PASS_VR_SCREEN );
 		VkFramebufferCreateInfo framebuffer = {0};
 		VkSubpassDependency dependencies[2] = {{0}, {0}};
-		attachment.format = vk.mainColorFormat;
-		attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-		attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-		attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachment.initialLayout = attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		attachments[0].format = vk.mainColorFormat;
+		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachments[0].initialLayout = attachments[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		if ( vk.xrDirect ) {
-			attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-			attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		}
+		// the controllers sort by depth; nothing reads it afterwards
+		attachments[1].format = vk.depth_format;
+		attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+		attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &color;
+		subpass.pDepthStencilAttachment = &depth;
 		dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
 		dependencies[0].dstSubpass = 0;
 		dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
@@ -5711,6 +5775,10 @@ static void vk_screen_target_init( void ) {
 			dependencies[0].srcStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
 			dependencies[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 		}
+		dependencies[0].srcStageMask |= VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		dependencies[0].srcAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		dependencies[0].dstStageMask |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		dependencies[0].dstAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 		dependencies[1].srcSubpass = 0;
 		dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
 		dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -5718,18 +5786,19 @@ static void vk_screen_target_init( void ) {
 		dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 		dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 		pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-		pass.attachmentCount = 1;
-		pass.pAttachments = &attachment;
+		pass.attachmentCount = 2;
+		pass.pAttachments = attachments;
 		pass.subpassCount = 1;
 		pass.pSubpasses = &subpass;
 		pass.dependencyCount = 2;
 		pass.pDependencies = dependencies;
-		vk_multiview_pass( &pass, &views, &mask );
+		vk_multiview_pass( &pass, &multiview, &mask );
 		VK_CHECK( qvkCreateRenderPass( vk.device, &pass, NULL, &vk_screen.pass ) );
 		framebuffer.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 		framebuffer.renderPass = vk_screen.pass;
-		framebuffer.attachmentCount = 1;
-		framebuffer.pAttachments = &vk.color_image_view;
+		framebuffer.attachmentCount = 2;
+		framebuffer.pAttachments = views;
+		views[1] = vk.post_depth_view;
 		framebuffer.width = vk.sceneWidth;
 		framebuffer.height = vk.sceneHeight;
 		framebuffer.layers = 1;
@@ -5738,7 +5807,7 @@ static void vk_screen_target_init( void ) {
 			for ( i = 0; i <= vk.xr_direct.count; i++ ) {
 				struct vkXRDirectTarget_s *t =
 					i < vk.xr_direct.count ? &vk.xr_direct.target[i] : &vk.xr_direct.idle;
-				framebuffer.pAttachments = &t->view;
+				views[0] = t->view;
 				VK_CHECK( qvkCreateFramebuffer( vk.device, &framebuffer, NULL, &t->screen ) );
 			}
 		}
@@ -6725,6 +6794,14 @@ static void vk_destroy_render_passes( void )
 		qvkDestroyRenderPass( vk.device, vk.xr_output.eye_pass, NULL );
 		vk.xr_output.eye_pass = VK_NULL_HANDLE;
 	}
+	if ( vk.xr_output.screen_pass ) {
+		qvkDestroyRenderPass( vk.device, vk.xr_output.screen_pass, NULL );
+		vk.xr_output.screen_pass = VK_NULL_HANDLE;
+	}
+	if ( vk.xr_output.screen_eye_pass ) {
+		qvkDestroyRenderPass( vk.device, vk.xr_output.screen_eye_pass, NULL );
+		vk.xr_output.screen_eye_pass = VK_NULL_HANDLE;
+	}
 }
 
 
@@ -6804,8 +6881,11 @@ void vk_shutdown( refShutdownCode_t code )
 		for ( n = 0; n < vk.xr_output.eye_count; n++ ) {
 			if ( vk.xr_output.eye_framebuffer[n] )
 				qvkDestroyFramebuffer( vk.device, vk.xr_output.eye_framebuffer[n], NULL );
+			if ( vk.xr_output.screen_eye_framebuffer[n] )
+				qvkDestroyFramebuffer( vk.device, vk.xr_output.screen_eye_framebuffer[n], NULL );
 			qvkDestroyImageView( vk.device, vk.xr_output.eye_view[n], NULL );
 			vk.xr_output.eye_framebuffer[n] = VK_NULL_HANDLE;
+			vk.xr_output.screen_eye_framebuffer[n] = VK_NULL_HANDLE;
 			vk.xr_output.eye_view[n] = VK_NULL_HANDLE;
 		}
 		vk.xr_output.eye_count = 0;
@@ -7014,6 +7094,16 @@ void vk_release_resources( void ) {
 	int i, j;
 
 	vk_wait_idle();
+
+	// tr still names the controller models' buffers; R_Init clears it next
+	for ( i = 0; i < (int)ARRAY_LEN( tr.xrAssets ); i++ ) {
+		if ( tr.xrAssets[i].buffer )
+			qvkDestroyBuffer( vk.device, tr.xrAssets[i].buffer, NULL );
+		if ( tr.xrAssets[i].memory )
+			qvkFreeMemory( vk.device, tr.xrAssets[i].memory, NULL );
+		tr.xrAssets[i].buffer = VK_NULL_HANDLE;
+		tr.xrAssets[i].memory = VK_NULL_HANDLE;
+	}
 
 	for (i = 0; i < vk_world.num_image_chunks; i++)
 		qvkFreeMemory(vk.device, vk_world.image_chunks[i].memory, NULL);
@@ -8953,11 +9043,6 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	depth_stencil_state.flags = 0;
 	depth_stencil_state.depthTestEnable = (state_bits & GLS_DEPTHTEST_DISABLE) ? VK_FALSE : VK_TRUE;
 	depth_stencil_state.depthWriteEnable = (state_bits & GLS_DEPTHMASK_TRUE) ? VK_TRUE : VK_FALSE;
-	if ( renderPassIndex == RENDER_PASS_VR_SCREEN_EYE ) {
-		// the composition relies on draw order, as in its own depthless pass
-		depth_stencil_state.depthTestEnable = VK_FALSE;
-		depth_stencil_state.depthWriteEnable = VK_FALSE;
-	}
 #ifdef USE_REVERSED_DEPTH
 	depth_stencil_state.depthCompareOp = (state_bits & GLS_DEPTHFUNC_EQUAL) ? VK_COMPARE_OP_EQUAL : VK_COMPARE_OP_GREATER_OR_EQUAL;
 #else
@@ -9201,7 +9286,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	else if ( renderPassIndex == RENDER_PASS_SCREENMAP )
 		create_info.renderPass = vk.render_pass.screenmap;
 	else if ( renderPassIndex == RENDER_PASS_VR_SCREEN_EYE )
-		create_info.renderPass = vk.xr_output.pass;
+		create_info.renderPass = vk.xr_output.screen_pass;
 	else if ( renderPassIndex == RENDER_PASS_POST_SCENE && vk.render_pass.post_scene )
 		create_info.renderPass = vk.render_pass.post_scene;
 	else if ( renderPassIndex == RENDER_PASS_MONO_POST_SCENE && vk.mono.pass.post_scene )
@@ -10855,6 +10940,305 @@ static void vk_capture_screen_source( VkImage srcImage, VkFormatProperties prope
 
 }
 
+/* CONTROLLER MODELS AND POINTER RAYS */
+#define VK_XR_MODEL_IMAGES 16
+#define VK_XR_MODEL_TEXTURE_MAX 4096
+
+/* One of an asset's base color textures; the white image when it won't decode. The decoded pixels stay with the
+ * model, so a renderer restart only uploads them again; a width below zero marks a failure. */
+static image_t *vk_xr_model_image( const vkXRModel_t *model, int asset, int index ) {
+	vrModelImage_t *source = &model->model.images[index];
+	char name[MAX_QPATH];
+	image_t *image;
+	Com_sprintf( name, sizeof( name ), "*xrmodel%d_%d", asset, index );
+	if ( !source->pixels && !source->width ) {
+		byte *pic = NULL;
+		int width = 0, height = 0, i, count = 0;
+		source->width = -1;
+		/* decoding takes several times the pixels in memory, so the header's size is checked first */
+		if ( VR_ModelImageSize( source, &width, &height ) && width > 0 && height > 0 &&
+			 width <= VK_XR_MODEL_TEXTURE_MAX && height <= VK_XR_MODEL_TEXTURE_MAX ) {
+			if ( source->format == VR_MODEL_IMAGE_JPEG )
+				ri.CL_DecodeJPG( name, source->data, source->size, &pic, &width, &height );
+			else if ( source->format == VR_MODEL_IMAGE_PNG )
+				R_DecodePNG( name, source->data, source->size, &pic, &width, &height );
+		}
+		if ( pic && width > 0 && height > 0 && width <= VK_XR_MODEL_TEXTURE_MAX && height <= VK_XR_MODEL_TEXTURE_MAX ) {
+			count = width * height;
+			source->pixels = VK_XR_ModelAlloc( (size_t)count * 4 );
+		}
+		if ( source->pixels ) {
+			Com_Memcpy( source->pixels, pic, (size_t)count * 4 );
+			// glTF's opaque and masked materials ignore whatever the texture's alpha holds
+			for ( i = 0; i < count; i++ )
+				source->pixels[i * 4 + 3] = 255;
+			source->width = width;
+			source->height = height;
+		} else {
+			ri.Printf( PRINT_WARNING, "OpenXR controller model texture %d did not decode; drawing it untextured\n", index );
+		}
+		if ( pic )
+			ri.Free( pic );
+	}
+	if ( !source->pixels )
+		return tr.whiteImage;
+	image = R_CreateImage( name, NULL, source->pixels, source->width, source->height,
+						   IMGFLAG_MIPMAP | IMGFLAG_NOLIGHTSCALE | IMGFLAG_NO_COMPRESSION );
+	return image ? image : tr.whiteImage;
+}
+
+/* The textures, shaders and static geometry for one asset. A shader per texture serves every material on it,
+ * since each material's color is already in its vertices. */
+static void vk_xr_model_asset( const vkXRModel_t *model, int asset ) {
+	const size_t size = VR_ModelPack( &model->model, NULL, NULL );
+	int i, m;
+	if ( size ) {
+		byte *packed = ri.Hunk_AllocateTempMemory( (int)size );
+		/* hunk memory goes with the rest of tr at the next renderer restart */
+		tr.xrAssets[asset].offsets = ri.Hunk_Alloc( model->model.primitiveCount * sizeof( unsigned ), h_low );
+		VR_ModelPack( &model->model, packed, tr.xrAssets[asset].offsets );
+		vk_create_static_buffer( packed, size, &tr.xrAssets[asset].buffer, &tr.xrAssets[asset].memory );
+		ri.Hunk_FreeTempMemory( packed );
+	}
+	Com_Memcpy( tr.xrAssets[asset].cacheId, model->cacheId, sizeof( tr.xrAssets[asset].cacheId ) );
+	tr.xrAssets[asset].packed = size;
+	tr.xrAssets[asset].plain = R_XRModelShader( va( "*xrmodel%d_%d", asset, -1 ), tr.whiteImage, qfalse );
+	for ( i = 0; i < VK_XR_MODEL_IMAGES; i++ ) {
+		image_t *image = tr.whiteImage;
+		/* only a texture some material draws with is decoded */
+		for ( m = 0; m < model->model.materialCount && model->model.materials[m].image != i; m++ )
+			;
+		if ( i < model->model.imageCount && m < model->model.materialCount )
+			image = vk_xr_model_image( model, asset, i );
+		tr.xrAssets[asset].shaders[i] =
+			image == tr.whiteImage ? NULL : R_XRModelShader( va( "*xrmodel%d_%d", asset, i ), image, qfalse );
+	}
+	tr.xrAssets[asset].loaded = qtrue;
+}
+
+/* Frontend, once a frame: updates the models and makes sure whichever are loaded have their drawing resources. */
+void vk_prepare_xr_models( void ) {
+	int slot, asset;
+	qboolean busy;
+	if ( !VK_XR_Enabled() || !tr.registered )
+		return;
+	/* fetching a model, decoding a texture and uploading one each stall the frame: one of them a frame */
+	busy = VK_XR_UpdateModels();
+	for ( slot = 0; slot < VK_XR_MODELS_MAX; slot++ ) {
+		const vkXRModel_t *model = VK_XR_Model( slot );
+		if ( !model ) {
+			tr.xrModels[slot].serial = 0;
+			continue;
+		}
+		if ( tr.xrModels[slot].serial == model->serial )
+			continue;
+		/* a controller that slept and woke brings the same asset back under a new model; the size is compared
+		 * too, for a runtime that gives different files one ID */
+		for ( asset = 0; asset < (int)ARRAY_LEN( tr.xrAssets ); asset++ )
+			if ( tr.xrAssets[asset].loaded &&
+				 !memcmp( tr.xrAssets[asset].cacheId, model->cacheId, sizeof( model->cacheId ) ) &&
+				 tr.xrAssets[asset].packed == VR_ModelPack( &model->model, NULL, NULL ) )
+				break;
+		if ( asset == (int)ARRAY_LEN( tr.xrAssets ) ) {
+			for ( asset = 0; asset < (int)ARRAY_LEN( tr.xrAssets ) && tr.xrAssets[asset].loaded; asset++ )
+				;
+			if ( asset == (int)ARRAY_LEN( tr.xrAssets ) ) {
+				ri.Printf( PRINT_WARNING, "OpenXR controller model not drawn: %d different models are already loaded\n", asset );
+				asset = -1;
+			} else if ( busy ) {
+				continue;
+			} else {
+				vk_xr_model_asset( model, asset );
+				busy = qtrue;
+			}
+		}
+		tr.xrModels[slot].serial = model->serial;
+		tr.xrModels[slot].asset = asset;
+	}
+}
+
+#define VK_XR_POOL_SEGMENTS 20
+#define VK_XR_POOL_RINGS 3
+/* The pointer's red, and the blue it takes on instead: the ray, then the pool's center and each ring out from it. */
+static const byte vk_xr_pointer_rgb[2][3] = {{255, 48, 40}, {77, 128, 255}};
+static const byte vk_xr_pool_rgba[2][VK_XR_POOL_RINGS + 1][4] = {
+	{{255, 190, 170, 255}, {255, 64, 52, 230}, {255, 48, 40, 110}, {255, 48, 40, 0}},
+	{{170, 200, 255, 255}, {90, 140, 255, 230}, {77, 128, 255, 110}, {77, 128, 255, 0}}};
+
+/* Each hand's pointer: a strip along its ray, turned toward the head and widening with distance to look even,
+ * and, while the ray is on the screen, its cursor as a pool of light there, hot at the point a click lands and
+ * fading out. Both test against the controllers' depth, so they draw after them. */
+static void vk_draw_screen_pointers( const vrScreenGeometry_t *screen, const vec3_t eye ) {
+	/* each ring's radius as a share of the screen's height */
+	static const float radius[VK_XR_POOL_RINGS] = {0.005f, 0.011f, 0.024f};
+	qboolean begun = qfalse;
+	int hand, i, ring;
+	for ( hand = 0; hand < 2; hand++ ) {
+		const vkXRPointer_t *pointer = VK_XR_Pointer( hand );
+		vec3_t along, toEye, side, center, left, right;
+		color4ub_t faint, bright;
+		const byte( *color )[4];
+		int ndx;
+		if ( !pointer )
+			continue;
+		color = vk_xr_pool_rgba[pointer->blue ? 1 : 0];
+		if ( !begun ) {
+			RB_BeginSurface( tr.xrPointerShader, 0 );
+			begun = qtrue;
+		}
+		VectorSubtract( pointer->end, pointer->origin, along );
+		VectorSubtract( eye, pointer->origin, toEye );
+		CrossProduct( along, toEye, side );
+		if ( VectorNormalize( side ) >= 0.000001f ) {
+			RB_CHECKOVERFLOW( 4, 6 );
+#ifdef USE_VBO
+			tess.surfType = SF_TRIANGLES;
+#endif
+			for ( i = 0; i < 3; i++ )
+				faint.rgba[i] = bright.rgba[i] = vk_xr_pointer_rgb[pointer->blue ? 1 : 0][i];
+			faint.rgba[3] = 40;
+			bright.rgba[3] = 200;
+			ndx = tess.numVertexes;
+			for ( i = 0; i < 3; i++ ) {
+				tess.xyz[ndx][i] = pointer->origin[i] + side[i] * 0.0015f;
+				tess.xyz[ndx + 1][i] = pointer->origin[i] - side[i] * 0.0015f;
+				tess.xyz[ndx + 2][i] = pointer->end[i] - side[i] * 0.004f;
+				tess.xyz[ndx + 3][i] = pointer->end[i] + side[i] * 0.004f;
+			}
+			for ( i = 0; i < 4; i++ ) {
+				tess.texCoords[0][ndx + i][0] = tess.texCoords[1][ndx + i][0] = 0;
+				tess.texCoords[0][ndx + i][1] = tess.texCoords[1][ndx + i][1] = 0;
+				VectorCopy( side, tess.normal[ndx + i] );
+				tess.vertexColors[ndx + i] = i < 2 ? faint : bright;
+			}
+			tess.indexes[tess.numIndexes + 0] = ndx + 0;
+			tess.indexes[tess.numIndexes + 1] = ndx + 1;
+			tess.indexes[tess.numIndexes + 2] = ndx + 3;
+			tess.indexes[tess.numIndexes + 3] = ndx + 3;
+			tess.indexes[tess.numIndexes + 4] = ndx + 1;
+			tess.indexes[tess.numIndexes + 5] = ndx + 2;
+			tess.numVertexes += 4;
+			tess.numIndexes += 6;
+		}
+
+		if ( !pointer->pool )
+			continue;
+		/* the pool lies in the screen's surface: across is the screen's own tangent there, up is the world's */
+		VR_ScreenPoint( screen, pointer->cursor[0], pointer->cursor[1], center );
+		VR_ScreenPoint( screen, pointer->cursor[0] - 0.01f, pointer->cursor[1], left );
+		VR_ScreenPoint( screen, pointer->cursor[0] + 0.01f, pointer->cursor[1], right );
+		VectorSubtract( right, left, side );
+		if ( VectorNormalize( side ) < 0.000001f )
+			continue;
+		RB_CHECKOVERFLOW( 1 + VK_XR_POOL_RINGS * VK_XR_POOL_SEGMENTS, ( 2 * VK_XR_POOL_RINGS - 1 ) * VK_XR_POOL_SEGMENTS * 3 );
+#ifdef USE_VBO
+		tess.surfType = SF_TRIANGLES;
+#endif
+		ndx = tess.numVertexes;
+		VectorCopy( center, tess.xyz[ndx] );
+		Com_Memcpy( tess.vertexColors[ndx].rgba, color[0], 4 );
+		for ( ring = 0; ring < VK_XR_POOL_RINGS; ring++ ) {
+			const float r = radius[ring] * screen->height;
+			for ( i = 0; i < VK_XR_POOL_SEGMENTS; i++ ) {
+				const float angle = i * ( 2 * (float)M_PI / VK_XR_POOL_SEGMENTS );
+				const int v = ndx + 1 + ring * VK_XR_POOL_SEGMENTS + i, next = ( i + 1 ) % VK_XR_POOL_SEGMENTS;
+				VectorMA( center, r * cosf( angle ), side, tess.xyz[v] );
+				tess.xyz[v][1] += r * sinf( angle );
+				Com_Memcpy( tess.vertexColors[v].rgba, color[ring + 1], 4 );
+				if ( ring == 0 ) {
+					tess.indexes[tess.numIndexes++] = ndx;
+					tess.indexes[tess.numIndexes++] = v;
+					tess.indexes[tess.numIndexes++] = ndx + 1 + next;
+				} else {
+					const int inner = v - VK_XR_POOL_SEGMENTS, innerNext = ndx + 1 + ( ring - 1 ) * VK_XR_POOL_SEGMENTS + next;
+					tess.indexes[tess.numIndexes++] = inner;
+					tess.indexes[tess.numIndexes++] = v;
+					tess.indexes[tess.numIndexes++] = innerNext;
+					tess.indexes[tess.numIndexes++] = innerNext;
+					tess.indexes[tess.numIndexes++] = v;
+					tess.indexes[tess.numIndexes++] = ndx + 1 + ring * VK_XR_POOL_SEGMENTS + next;
+				}
+			}
+		}
+		for ( i = ndx; i < ndx + 1 + VK_XR_POOL_RINGS * VK_XR_POOL_SEGMENTS; i++ ) {
+			tess.texCoords[0][i][0] = tess.texCoords[1][i][0] = 0;
+			tess.texCoords[0][i][1] = tess.texCoords[1][i][1] = 0;
+			VectorClear( tess.normal[i] );
+		}
+		tess.numVertexes += 1 + VK_XR_POOL_RINGS * VK_XR_POOL_SEGMENTS;
+	}
+	if ( begun )
+		RB_EndSurface();
+}
+
+/* Each part draws from the asset's static buffer under its node's matrix; only its headlight colors, four bytes a
+ * vertex, are made each frame. Both sides of every triangle draw and the pass's depth buffer orders them. */
+static void vk_draw_screen_models( const vec3_t eye ) {
+	static float world[VR_MODEL_MAX_NODES * 16];
+	static unsigned char visible[VR_MODEL_MAX_NODES];
+	const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+	qboolean drawn = qfalse;
+	int slot, n, p;
+	for ( slot = 0; slot < VK_XR_MODELS_MAX; slot++ ) {
+		const vkXRModel_t *model = VK_XR_Model( slot );
+		const vrModel_t *m;
+		int asset;
+		if ( !model || !model->drawable || tr.xrModels[slot].serial != model->serial || tr.xrModels[slot].asset < 0 )
+			continue;
+		asset = tr.xrModels[slot].asset;
+		m = &model->model;
+		if ( !tr.xrAssets[asset].buffer )
+			continue;
+		VR_ModelPose( m, &model->root, model->states, model->map, model->nodeCount, world, visible );
+		for ( n = 0; n < m->nodeCount; n++ ) {
+			const vrModelMesh_t *mesh;
+			if ( m->nodes[n].mesh < 0 || m->nodes[n].mesh >= m->meshCount || !visible[n] )
+				continue;
+			mesh = &m->meshes[m->nodes[n].mesh];
+			for ( p = mesh->firstPrimitive; p < mesh->firstPrimitive + mesh->primitiveCount; p++ ) {
+				const vrModelPrimitive_t *primitive = &m->primitives[p];
+				const int index = m->materials[primitive->material].image;
+				const shader_t *shader = index >= 0 && index < VK_XR_MODEL_IMAGES && tr.xrAssets[asset].shaders[index]
+											 ? tr.xrAssets[asset].shaders[index]
+											 : tr.xrAssets[asset].plain;
+				const shaderStage_t *stage = shader->stages[0];
+				const uint32_t colors = PAD( vk.cmd->vertex_buffer_offset, 32 ), size = primitive->vertexCount * 4;
+				const VkDeviceSize start = tr.xrAssets[asset].offsets[p];
+				VkBuffer buffers[3];
+				VkDeviceSize offsets[3];
+				/* a primitive without a triangle has no indices to bind */
+				if ( primitive->indexCount < 3 )
+					continue;
+				if ( colors + size > vk.geometry_buffer_size ) {
+					// schedule geometry buffer resize
+					vk.geometry_buffer_size_new = log2pad( colors + size, 1 );
+					return;
+				}
+				VR_ModelShade( m, p, world + n * 16, eye, vk.cmd->vertex_buffer_ptr + colors );
+				vk.cmd->vertex_buffer_offset = (VkDeviceSize)colors + size;
+				buffers[0] = buffers[2] = tr.xrAssets[asset].buffer;
+				buffers[1] = vk.cmd->vertex_buffer;
+				offsets[0] = start;
+				offsets[1] = colors;
+				offsets[2] = start + VR_MODEL_PACK_ST( primitive->vertexCount );
+				GL_SelectTexture( 0 );
+				GL_Bind( stage->bundle[0].image[0] );
+				vk_update_mvp( world + n * 16 );
+				vk.cmd->emissive_factor = 0.0f;
+				vk_bind_pipeline( stage->vk_pipeline[0] );
+				qvkCmdBindVertexBuffers( vk.cmd->command_buffer, 0, 3, buffers, offsets );
+				vk_bind_index_buffer( tr.xrAssets[asset].buffer, start + VR_MODEL_PACK_INDEX( primitive->vertexCount ) );
+				vk.cmd->num_indexes = primitive->indexCount;
+				vk_draw_geometry( DEPTH_RANGE_NORMAL, qtrue );
+				drawn = qtrue;
+			}
+		}
+	}
+	/* what follows is in tracking space again */
+	if ( drawn )
+		vk_update_mvp( identity );
+}
+
 /* Draws the floor, the screen's reflection and the screen in stereo into the open pass. */
 static void vk_draw_screen_composition( const vrScreenGeometry_t *screen, qboolean clear ) {
 	const vec4_t black = {0, 0, 0, 1};
@@ -10934,6 +11318,13 @@ static void vk_draw_screen_composition( const vrScreenGeometry_t *screen, qboole
 			RB_AddQuadStampExt( origin, left, up, white, u0, 0, u1, 1 );
 		}
 		RB_EndSurface();
+		{
+			/* the controllers sit in front of the screen; each ray hides behind whatever part of them covers it */
+			vec3_t eye;
+			VK_XR_HeadPosition( eye );
+			vk_draw_screen_models( eye );
+			vk_draw_screen_pointers( screen, eye );
+		}
 		tess.shader = NULL;
 	}
 	backEnd.viewParms = savedView;
@@ -10981,7 +11372,7 @@ static void vk_render_virtual_screen( vkMonoTargets_t *source ) {
 	/* Screen metadata remains live, but subsequent passes consume stereo output. */
 	source->sourceActive = qfalse;
 
-	/* The floor and screen compose in a single-sample color-only pass. */
+	/* The floor, screen and controllers compose in a single-sample pass over its own depth. */
 	vk.renderPassIndex = RENDER_PASS_VR_SCREEN;
 	vk.renderWidth = vk.sceneWidth;
 	vk.renderHeight = vk.sceneHeight;
@@ -11266,8 +11657,6 @@ void vk_end_frame( void )
 		const uint32_t index = vk_eye_output_index();
 		const qboolean direct = index < vk.xr_output.eye_count;
 		const VkFormatProperties properties = vk.screenFormatProperties;
-		VkClearAttachment black;
-		VkClearRect rect;
 
 		// a 2D batch still pending when the frame ends without a swap
 		if ( tess.numIndexes ) {
@@ -11307,17 +11696,10 @@ void vk_end_frame( void )
 		/* Screen metadata remains live, but the composition consumes stereo output. */
 		vk.mono.sourceActive = qfalse;
 
-		vk_begin_render_pass( direct ? vk.xr_output.eye_pass : vk.xr_output.pass,
-							  direct ? vk.xr_output.eye_framebuffer[index] : vk.xr_output.framebuffer, qfalse,
+		// the pass clears to black and brings the depth buffer the controllers need
+		vk_begin_render_pass( direct ? vk.xr_output.screen_eye_pass : vk.xr_output.screen_pass,
+							  direct ? vk.xr_output.screen_eye_framebuffer[index] : vk.xr_output.screen_framebuffer, qtrue,
 							  vk.sceneWidth, vk.sceneHeight );
-		Com_Memset( &black, 0, sizeof( black ) );
-		Com_Memset( &rect, 0, sizeof( rect ) );
-		black.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		black.clearValue.color.float32[3] = 1;
-		rect.rect.extent.width = vk.sceneWidth;
-		rect.rect.extent.height = vk.sceneHeight;
-		rect.layerCount = 1;
-		qvkCmdClearAttachments( vk.cmd->command_buffer, 1, &black, 1, &rect );
 		vk.renderPassIndex = RENDER_PASS_VR_SCREEN_EYE;
 		vk_foveation_invalidate_rate();
 		vk_hud_invalidate_caches();

@@ -212,8 +212,15 @@ static xrLoaderStatus_t XRLoader_Open( xrLoaderState_t *st, xrLoaderInfo_t *info
 	ci.type = XR_TYPE_INSTANCE_CREATE_INFO;
 	strcpy( ci.applicationInfo.applicationName, "Trinity Engine" );
 	strcpy( ci.applicationInfo.engineName, "Trinity Engine" );
-	ci.applicationInfo.apiVersion = XR_MAKE_VERSION( 1, 0, 0 );
+	/* the same request the session makes: OpenXR 1.1, or 1.0 from a runtime that turns 1.1 down with any code
+	 * but the ones no other request would get past */
+	ci.applicationInfo.apiVersion = XR_MAKE_VERSION( 1, 1, 0 );
 	result = create( &ci, &st->instance );
+	if ( XR_FAILED( result ) && result != XR_ERROR_RUNTIME_UNAVAILABLE && result != XR_ERROR_LIMIT_REACHED &&
+		 result != XR_ERROR_OUT_OF_MEMORY && result != XR_ERROR_INSTANCE_LOST ) {
+		ci.applicationInfo.apiVersion = XR_MAKE_VERSION( 1, 0, 0 );
+		result = create( &ci, &st->instance );
+	}
 	if ( XR_FAILED( result ) )
 		goto runtime_failure;
 	RESOLVE( st->instance, xrGetInstanceProperties, properties );

@@ -3984,6 +3984,30 @@ shader_t *R_FindShader( const char *name, int lightmapIndex, qboolean mipRawImag
 }
 
 
+/*
+====================
+R_XRModelShader
+
+Triangles that arrive culled and lit: the stage only modulates the texture by the vertex color.
+Opaque ones write depth; blended ones only test against it.
+====================
+*/
+shader_t *R_XRModelShader( const char *name, image_t *image, qboolean blend ) {
+	InitShader( name, LIGHTMAP_2D );
+	R_CreateDefaultShading( image );
+	stages[0].bundle[0].rgbGen = CGEN_EXACT_VERTEX;
+	if ( blend ) {
+		stages[0].stateBits = GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA;
+	} else {
+		// glTF's opaque and masked materials ignore whatever the texture's alpha holds
+		stages[0].bundle[0].alphaGen = AGEN_SKIP;
+		stages[0].stateBits = GLS_DEFAULT;
+	}
+	shader.cullType = CT_TWO_SIDED;
+	return FinishShader();
+}
+
+
 qhandle_t RE_RegisterShaderFromImage(const char *name, int lightmapIndex, image_t *image, qboolean mipRawImage) {
 	unsigned long hash;
 	shader_t	*sh;
@@ -4562,6 +4586,7 @@ static void CreateExternalShaders( void ) {
 		R_CreateDefaultShading( tr.whiteImage );
 		shader.cullType = CT_TWO_SIDED;
 		tr.virtualFloorShader = FinishShader();
+		tr.xrPointerShader = R_XRModelShader( "*xrPointer", tr.whiteImage, qtrue );
 	}
 }
 
