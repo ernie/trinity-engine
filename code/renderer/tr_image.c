@@ -1063,6 +1063,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 
 	image = R_CreateImage( name, localName, pic, width, height, flags );
 	ri.Free( pic );
+	ri.LoadingPump( qfalse ); // a shader may be mid-parse here: tracked frames only
 	return image;
 }
 

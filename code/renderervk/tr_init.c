@@ -2209,6 +2209,8 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.XRSetActive = VK_XR_SetActive;
 	re.XRBeginFrame = VK_XR_BeginFrame;
 	re.XREndFrame = VK_XR_EndFrame;
+	re.XRLoadingFrameDue = RE_XRLoadingFrameDue;
+	re.XRRedrawEnvironment = RE_XRRedrawEnvironment;
 	re.XRStatus = VK_XR_Status;
 	re.XRLastError = VK_XR_LastError;
 	re.XRInfo = VK_XR_Info;

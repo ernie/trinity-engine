@@ -777,12 +777,18 @@ void CM_LoadMap( const char *name, qboolean clientload, int *checksum ) {
 	CMod_LoadPlanes (&header.lumps[LUMP_PLANES]);
 	CMod_LoadBrushSides (&header.lumps[LUMP_BRUSHSIDES]);
 	CMod_LoadBrushes (&header.lumps[LUMP_BRUSHES]);
+#if !defined(BSPC) && !defined(DEDICATED)
+	CL_LoadingPump( qfalse ); // tracked frames only: the map is half built
+#endif
 	CMod_LoadSubmodels (&header.lumps[LUMP_MODELS]);
 	CMod_LoadLeafs (&header.lumps[LUMP_LEAFS]);
 	CMod_LoadNodes (&header.lumps[LUMP_NODES]);
 	CMod_LoadEntityString (&header.lumps[LUMP_ENTITIES]);
 	CMod_LoadVisibility( &header.lumps[LUMP_VISIBILITY] );
 	CMod_LoadPatches( &header.lumps[LUMP_SURFACES], &header.lumps[LUMP_DRAWVERTS] );
+#if !defined(BSPC) && !defined(DEDICATED)
+	CL_LoadingPump( qfalse );
+#endif
 
 	// we are NOT freeing the file, because it is cached for the ref
 	FS_FreeFile( buf );

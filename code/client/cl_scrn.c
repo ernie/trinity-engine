@@ -22,6 +22,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_scrn.c -- master for refresh, status bar, console, chat, notify, etc
 
 #include "client.h"
+#include "../vrcommon/vr_loading_budget.h"
 #include "cl_vr.h"
 #include "cl_vr_input.h"
 #include "cl_vr_modules.h"
@@ -737,8 +738,10 @@ This is called every frame, and can also be called explicitly to flush
 text to the screen.
 ==================
 */
+static int scr_recursive;	// depth inside SCR_UpdateScreen; the loading pump never opens a frame inside one
+static int scr_lastUpdate;	// Sys_Milliseconds at the last completed update
+
 void SCR_UpdateScreen( void ) {
-	static int recursive;
 	static int framecount;
 	static int next_frametime;
 	qboolean loadingFrame;
@@ -748,7 +751,7 @@ void SCR_UpdateScreen( void ) {
 
 	/* Loading pacifiers outside CL_Frame own their XR frame. Calls made inside
 	 * an existing frame must neither acquire another image nor end that frame. */
-	loadingFrame = CL_VR_BeginLoadingFrame();
+	loadingFrame = CL_VR_BeginLoadingFrame( qfalse );
 	if ( re.DesktopTrackingStatus ) {
 		re.DesktopTrackingStatus( VR_IsActiveMode() && CL_VR_WaitingForTracking(), cls.charSetShader, cls.vrTrackingIcon );
 	}
@@ -779,10 +782,10 @@ void SCR_UpdateScreen( void ) {
 		framecount = cls.framecount;
 	}
 
-	if ( ++recursive > 2 ) {
+	if ( ++scr_recursive > 2 ) {
 		Com_Error( ERR_FATAL, "SCR_UpdateScreen: recursively called" );
 	}
-	recursive = 1;
+	scr_recursive = 1;
 
 	// If there is no VM, there are also no rendering commands issued. Stop the renderer in
 	// that case.
@@ -808,5 +811,33 @@ void SCR_UpdateScreen( void ) {
 	}
 
 	if (loadingFrame) CL_VR_EndFrame();
-	recursive = 0;
+	scr_recursive = 0;
+	scr_lastUpdate = Sys_Milliseconds();
+}
+
+/* The renderer calls this between asset loads. A stretch of loading with no pacifier leaves the headset
+ * without frames until the runtime shows its waiting card, so a loading frame goes out once the last
+ * update is older than the interval. Never inside an update or an open VR frame: that would nest frames. */
+#define SCR_LOADING_PUMP_MS 100
+static vrLoadingBudget_t scr_loadingBudget;
+
+void CL_LoadingPump( qboolean redraw ) {
+	int start;
+	if ( scr_recursive || CL_VR_FrameOpen() || !VR_IsActiveMode() || cls.state < CA_CONNECTING || cls.state > CA_PRIMED )
+		return;
+	if ( redraw && ( cls.state == CA_LOADING || cls.state == CA_PRIMED ) && Sys_Milliseconds() - scr_lastUpdate >= SCR_LOADING_PUMP_MS ) {
+		SCR_UpdateScreen();
+		return;
+	}
+	// between redraws, and through the local server's spawn: the surroundings alone, tracked, around the screen
+	// as it was, paced by the display; a frame that blocked on the GPU buys the loader the same time back
+	start = Sys_Milliseconds();
+	if ( VR_LoadingBudgetHeld( &scr_loadingBudget, start ) || !re.XRLoadingFrameDue || !re.XRLoadingFrameDue() )
+		return;
+	if ( CL_VR_BeginLoadingFrame( qtrue ) ) {
+		if ( !re.XRRedrawEnvironment() && redraw )
+			SCR_UpdateScreen(); // the mode changed under us: the whole screen into the frame just begun
+		CL_VR_EndFrame();
+		VR_LoadingBudgetSpent( &scr_loadingBudget, start, Sys_Milliseconds() );
+	}
 }

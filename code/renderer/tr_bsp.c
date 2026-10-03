@@ -2378,19 +2378,24 @@ void RE_LoadWorldMap( const char *name ) {
 
 	// load into heap
 	R_LoadLightmaps( &header->lumps[LUMP_LIGHTMAPS] );
+	ri.LoadingPump( qfalse ); // tracked frames only while the world is half built
 	R_LoadShaders( &header->lumps[LUMP_SHADERS] );
 	R_LoadPlanes( &header->lumps[LUMP_PLANES] );
 	R_LoadFogs( &header->lumps[LUMP_FOGS], &header->lumps[LUMP_BRUSHES], &header->lumps[LUMP_BRUSHSIDES] );
 	R_LoadSurfaces( &header->lumps[LUMP_SURFACES], &header->lumps[LUMP_DRAWVERTS], &header->lumps[LUMP_DRAWINDEXES] );
+	ri.LoadingPump( qfalse ); // tracked frames only while the world is half built
 	R_LoadMarksurfaces( &header->lumps[LUMP_LEAFSURFACES] );
 	R_LoadNodesAndLeafs( &header->lumps[LUMP_NODES], &header->lumps[LUMP_LEAFS] );
+	ri.LoadingPump( qfalse ); // tracked frames only while the world is half built
 	R_LoadSubmodels( &header->lumps[LUMP_MODELS] );
 	R_LoadVisibility( &header->lumps[LUMP_VISIBILITY] );
 	R_LoadEntities( &header->lumps[LUMP_ENTITIES] );
 	R_LoadLightGrid( &header->lumps[LUMP_LIGHTGRID] );
+	ri.LoadingPump( qfalse ); // tracked frames only while the world is half built
 
 #ifdef USE_VBO
 	R_BuildWorldVBO( s_worldData.surfaces, s_worldData.numsurfaces );
+	ri.LoadingPump( qfalse ); // tracked frames only while the world is half built
 #endif
 
 	tr.mapLoading = qfalse;

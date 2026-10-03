@@ -11367,7 +11367,8 @@ static void vk_render_virtual_screen( vkMonoTargets_t *source ) {
 	srcImage = t->image;
 	composition = t->screen;
 
-	vk_capture_screen_source( srcImage, properties );
+	if ( !vk.repeatScreen )
+		vk_capture_screen_source( srcImage, properties );
 
 	/* Screen metadata remains live, but subsequent passes consume stereo output. */
 	source->sourceActive = qfalse;
@@ -11692,7 +11693,8 @@ void vk_end_frame( void )
 		vk_post_process_push( vk.pipeline_layout_composite );
 		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 		vk_end_render_pass();
-		vk_capture_screen_source( vk.xr_output.image, properties );
+		if ( !vk.repeatScreen )
+			vk_capture_screen_source( vk.xr_output.image, properties );
 		/* Screen metadata remains live, but the composition consumes stereo output. */
 		vk.mono.sourceActive = qfalse;
 
@@ -11924,6 +11926,25 @@ void vk_end_frame( void )
 	vk.renderPassIndex = RENDER_PASS_MAIN;
 }
 
+
+/* A loading frame with the screen as last captured: the composition redraws the floor, the screen, the controllers
+ * and the pointers for the head pose of the XR frame the client has begun, and the frame submits. Nothing here
+ * reaches the shader or image registries, so it may run from inside a load. */
+qboolean RE_XRLoadingFrameDue( void ) {
+	return tr.registered && !vk.frame_count && VK_XR_ScreenVisible() && vk_screen.image.handle && VK_XR_LoadingFrameDue();
+}
+
+qboolean RE_XRRedrawEnvironment( void ) {
+	if ( !tr.registered || vk.frame_count || !VK_XR_Screen() || !vk_screen.image.handle )
+		return qfalse;
+	vk_prepare_xr_models(); // the controllers' poses for this frame's display time
+	vk.repeatScreen = qtrue;
+	vk_begin_frame();
+	vk_end_frame();
+	vk_present_frame();
+	vk.repeatScreen = qfalse;
+	return qtrue;
+}
 
 void vk_present_frame( void )
 {

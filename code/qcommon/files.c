@@ -1895,6 +1895,8 @@ FS_Read
 Properly handles partial reads
 =================
 */
+#define FS_ZIP_READ_BLOCK ( 1 << 17 )
+
 int FS_Read( void *buffer, int len, fileHandle_t f ) {
 	int		block, remaining;
 	int		read;
@@ -1941,7 +1943,21 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 		}
 		return len;
 	} else {
-		return unzReadCurrentFile( fsh[f].handleFiles.file.z, buffer, len );
+		// inflated an eighth of a megabyte at a time: a 4x texture is tens of megabytes, and a load's headset frames go between the pieces
+		remaining = len;
+		while ( remaining > 0 ) {
+			block = remaining < FS_ZIP_READ_BLOCK ? remaining : FS_ZIP_READ_BLOCK;
+			read = unzReadCurrentFile( fsh[f].handleFiles.file.z, buf, block );
+			if ( read <= 0 )
+				return read < 0 ? read : len - remaining;
+			remaining -= read;
+			buf += read;
+#ifndef DEDICATED
+			if ( remaining > 0 )
+				CL_LoadingPump( qfalse );
+#endif
+		}
+		return len;
 	}
 }
 

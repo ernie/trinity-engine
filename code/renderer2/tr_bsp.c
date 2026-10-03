@@ -2781,14 +2781,17 @@ void RE_LoadWorldMap( const char *name ) {
 	R_LoadEntities( &header->lumps[LUMP_ENTITIES] );
 	R_LoadShaders( &header->lumps[LUMP_SHADERS] );
 	R_LoadLightmaps( &header->lumps[LUMP_LIGHTMAPS], &header->lumps[LUMP_SURFACES] );
+	ri.LoadingPump( qfalse ); // tracked frames only while the world is half built
 	R_LoadPlanes (&header->lumps[LUMP_PLANES]);
 	R_LoadFogs( &header->lumps[LUMP_FOGS], &header->lumps[LUMP_BRUSHES], &header->lumps[LUMP_BRUSHSIDES] );
 	R_LoadSurfaces( &header->lumps[LUMP_SURFACES], &header->lumps[LUMP_DRAWVERTS], &header->lumps[LUMP_DRAWINDEXES] );
+	ri.LoadingPump( qfalse ); // tracked frames only while the world is half built
 	R_LoadMarksurfaces (&header->lumps[LUMP_LEAFSURFACES]);
 	R_LoadNodesAndLeafs (&header->lumps[LUMP_NODES], &header->lumps[LUMP_LEAFS]);
 	R_LoadSubmodels (&header->lumps[LUMP_MODELS]);
 	R_LoadVisibility( &header->lumps[LUMP_VISIBILITY] );
 	R_LoadLightGrid( &header->lumps[LUMP_LIGHTGRID] );
+	ri.LoadingPump( qfalse ); // tracked frames only while the world is half built
 
 	// determine vertex light directions
 	R_CalcVertexLightDirs();

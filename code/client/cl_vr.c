@@ -558,15 +558,22 @@ static qboolean CL_VR_BeginFrameInternal( qboolean updateInput ) {
 qboolean CL_VR_BeginFrame( void ) {
 	return CL_VR_BeginFrameInternal( qtrue );
 }
-qboolean CL_VR_BeginLoadingFrame( void ) {
+/* A tracked frame draws nothing from the modules, so it may also cover the local server's spawn, before the
+ * cgame exists, and needs no VR-ready VM. */
+qboolean CL_VR_BeginLoadingFrame( qboolean tracked ) {
+	const qboolean loading = tracked ? cls.state >= CA_CONNECTING && cls.state <= CA_PRIMED
+									 : cls.state == CA_LOADING || cls.state == CA_PRIMED;
 	if ( frame.open || VRState_RestartQueued( &machine ) || machine.xrTainted || !VR_IsActiveMode() ||
-		!cls.rendererStarted || (cls.state != CA_LOADING && cls.state != CA_PRIMED) )
+		!cls.rendererStarted || !loading )
 		return qfalse;
-	if ( machine.running && (!machine.xrRenderer || !VM_VRRegistered( uivm ) || !VM_VRRegistered( cgvm )) )
+	if ( machine.running && (!machine.xrRenderer || (!tracked && (!VM_VRRegistered( uivm ) || !VM_VRRegistered( cgvm )))) )
 		return qfalse;
 	/* Loading callbacks can run inside CG_INIT. Update the tracked screen,
 	 * but never dispatch controller events into a partially initialized VM. */
 	CL_VR_BeginFrameInternal( qfalse );
+	return frame.open;
+}
+qboolean CL_VR_FrameOpen( void ) {
 	return frame.open;
 }
 void CL_VR_EndFrame( void ) {

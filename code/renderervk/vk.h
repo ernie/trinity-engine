@@ -320,6 +320,8 @@ void vk_begin_frame( void );
 void vk_prepare_xr_models( void );
 void vk_end_frame( void );
 void vk_present_frame( void );
+qboolean RE_XRLoadingFrameDue( void );
+qboolean RE_XRRedrawEnvironment( void );
 
 void vk_end_render_pass( void );
 void vk_begin_main_render_pass( void );
@@ -460,6 +462,7 @@ typedef struct {
 	qboolean multiview;
 	vkPostFlow_t postFlow;					// how this frame finishes; decided when it begins
 	qboolean postOpen;						// the flow's post pass has begun
+	qboolean repeatScreen;					// this frame recomposes the last captured screen: no capture
 	VkDescriptorSetLayout set_layout_sampler;	// combined image sampler
 	VkDescriptorSetLayout set_layout_uniform;	// dynamic uniform buffer
 	VkDescriptorSetLayout set_layout_storage;	// feedback buffer

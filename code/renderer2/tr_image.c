@@ -2824,6 +2824,7 @@ image_t	*R_FindImageFile( const char *name, imgType_t type, imgFlags_t flags )
 
 	image = R_CreateImage2( ( char * ) name, pic, width, height, picFormat, picNumMips, type, flags, 0 );
 	ri.Free( pic );
+	ri.LoadingPump( qfalse ); // a shader may be mid-parse here: tracked frames only
 	return image;
 }
 

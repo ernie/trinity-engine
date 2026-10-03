@@ -32,7 +32,8 @@ void CL_VR_RestartAborted( void );
 void CL_VR_ConnectionEnded( void );
 qboolean CL_VR_BeginFrame( void );
 /* Returns ownership: the caller must pair a successful begin with EndFrame. */
-qboolean CL_VR_BeginLoadingFrame( void );
+qboolean CL_VR_BeginLoadingFrame( qboolean tracked );
+qboolean CL_VR_FrameOpen( void );
 void CL_VR_EndFrame( void );
 void CL_VR_ResetVirtualScreen( void );
 qboolean CL_VR_RenderStereo( void );

@@ -11,6 +11,8 @@ qboolean VK_XR_ResolutionChanged( void );
 qboolean VK_XR_EyeSize( int *recW, int *recH, int *maxW, int *maxH );
 int VK_XR_BeginFrame( refXRFrame_t *frame );
 int VK_XR_EndFrame( void );
+qboolean VK_XR_LoadingFrameDue( void );
+qboolean VK_XR_ScreenVisible( void );
 void VK_XR_Submitted( void );
 int VK_XR_Status( void );
 qboolean VK_XR_Haptic( int hand, float amplitude, int durationMs );

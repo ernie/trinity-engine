@@ -3894,6 +3894,9 @@ shader_t *R_FindShader( const char *name, int lightmapIndex, qboolean mipRawImag
 		return tr.defaultShader;
 	}
 
+	// no shader is mid-parse here, so a loading frame may draw (and register) safely
+	ri.LoadingPump( qtrue );
+
 	// use (fullbright) vertex lighting if the bsp file doesn't have
 	// lightmaps
 	if ( lightmapIndex >= 0 && lightmapIndex >= tr.numLightmaps ) {

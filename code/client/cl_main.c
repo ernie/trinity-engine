@@ -3773,6 +3773,7 @@ static void CL_InitRef( void ) {
 	rimp.Cmd_Argv = Cmd_Argv;
 	rimp.Cmd_ExecuteText = Cbuf_ExecuteText;
 	rimp.Printf = CL_RefPrintf;
+	rimp.LoadingPump = CL_LoadingPump;
 	rimp.Error = CL_RendererError;
 	rimp.Milliseconds = CL_ScaledMilliseconds;
 	rimp.Microseconds = Sys_Microseconds;

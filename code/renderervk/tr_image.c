@@ -360,6 +360,8 @@ static void R_LightScaleTexture( byte *in, int inwidth, int inheight, qboolean o
 			c = inwidth*inheight;
 			for (i=0 ; i<c ; i++, p+=4)
 			{
+				if ( ( i & 0xFFFFF ) == 0 )
+					ri.LoadingPump( qfalse );
 				p[0] = s_gammatable[p[0]];
 				p[1] = s_gammatable[p[1]];
 				p[2] = s_gammatable[p[2]];
@@ -383,6 +385,8 @@ static void R_LightScaleTexture( byte *in, int inwidth, int inheight, qboolean o
 		{
 			for (i=0 ; i<c ; i++, p+=4)
 			{
+				if ( ( i & 0xFFFFF ) == 0 )
+					ri.LoadingPump( qfalse );
 				p[0] = s_intensitytable[p[0]];
 				p[1] = s_intensitytable[p[1]];
 				p[2] = s_intensitytable[p[2]];
@@ -392,6 +396,8 @@ static void R_LightScaleTexture( byte *in, int inwidth, int inheight, qboolean o
 		{
 			for (i=0 ; i<c ; i++, p+=4)
 			{
+				if ( ( i & 0xFFFFF ) == 0 )
+					ri.LoadingPump( qfalse );
 				p[0] = s_gammatable[s_intensitytable[p[0]]];
 				p[1] = s_gammatable[s_intensitytable[p[1]]];
 				p[2] = s_gammatable[s_intensitytable[p[2]]];
@@ -429,6 +435,8 @@ static void R_MipMap2( unsigned * const out, unsigned * const in, int inWidth, i
 	inHeightMask = inHeight - 1;
 
 	for ( i = 0 ; i < outHeight ; i++ ) {
+		if ( ( i & 15 ) == 0 )
+			ri.LoadingPump( qfalse ); // a 4x texture's first level is tens of milliseconds
 		for ( j = 0 ; j < outWidth ; j++ ) {
 			outpix = (byte *) ( temp + i * outWidth + j );
 			for ( k = 0 ; k < 4 ; k++ ) {
@@ -503,6 +511,8 @@ static void R_MipMap( byte *out, byte *in, int width, int height ) {
 	}
 
 	for (i=0 ; i<height ; i++, in+=row) {
+		if ( ( i & 63 ) == 0 )
+			ri.LoadingPump( qfalse );
 		for (j=0 ; j<width ; j++, out+=4, in+=8) {
 			out[0] = (in[0] + in[4] + in[row+0] + in[row+4])>>2;
 			out[1] = (in[1] + in[5] + in[row+1] + in[row+5])>>2;
@@ -698,6 +708,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 	// Use the normal mip-mapping to go down from [width, height] to [scaled_width, scaled_height] dimensions.
 	while (width > scaled_width || height > scaled_height) {
 		R_MipMap(data, data, width, height);
+		ri.LoadingPump( qfalse );
 
 		width >>= 1;
 		if (width < 1) width = 1;
@@ -713,6 +724,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 
 	if ( !(image->flags & IMGFLAG_NOLIGHTSCALE ) ) {
 		R_LightScaleTexture( (byte*)scaled_buffer, scaled_width, scaled_height, !mipmap );
+		ri.LoadingPump( qfalse );
 	}
 
 	miplevel = 0;
@@ -724,6 +736,7 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 	if ( mipmap ) {
 		while (scaled_width > 1 && scaled_height > 1) {
 			R_MipMap((byte *)scaled_buffer, (byte *)scaled_buffer, scaled_width, scaled_height);
+			ri.LoadingPump( qfalse );
 
 			scaled_width >>= 1;
 			if (scaled_width < 1) scaled_width = 1;
@@ -1328,6 +1341,7 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 
 	image = R_CreateImage( name, localName, pic, width, height, flags );
 	ri.Free( pic );
+	ri.LoadingPump( qfalse ); // a shader may be mid-parse here: tracked frames only
 	return image;
 }
 

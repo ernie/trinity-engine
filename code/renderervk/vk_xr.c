@@ -38,6 +38,7 @@ static struct {
 	VkFormatProperties sourceProperties, destinationProperties;
 } presentationFormats;
 static qboolean requested, active, copied, submitted, failed;
+static int lastEnd; // ri.Milliseconds() at the last frame end
 static char failure[256];
 static vrScreenAnchor_t screenAnchor;
 static vrScreenGeometry_t screenGeometry;
@@ -174,6 +175,10 @@ void VK_XR_SetVirtualScreen( qboolean enabled, qboolean menuYawLocked, refXRFram
 }
 const vrScreenGeometry_t *VK_XR_Screen( void ) {
 	return VK_XR_Drawing() && screenGeometry.visible ? &screenGeometry : NULL;
+}
+/* Visibility alone, for questions asked between frames, where no frame is renderable yet. */
+qboolean VK_XR_ScreenVisible( void ) {
+	return screenGeometry.visible;
 }
 void VK_XR_SetPointer( int hand, const float *origin, const float *end, const float *cursor, qboolean blue ) {
 	if ( hand < 0 || hand > 1 )
@@ -769,7 +774,16 @@ int VK_XR_EndFrame( void ) {
 	if ( !VKXR_Check( VK_XRVK_End( &xr, submitted && !failed ), "xrEndFrame" ) ) {
 		return -1;
 	}
+	lastEnd = ri.Milliseconds();
 	return failed || xr.lost ? -1 : 0;
+}
+
+/* A loading frame may go out when the session shows frames and the display has moved on since the last one. */
+qboolean VK_XR_LoadingFrameDue( void ) {
+	const int period = xr.displayPeriod > 0 ? (int)( xr.displayPeriod / 1000000 ) : 16;
+	if ( !xr.session || !xr.running || !active || !xr.target.handle || failed || xr.lost || xr.frameBegun )
+		return qfalse;
+	return ri.Milliseconds() - lastEnd >= period;
 }
 
 void VK_XR_ShutdownSession( void ) {

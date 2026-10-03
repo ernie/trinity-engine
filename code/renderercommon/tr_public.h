@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "tr_types.h"
 #include "vulkan/vulkan.h"
 
-#define	REF_API_VERSION		15
+#define	REF_API_VERSION		17
 
 //
 // these are the functions exported by the refresh module
@@ -139,6 +139,11 @@ typedef struct {
 	qboolean (*XRSetActive)( qboolean active );
 	int (*XRBeginFrame)( refXRFrame_t *frame );
 	int (*XREndFrame)( void );
+	// a tracked loading frame: XRLoadingFrameDue says one can go out now (the mode allows it and a display period has
+	// passed since the last frame); inside the XR frame then begun, XRRedrawEnvironment draws the virtual screen's
+	// surroundings for the current head pose around the screen as last captured, and submits
+	qboolean (*XRLoadingFrameDue)( void );
+	qboolean (*XRRedrawEnvironment)( void );
 	int (*XRStatus)( void ); // 0 absent, 1 initialized, 2 active, -1 lost
 	const char *(*XRLastError)( void );
 	qboolean (*XRHaptic)( int hand, float amplitude, int durationMs );
@@ -270,6 +275,10 @@ typedef struct {
 	// Enable EDR output on the presentation layer; returns the display's EDR
 	// headroom (>1 = HDR-capable). macOS-only effect, 1.0 elsewhere.
 	float	(*VK_ConfigureHDR)( qboolean enable );
+
+	// called between the steps of a load so the headset keeps getting frames; redraw says the caller sits where a
+	// redrawn loading screen may register shaders (no shader mid-parse), otherwise only a tracked frame may go out
+	void	(*LoadingPump)( qboolean redraw );
 
 } refimport_t;
 

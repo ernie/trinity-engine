@@ -148,6 +148,8 @@ void R_LoadTGA ( const char *name, byte **pic, int *width, int *height)
 			case 8:
 				for ( row = rows - 1; row >= 0; row-- )	{
 					pixbuf = targa_rgba + row * columns * 4;
+					if ( ( row & 63 ) == 0 )
+						ri.LoadingPump( qfalse );
 					for ( column = 0; column < columns; column++ ) {
 						byte red, green, blue;
 						red = green = blue = *buf_p++;
@@ -161,6 +163,8 @@ void R_LoadTGA ( const char *name, byte **pic, int *width, int *height)
 			case 24:
 				for ( row = rows - 1; row >= 0; row-- ) {
 					pixbuf = targa_rgba + row * columns * 4;
+					if ( ( row & 63 ) == 0 )
+						ri.LoadingPump( qfalse );
 					for ( column = 0; column < columns; column++ ) {
 						byte red, green, blue;
 						blue = *buf_p++;
@@ -176,6 +180,8 @@ void R_LoadTGA ( const char *name, byte **pic, int *width, int *height)
 			case 32:
 				for ( row = rows - 1; row >= 0; row-- ) {
 					pixbuf = targa_rgba + row * columns * 4;
+					if ( ( row & 63 ) == 0 )
+						ri.LoadingPump( qfalse );
 					for ( column = 0; column < columns; column++ ) {
 						byte red, green, blue, alpha;
 						blue = *buf_p++;
@@ -199,6 +205,8 @@ void R_LoadTGA ( const char *name, byte **pic, int *width, int *height)
 
 		for(row=rows-1; row>=0; row--) {
 			pixbuf = targa_rgba + row*columns*4;
+			if ( ( row & 63 ) == 0 )
+				ri.LoadingPump( qfalse );
 			for(column=0; column<columns; ) {
 				if(buf_p + 1 > end)
 					ri.Error (ERR_DROP, "LoadTGA: file truncated (%s)", name);
