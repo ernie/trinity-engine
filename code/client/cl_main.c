@@ -26,6 +26,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cl_vr.h"
 #include "cl_vr_modules.h"
 #include "cl_vr_bind.h"
+#include "cl_vr_input.h"
 #include "../vrcommon/vr_state.h"
 #include "cl_discord.h"
 #include "cl_trinity.h"
@@ -3540,6 +3541,7 @@ static void CL_InitRenderer( void ) {
 	cls.vrTrackingIcon = re.RegisterShaderNoMip( "menu/art/vr" );
 	cls.whiteShader = re.RegisterShader( "white" );
 	cls.consoleShader = re.RegisterShader( "console" );
+	VKeyboard_RendererStarted();
 
 	Con_CheckResize();
 

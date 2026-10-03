@@ -108,6 +108,19 @@ with `vid_restart`.
 | `vr_sensitivity` | Smooth thumbstick turning speed; `100` is normal, independent of mouse `sensitivity` |
 | `vr_snapturn` | Positive values select the snap-turn angle in degrees, with `1` meaning 45; nonpositive values enable smooth turning |
 
+### Virtual keyboard
+
+The console, the chat line and menu text fields bring up an on-screen keyboard
+on the virtual screen. It is a 65% PC layout: the main block, a column of
+Home, End, Page Up and Page Down, and arrow keys. Shift is one-shot, so it
+applies to the next character and clears; Caps Lock latches and affects
+letters only, and Shift under it gives lowercase. Either hand types; the
+pointing hand's pool of light hovers a key, the trigger presses it, and a held
+trigger repeats. Crossing onto a key gives a light haptic tick. Dismiss it with Escape, the
+controller's Menu button, or a click outside the keyboard; Enter closes it in
+a menu field and keeps it open in the console. The font and key art come from
+the Trinity paks; an older pak gives the same keyboard in a plain style.
+
 ### Rendering path
 
 `r_fbo` picks how the scene reaches the headset.

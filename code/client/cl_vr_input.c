@@ -183,8 +183,21 @@ static void VRInput_Pulse( int hand ) {
 		input.hapticEnd[hand] = cls.realtime + 200;
 }
 
+/* A hover tick: the pool crossing onto a key, 20 ms at 0.25, scaled by vr_hapticIntensity. It never holds the
+ * motor, so a press right after it still gets its pulse. */
+void CL_VRInput_HoverTick( int hand ) {
+	if ( !re.XRHaptic || cls.realtime < input.hapticEnd[hand] )
+		return;
+	re.XRHaptic( hand, Com_Clamp( 0, 1, .25f * VRInput_Cvar( vr_hapticIntensity, .5f ) ), 20 );
+}
+
 /* Whether each hand's drawn ray met the virtual screen, as of the last frame it was drawn. */
 static qboolean pointerOnScreen[2];
+
+/* With the pointer drawn, a ray off the screen has no pool of light, so its resting cursor means nothing. */
+qboolean CL_VRInput_PointerOnScreen( int hand ) {
+	return vr.pointerMode != VR_POINTER_DRAWN || pointerOnScreen[hand];
+}
 
 static void VRInput_Click( qboolean down ) {
 	const int key = VRInput_SourceKey(), slot = key >= 0 ? key : 0;

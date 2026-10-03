@@ -17,10 +17,13 @@ float CL_VRInput_StickCurve( float value, float deadzone );
 /* Bound kbutton state (cl_input.c): buttons, digital moves and walking, as the flatscreen command gets them. */
 void CL_VRInput_KeyState( usercmd_t *cmd );
 void CL_VRInput_HapticEvent( const char *event, int position, int flags, int intensity, float angle, float height );
+void CL_VRInput_HoverTick( int hand );
+qboolean CL_VRInput_PointerOnScreen( int hand );
 void VKeyboard_Show( void );
 void VKeyboard_Hide( void );
 qboolean VKeyboard_IsActive( void );
 void VKeyboard_Draw( void );
 qboolean VKeyboard_HandleKey( int key );
 void VKeyboard_HandleOffhandKey( qboolean down );
+void VKeyboard_RendererStarted( void );
 #endif

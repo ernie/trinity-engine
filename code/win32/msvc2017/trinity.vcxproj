@@ -383,6 +383,7 @@
   <ItemGroup>
     <ClInclude Include="..\..\cgame\cg_public.h" />
     <ClInclude Include="..\..\client\client.h" />
+    <ClInclude Include="..\..\client\cl_vkb_layout.h" />
     <ClInclude Include="..\..\client\cl_discord.h" />
     <ClInclude Include="..\..\client\cl_discord_proto.h" />
     <ClInclude Include="..\..\client\cl_curl.h" />
@@ -461,6 +462,7 @@
     <ClCompile Include="..\..\client\cl_vr_bind.c" />
     <ClCompile Include="..\..\client\cl_bhaptics.c" />
     <ClCompile Include="..\..\client\cl_keyboard.c" />
+    <ClCompile Include="..\..\client\cl_vkb_layout.c" />
     <ClCompile Include="..\..\client\cl_renderer_recovery.c" />
     <ClCompile Include="..\..\vrcommon\vr_cvars.c" />
     <ClCompile Include="..\..\vrcommon\vr_bind.c" />
@@ -469,4 +471,4 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
-</Project>
+</Project>
