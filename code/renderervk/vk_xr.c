@@ -233,6 +233,20 @@ void VK_XR_ScreenCaptureRect( int eyeWidth, int eyeHeight, int rect[4] ) {
 					  xr.views[0].fov.angleDown - xr.views[1].fov.angleDown) * .25f;
 	VR_ScreenCaptureRect( eyeWidth, eyeHeight, eyeWidth, eyeHeight, halfSpan, -halfSpan, rect );
 }
+qboolean VK_XR_ScreenTexelScale( int eyeWidth, int eyeHeight, int cropWidth, int cropHeight, float scale[2] ) {
+	float tanW = 0, tanH = 0;
+	int eye;
+	for ( eye = 0; eye < 2; eye++ ) {
+		tanW += tanf( xr.views[eye].fov.angleRight ) - tanf( xr.views[eye].fov.angleLeft );
+		tanH += tanf( xr.views[eye].fov.angleUp ) - tanf( xr.views[eye].fov.angleDown );
+	}
+	if ( !( tanW > 0 ) || !( tanH > 0 ) || cropWidth < 1 || cropHeight < 1 )
+		return qfalse;
+	/* the screen's center sits at the center distance whatever the curvature, so a texel's angle is its size over that */
+	scale[0] = VR_SCREEN_ARC_LENGTH / ( cropWidth * VR_SCREEN_CENTER_DISTANCE ) * ( eyeWidth * 2 / tanW );
+	scale[1] = VR_SCREEN_HEIGHT / ( cropHeight * VR_SCREEN_CENTER_DISTANCE ) * ( eyeHeight * 2 / tanH );
+	return qtrue;
+}
 
 void VK_XR_EyeMatrix( int eye, float matrix[16] ) {
 	const XrPosef *pose = &xr.views[eye].pose;

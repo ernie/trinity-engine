@@ -5660,14 +5660,79 @@ static void vk_hud_attachment( VkFormat format, VkImageUsageFlags usage, VkImage
 #define VK_SCREEN_MIP_LEVELS 5
 /* Must match SPAN in virtualreflect.frag. */
 #define VK_SCREEN_REFLECT_SPAN 0.25f
-/* Store the floating screen at per-eye resolution to avoid downsampling menus. */
+/* The floating screen holds the flat render's 4:3 box at the eye's own pixel density, so one tap draws it
+ * about 1:1: the capture blit does the filtering once instead of every eye pixel. */
 typedef struct {
 	image_t image;
 	uint32_t mips;
 	VkDeviceMemory memory;
 	VkRenderPass pass;
+	qboolean fitted; // sized from located views; until then the crop's own size stands in
 } vkScreenTarget_t;
 static vkScreenTarget_t vk_screen;
+
+/* The crop's size, scaled to the eye's density once the views are known; never larger than the crop. */
+static qboolean vk_screen_fit_size( int *width, int *height ) {
+	int rect[4];
+	float scale[2];
+	qboolean fitted;
+	VK_XR_ScreenCaptureRect( vk.sceneWidth, vk.sceneHeight, rect );
+	*width = rect[2] - rect[0];
+	*height = rect[3] - rect[1];
+	fitted = VK_XR_ScreenTexelScale( vk.sceneWidth, vk.sceneHeight, *width, *height, scale );
+	if ( fitted ) {
+		if ( scale[0] < 1 )
+			*width = MAX( 1, (int)( *width * scale[0] + 0.5f ) );
+		if ( scale[1] < 1 )
+			*height = MAX( 1, (int)( *height * scale[1] + 0.5f ) );
+	}
+	return fitted;
+}
+
+static void vk_screen_image_create( int width, int height ) {
+	VkCommandBuffer initial;
+	VkClearColorValue black = {{0, 0, 0, 1}};
+	VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1};
+	const VkFormatFeatureFlags mipFeatures = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+											 VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+	VkFormatProperties properties;
+	vk_screen.image.width = vk_screen.image.uploadWidth = width;
+	vk_screen.image.height = vk_screen.image.uploadHeight = height;
+	/* The mips come from linear blits; without them the reflection is sharp instead of blurred. */
+	qvkGetPhysicalDeviceFormatProperties( vk.physical_device, vk.color_format, &properties );
+	vk_screen.mips = (properties.optimalTilingFeatures & mipFeatures) == mipFeatures ? VK_SCREEN_MIP_LEVELS : 1;
+	vk_hud_attachment( vk.color_format,
+					   VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+						   VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+					   VK_IMAGE_ASPECT_COLOR_BIT, &vk_screen.image.handle, &vk_screen.image.view,
+					   &vk_screen.memory, vk_screen.image.uploadWidth, vk_screen.image.uploadHeight,
+					   vk_screen.mips );
+	initial = begin_command_buffer();
+	record_image_layout_transition( initial, vk_screen.image.handle, VK_IMAGE_ASPECT_COLOR_BIT,
+									VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+									VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT );
+	qvkCmdClearColorImage( initial, vk_screen.image.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black,
+						   1, &range );
+	record_image_layout_transition( initial, vk_screen.image.handle, VK_IMAGE_ASPECT_COLOR_BIT,
+									VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+									VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+									VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
+	end_command_buffer( initial, __func__ );
+	ri.Printf( PRINT_ALL, "VR virtual screen capture: %dx%d, %u mips\n", vk_screen.image.uploadWidth,
+			   vk_screen.image.uploadHeight, vk_screen.mips );
+}
+
+static void vk_screen_image_destroy( void ) {
+	if ( vk_screen.image.view )
+		qvkDestroyImageView( vk.device, vk_screen.image.view, NULL );
+	if ( vk_screen.image.handle )
+		qvkDestroyImage( vk.device, vk_screen.image.handle, NULL );
+	if ( vk_screen.memory )
+		qvkFreeMemory( vk.device, vk_screen.memory, NULL );
+	vk_screen.image.view = VK_NULL_HANDLE;
+	vk_screen.image.handle = VK_NULL_HANDLE;
+	vk_screen.memory = VK_NULL_HANDLE;
+}
 
 /* Trilinear with no LOD clamp, so the reflection can sample its blurred mip. */
 static void vk_screen_write_descriptor( void ) {
@@ -5699,36 +5764,9 @@ static void vk_screen_target_init( void ) {
 		return;
 	}
 	if ( !vk_screen.image.handle ) {
-		VkCommandBuffer initial;
-		VkClearColorValue black = {{0, 0, 0, 1}};
-		VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1};
-		const VkFormatFeatureFlags mipFeatures = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
-												 VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
-		VkFormatProperties properties;
-		vk_screen.image.width = vk_screen.image.uploadWidth = vk.sceneWidth;
-		vk_screen.image.height = vk_screen.image.uploadHeight = vk.sceneHeight;
-		/* The mips come from linear blits; without them the reflection is sharp instead of blurred. */
-		qvkGetPhysicalDeviceFormatProperties( vk.physical_device, vk.color_format, &properties );
-		vk_screen.mips = (properties.optimalTilingFeatures & mipFeatures) == mipFeatures ? VK_SCREEN_MIP_LEVELS : 1;
-		vk_hud_attachment( vk.color_format,
-						   VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-							   VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-						   VK_IMAGE_ASPECT_COLOR_BIT, &vk_screen.image.handle, &vk_screen.image.view,
-						   &vk_screen.memory, vk_screen.image.uploadWidth, vk_screen.image.uploadHeight,
-						   vk_screen.mips );
-		initial = begin_command_buffer();
-		record_image_layout_transition( initial, vk_screen.image.handle, VK_IMAGE_ASPECT_COLOR_BIT,
-										VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-										VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT );
-		qvkCmdClearColorImage( initial, vk_screen.image.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black,
-							   1, &range );
-		record_image_layout_transition( initial, vk_screen.image.handle, VK_IMAGE_ASPECT_COLOR_BIT,
-										VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-										VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-										VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT );
-		end_command_buffer( initial, __func__ );
-		ri.Printf( PRINT_ALL, "VR virtual screen capture: %dx%d, %u mips\n", vk_screen.image.uploadWidth,
-				   vk_screen.image.uploadHeight, vk_screen.mips );
+		int width, height;
+		vk_screen.fitted = vk_screen_fit_size( &width, &height );
+		vk_screen_image_create( width, height );
 	}
 	if ( !vk_screen.pass ) {
 		VkAttachmentDescription attachments[2] = {{0}, {0}};
@@ -5841,12 +5879,7 @@ static void vk_screen_composition_shutdown( void ) {
 }
 static void vk_screen_target_shutdown( void ) {
 	vk_screen_composition_shutdown();
-	if ( vk_screen.image.view )
-		qvkDestroyImageView( vk.device, vk_screen.image.view, NULL );
-	if ( vk_screen.image.handle )
-		qvkDestroyImage( vk.device, vk_screen.image.handle, NULL );
-	if ( vk_screen.memory )
-		qvkFreeMemory( vk.device, vk_screen.memory, NULL );
+	vk_screen_image_destroy();
 	Com_Memset( &vk_screen, 0, sizeof( vk_screen ) );
 }
 
@@ -10896,11 +10929,25 @@ static void vk_screen_mip_barrier( uint32_t base, uint32_t count, VkImageLayout 
 						   &barrier );
 }
 
-/* Crops the gamma-corrected mono output into the virtual-screen texture and rebuilds its mips. */
+/* Crops the gamma-corrected mono output into the virtual-screen texture, filtered down to the eye's density, and
+ * rebuilds its mips. The first capture after the views are located resizes the texture to that density: nothing
+ * submitted still reads it once the queue has drained, and this frame has not bound it yet. */
 static void vk_capture_screen_source( VkImage srcImage, VkFormatProperties properties ) {
 	VkImageBlit copy;
 	int i, crop[4];
 
+	if ( !vk_screen.fitted ) {
+		int width, height;
+		if ( vk_screen_fit_size( &width, &height ) ) {
+			vk_screen.fitted = qtrue;
+			if ( width != vk_screen.image.uploadWidth || height != vk_screen.image.uploadHeight ) {
+				qvkDeviceWaitIdle( vk.device );
+				vk_screen_image_destroy();
+				vk_screen_image_create( width, height );
+				vk_screen_write_descriptor();
+			}
+		}
+	}
 	record_image_layout_transition( vk.cmd->command_buffer, vk_screen.image.handle, VK_IMAGE_ASPECT_COLOR_BIT,
 									VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 									VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -11075,18 +11122,19 @@ static const byte vk_xr_pool_rgba[2][VK_XR_POOL_RINGS + 1][4] = {
 	{{255, 190, 170, 255}, {255, 64, 52, 230}, {255, 48, 40, 110}, {255, 48, 40, 0}},
 	{{170, 200, 255, 255}, {90, 140, 255, 230}, {77, 128, 255, 110}, {77, 128, 255, 0}}};
 
-/* Each hand's pointer: a strip along its ray, turned toward the head and widening with distance to look even,
- * and, while the ray is on the screen, its cursor as a pool of light there, hot at the point a click lands and
- * fading out. Both test against the controllers' depth, so they draw after them. */
+/* Each hand's pointer: a strip along its ray, turned toward the head, widening with distance to look even and
+ * fading from the hand toward where it lands, and, while the ray is on the screen, its cursor as a pool of light
+ * there, hot at the point a click lands and fading out. Both test against the controllers' depth, so they draw
+ * after them. */
 static void vk_draw_screen_pointers( const vrScreenGeometry_t *screen, const vec3_t eye ) {
 	/* each ring's radius as a share of the screen's height */
-	static const float radius[VK_XR_POOL_RINGS] = {0.005f, 0.011f, 0.024f};
+	static const float radius[VK_XR_POOL_RINGS] = {0.0035f, 0.008f, 0.017f};
 	qboolean begun = qfalse;
 	int hand, i, ring;
 	for ( hand = 0; hand < 2; hand++ ) {
 		const vkXRPointer_t *pointer = VK_XR_Pointer( hand );
-		vec3_t along, toEye, side, center, left, right;
-		color4ub_t faint, bright;
+		vec3_t along, toEye, side, center, left, right, knee;
+		color4ub_t hand, bend, tip;
 		const byte( *color )[4];
 		int ndx;
 		if ( !pointer )
@@ -11100,35 +11148,37 @@ static void vk_draw_screen_pointers( const vrScreenGeometry_t *screen, const vec
 		VectorSubtract( eye, pointer->origin, toEye );
 		CrossProduct( along, toEye, side );
 		if ( VectorNormalize( side ) >= 0.000001f ) {
-			RB_CHECKOVERFLOW( 4, 6 );
+			/* two strips: most of the fade happens by the knee, a third of the way out, and a faint tail reaches the pool */
+			static const int tri[12] = {0, 1, 3, 3, 1, 2, 3, 2, 5, 5, 2, 4};
+			RB_CHECKOVERFLOW( 6, 12 );
 #ifdef USE_VBO
 			tess.surfType = SF_TRIANGLES;
 #endif
 			for ( i = 0; i < 3; i++ )
-				faint.rgba[i] = bright.rgba[i] = vk_xr_pointer_rgb[pointer->blue ? 1 : 0][i];
-			faint.rgba[3] = 40;
-			bright.rgba[3] = 200;
+				hand.rgba[i] = bend.rgba[i] = tip.rgba[i] = vk_xr_pointer_rgb[pointer->blue ? 1 : 0][i];
+			hand.rgba[3] = 220;
+			bend.rgba[3] = 60;
+			tip.rgba[3] = 20;
+			VectorMA( pointer->origin, 0.3f, along, knee );
 			ndx = tess.numVertexes;
 			for ( i = 0; i < 3; i++ ) {
-				tess.xyz[ndx][i] = pointer->origin[i] + side[i] * 0.0015f;
-				tess.xyz[ndx + 1][i] = pointer->origin[i] - side[i] * 0.0015f;
-				tess.xyz[ndx + 2][i] = pointer->end[i] - side[i] * 0.004f;
-				tess.xyz[ndx + 3][i] = pointer->end[i] + side[i] * 0.004f;
+				tess.xyz[ndx][i] = pointer->origin[i] + side[i] * 0.001f;
+				tess.xyz[ndx + 1][i] = pointer->origin[i] - side[i] * 0.001f;
+				tess.xyz[ndx + 2][i] = knee[i] - side[i] * 0.0015f;
+				tess.xyz[ndx + 3][i] = knee[i] + side[i] * 0.0015f;
+				tess.xyz[ndx + 4][i] = pointer->end[i] - side[i] * 0.0025f;
+				tess.xyz[ndx + 5][i] = pointer->end[i] + side[i] * 0.0025f;
 			}
-			for ( i = 0; i < 4; i++ ) {
+			for ( i = 0; i < 6; i++ ) {
 				tess.texCoords[0][ndx + i][0] = tess.texCoords[1][ndx + i][0] = 0;
 				tess.texCoords[0][ndx + i][1] = tess.texCoords[1][ndx + i][1] = 0;
 				VectorCopy( side, tess.normal[ndx + i] );
-				tess.vertexColors[ndx + i] = i < 2 ? faint : bright;
+				tess.vertexColors[ndx + i] = i < 2 ? hand : i < 4 ? bend : tip;
 			}
-			tess.indexes[tess.numIndexes + 0] = ndx + 0;
-			tess.indexes[tess.numIndexes + 1] = ndx + 1;
-			tess.indexes[tess.numIndexes + 2] = ndx + 3;
-			tess.indexes[tess.numIndexes + 3] = ndx + 3;
-			tess.indexes[tess.numIndexes + 4] = ndx + 1;
-			tess.indexes[tess.numIndexes + 5] = ndx + 2;
-			tess.numVertexes += 4;
-			tess.numIndexes += 6;
+			for ( i = 0; i < 12; i++ )
+				tess.indexes[tess.numIndexes + i] = ndx + tri[i];
+			tess.numVertexes += 6;
+			tess.numIndexes += 12;
 		}
 
 		if ( !pointer->pool )

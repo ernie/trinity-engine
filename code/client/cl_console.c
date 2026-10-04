@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "client.h"
 #include "../vrcommon/vr_state.h"
 #include "../vrcommon/vr_cvars.h"
+#include "../vrcommon/vr_screen_geometry.h"
 
 #define  DEFAULT_CONSOLE_WIDTH 78
 #define  MAX_CONSOLE_WIDTH 120
@@ -297,26 +298,41 @@ Con_CheckResize
 If the line width has changed, reformat the buffer.
 ================
 */
+/* VR glyphs count virtual-screen units, which already track vidWidth, so the supersample factor stays out. */
+static float Con_Factor( void )
+{
+	int rect[4];
+	if ( !VR_IsActiveMode() ) {
+		return cls.con_factor;
+	}
+	VR_ScreenCaptureRect( cls.glconfig.vidWidth, cls.glconfig.vidHeight, cls.glconfig.vidWidth,
+		cls.glconfig.vidHeight, 0, 0, rect );
+	return ( rect[2] - rect[0] ) / 640.0f * 0.5f;
+}
+
 void Con_CheckResize( void )
 {
 	int		i, j, width, oldwidth, oldtotallines, oldcurrent, numlines, numchars;
 	short	tbuf[CON_TEXTSIZE], *src, *dst;
 	static int old_width, old_vispage;
+	static float old_factor;
 	int		vispage;
-	float	scale;
+	float	scale, factor;
 
-	if ( con.viswidth == cls.glconfig.vidWidth && !con_scale->modified ) {
+	factor = Con_Factor();
+	if ( con.viswidth == cls.glconfig.vidWidth && factor == old_factor && !con_scale->modified ) {
 		return;
 	}
+	old_factor = factor;
 
 	scale = con_scale->value;
 
 	con.viswidth = cls.glconfig.vidWidth;
 
-	smallchar_width = SMALLCHAR_WIDTH * scale * cls.con_factor;
-	smallchar_height = SMALLCHAR_HEIGHT * scale * cls.con_factor;
-	bigchar_width = BIGCHAR_WIDTH * scale * cls.con_factor;
-	bigchar_height = BIGCHAR_HEIGHT * scale * cls.con_factor;
+	smallchar_width = SMALLCHAR_WIDTH * scale * factor;
+	smallchar_height = SMALLCHAR_HEIGHT * scale * factor;
+	bigchar_width = BIGCHAR_WIDTH * scale * factor;
+	bigchar_height = BIGCHAR_HEIGHT * scale * factor;
 
 	if ( cls.glconfig.vidWidth == 0 ) // video hasn't been initialized yet
 	{
@@ -788,7 +804,8 @@ static int Con_DrawNotifyVR(void)
 	int mode = vr_currentHudDrawStatus ? vr_currentHudDrawStatus->integer : 1;
 	int currentColor = ColorIndex(COLOR_WHITE);
 	const int maxChars = 510 / SMALLCHAR_WIDTH;
-	float scale = con_scale ? con_scale->value : 2.0f;
+	/* a HUD unit covers about half the angle of a virtual-screen unit, so con_scale 1 reads alike on both */
+	float scale = ( con_scale ? con_scale->value : 1.0f ) * 2.0f;
 	float xadjust = 10.0f, yadjust = 10.0f, offset = 0.0f;
 	float unit = 2.0f; // pixels per 640 unit; mode 1's buffer is 1280x960
 	const short *text;
