@@ -8,6 +8,7 @@
 #include "vk_xr_gaze.h"
 #include "vk_xr_models.h"
 #include "../vrcommon/vr_float.h"
+#include "../vrcommon/vr_rate_list.h"
 #include "../vrcommon/vr_render_extent.h"
 
 #if VK_XR_DIRECT_MAX_IMAGES != VK_XRVK_MAX_IMAGES
@@ -103,16 +104,6 @@ static void VKXR_UpdateRefresh( void ) {
 	if ( XR_FAILED( result ) ) {
 		ri.Printf( PRINT_WARNING, "OpenXR refresh request %.1f Hz unavailable (%d)\n", wanted, (int)result );
 	}
-}
-
-/* Whether the space-separated rate list holds exactly this rate. */
-static qboolean VKXR_RateListed( const char *list, const char *rate ) {
-	const char *token;
-	while ( ( token = COM_Parse( &list ) )[0] ) {
-		if ( !strcmp( token, rate ) )
-			return qtrue;
-	}
-	return qfalse;
 }
 
 static qboolean VKXR_Check( XrResult result, const char *operation ) {
@@ -728,12 +719,12 @@ int VK_XR_BeginFrame( refXRFrame_t *frame ) {
 			return -1;
 		}
 		if ( xr.displayPeriod != period && xr.displayPeriod > 0 ) {
-			char measured[16];
-			Com_sprintf( measured, sizeof( measured ), "%.0f", 1e9 / xr.displayPeriod );
+			char rates[512];
+			Q_strncpyz( rates, ri.Cvar_VariableString( "vr_refreshrates" ), sizeof( rates ) );
 			// SteamVR lists only its configured rate and refuses requests while the panel runs another; the
 			// menus show the entry nearest the request, so the list must carry the rate the panel actually runs
-			if ( !VKXR_RateListed( ri.Cvar_VariableString( "vr_refreshrates" ), measured ) )
-				ri.Cvar_Set( "vr_refreshrates", measured );
+			if ( VR_RateListOffer( rates, sizeof( rates ), 1e9 / xr.displayPeriod ) )
+				ri.Cvar_Set( "vr_refreshrates", rates );
 		}
 	}
 	frame->renderable = active && xr.renderable;
