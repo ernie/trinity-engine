@@ -586,8 +586,6 @@ jobs:
             linux-arm64
             linux-armv7
             frame-arm64
-            windows-gcc-x86
-            windows-gcc-x86_64
             windows-mingw-x86
             windows-mingw-x86_64
             windows-msvc-arm64
@@ -602,8 +600,10 @@ jobs:
               cp trinity-assets/pak8t.pk3 "$dir/baseq3/"
               cp trinity-assets/pak3t.pk3 "$dir/missionpack/"
               cp trinity-assets/zzz-trinity-announcer.pk3 "$dir/baseq3/"
-              # SteamVR reads the per-app preferences from the package root
-              cp misc/vrpreferences.json "$dir/"
+              if [ "$dir" = frame-arm64 ]; then
+                # SteamVR reads the per-app preferences from the package root
+                cp misc/vrpreferences.json "$dir/"
+              fi
             else
               echo "Warning: $dir not found, skipping"
             fi
@@ -622,8 +622,6 @@ jobs:
           zip -r -y trinity-linux-arm64.zip          ./linux-arm64/
           zip -r -y trinity-linux-armv7.zip          ./linux-armv7/
           zip -r -y trinity-frame-arm64.zip          ./frame-arm64/
-          7z a -r trinity-windows-gcc-x86.zip ./windows-gcc-x86/*
-          7z a -r trinity-windows-gcc-x86_64.zip ./windows-gcc-x86_64/*
           7z a -r trinity-windows-mingw-x86.zip    ./windows-mingw-x86/*
           7z a -r trinity-windows-mingw-x86_64.zip ./windows-mingw-x86_64/*
           7z a -r trinity-windows-msvc-arm64.zip   ./windows-msvc-arm64/*
