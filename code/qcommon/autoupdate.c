@@ -12,6 +12,10 @@
 #include <stdio.h>
 #include <ctype.h>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 #ifdef __APPLE__
 #include <sys/wait.h>
 #include <unistd.h>
@@ -202,6 +206,8 @@ static void Update_BuildAssetName( char *buf, int bufSize )
   #endif
 #elif defined(__APPLE__)
 	Com_sprintf( buf, bufSize, "%s-macos-universal2.dmg", UPDATE_ASSET_PREFIX );
+#elif defined(TRINITY_FRAME)
+	Com_sprintf( buf, bufSize, "%s-frame-arm64.zip", UPDATE_ASSET_PREFIX );
 #elif defined(__linux__)
   #if defined(__aarch64__)
 	Com_sprintf( buf, bufSize, "%s-linux-arm64.zip", UPDATE_ASSET_PREFIX );
@@ -1030,6 +1036,15 @@ static qboolean Update_ExtractAndStage( void )
 				return qfalse;
 			}
 		}
+
+#ifndef _WIN32
+		// the release zips carry Unix modes; without this the executables land as 0644
+		{
+			mode_t mode = ( fileInfo.external_fa >> 16 ) & 0777;
+			if ( mode )
+				chmod( destPath, mode );
+		}
+#endif
 
 		// write manifest entry: relative_path|CRC32
 		fprintf( manifest, "%s|%08lX\n", relName, fileInfo.crc );
