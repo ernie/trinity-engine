@@ -40,13 +40,13 @@ void VM_RegisterVRShared( vm_t *vm, int writer, intptr_t vmAddr, int structSize,
 		structSize = sizeof( vr_shared_t );
 	}
 	if ( !address || (address & 3) ) {
-		Com_Error( ERR_DROP, "VM_RegisterVRShared: invalid address" );
+		Com_Error( ERR_DROP, "%s: VR shared block address invalid", vm->name );
 	}
 	if ( !vm->entryPoint ) {
 		/* Do not mask untrusted addresses: wrapping can validate another block. */
 		size_t arena = (size_t)vm->dataMask + 1;
 		if ( !vm->dataBase || address >= arena || (size_t)structSize > arena - address ) {
-			Com_Error( ERR_DROP, "VM_RegisterVRShared: state outside VM memory" );
+			Com_Error( ERR_DROP, "%s: VR shared block outside VM memory", vm->name );
 		}
 		vm->vrShared = (vr_shared_t *)(vm->dataBase + address);
 	} else {

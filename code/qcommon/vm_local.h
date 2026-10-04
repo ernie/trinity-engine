@@ -237,7 +237,6 @@ struct vm_s {
 	int			vrWriter;			// VR_WRITER_* sync-out scope
 	int			vrStructSize;		// module-declared struct size, sanitized to [0,sizeof]; bounds every sync
 	qboolean	vrSentinel;			// loaded QVM carried the VR API sentinel
-	qboolean	vrNative;			// bundled native VR fallback module
 };
 
 qboolean VM_Compile( vm_t *vm, vmHeader_t *header );

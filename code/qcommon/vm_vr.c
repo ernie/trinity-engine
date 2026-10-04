@@ -1,5 +1,6 @@
 #include "vm_local.h"
 #include "vm_vr.h"
+#include "vm_vr_fallback.h"
 #include "vm_vr_select.h"
 #include "../vrcommon/vr_shared.h"
 #if defined(__linux__)
@@ -16,6 +17,7 @@ explicit handoff choice, never an implicit change to normal QVM selection.
 typedef struct {
 	qboolean selected;
 	qboolean missionpack;
+	qboolean loaded;		// the module VM_VRSelectModule last loaded for this index is the bundled fallback
 } vrNativeFallback_t;
 static vrNativeFallback_t vrNative[VM_COUNT];
 
@@ -54,10 +56,9 @@ static qboolean VM_VRNativePath( char *path, int size, vmIndex_t index, qboolean
 }
 
 void VM_VRCancelNativeFallback( vmIndex_t index ) {
-	vrNativeFallback_t *fallback;
 	if ( !VM_VRNativeIndex( index ) ) return;
-	fallback = &vrNative[index];
-	memset( fallback, 0, sizeof( *fallback ) );
+	vrNative[index].selected = qfalse;
+	vrNative[index].missionpack = qfalse;
 }
 
 // Each caller owns this reference. Preflight releases it immediately; VM_Create
@@ -120,7 +121,7 @@ qboolean VM_VRQVMAccepted( vmIndex_t index ) {
 }
 
 qboolean VM_VRNativeFallback( const vm_t *vm ) {
-	return vm && vm->vrNative;
+	return vm && VM_VRNativeIndex( vm->index ) && vrNative[vm->index].loaded;
 }
 
 // the shared vm.c unloads native modules through this wrapper; map it onto Sys_UnloadLibrary
@@ -175,6 +176,8 @@ static void * QDECL VM_LoadDll( const char *name, vmMainFunc_t *entryPoint, dllS
 
 qboolean VM_VRSelectModule( vm_t *vm, vmInterpret_t *interpret, qboolean qvmOnly, vmHeader_t **header ) {
 	*header = NULL;
+	if ( VM_VRNativeIndex( vm->index ) )
+		vrNative[vm->index].loaded = qfalse;
 	if ( VM_VRNativeIndex( vm->index ) && vrNative[vm->index].selected ) {
 		vrNativeFallback_t *fallback = &vrNative[vm->index];
 		dllEntry_t entry;
@@ -193,7 +196,7 @@ qboolean VM_VRSelectModule( vm_t *vm, vmInterpret_t *interpret, qboolean qvmOnly
 		vm->privateFlag = 0;
 		vm->dataAlloc = vm->dataMask = ~0U;
 		vm->dataBase = NULL;
-		vm->vrNative = qtrue;
+		fallback->loaded = qtrue;
 		entry( vm->dllSyscall );
 		Com_Printf( "%s: using bundled native VR fallback (VR API %d.%d) from %s\n",
 			vm->name, VR_API_MAJOR, VR_API_MINOR, fallback->missionpack ? "missionpack" : "baseq3" );

@@ -2,6 +2,7 @@
 #include "cl_vr.h"
 #include "cl_vr_modules.h"
 #include "../qcommon/vm_vr.h"
+#include "../qcommon/vm_vr_fallback.h"
 
 /* The fallback choice of the connection that made it; CL_VRModulesPreflight applies it to each load. */
 static qboolean contextNativeCG, contextNativeUI;

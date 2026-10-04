@@ -4,17 +4,10 @@
 #include "vm_local.h"
 
 // VR module selection + shared-state protocol glue between vm.c and vrcommon.
-// All VR-specific VM logic lives here so the vendored vm.c stays a clean drop
-// from trinity-engine (end-state: one shared vm.c across all three engines).
+// Everything VR-specific in the VM lives beside this header, so the shared vm.c
+// stays a clean drop between trinity-engine and trinity-standalone.
 
 qboolean VM_VRSelectModule( vm_t *vm, vmInterpret_t *interpret, qboolean qvmOnly, vmHeader_t **header );
-// Reads the cgame/ui QVM that VM_Create loads next.
-qboolean VM_VRQVMAccepted( vmIndex_t index );
-qboolean VM_VRNativeFallback( const vm_t *vm );
-// Test-loads the bundled cgame/UI DLL; a selection takes effect at the next VM_Create.
-qboolean VM_VRPrepareNativeFallback( vmIndex_t index, qboolean qvmOnly, qboolean missionpack );
-void VM_VRSetNativeFallback( vmIndex_t index, qboolean enabled );
-void VM_VRCancelNativeFallback( vmIndex_t index );
 int VM_VRLoadQVMFile( vm_t *vm, const char *filename, void **buffer );
 void VM_VRModuleUnloaded( vm_t *vm );
 void VM_VRCallEnter( vm_t *vm );
