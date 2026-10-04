@@ -100,6 +100,8 @@ cvar_t	*r_bloom_threshold;
 cvar_t	*r_bloom_intensity;
 cvar_t	*r_bloom_threshold_mode;
 cvar_t	*r_bloom_modulate;
+cvar_t	*r_bloom_knee;
+cvar_t	*r_bloom_fine;
 cvar_t	*r_renderWidth;
 cvar_t	*r_renderHeight;
 cvar_t	*r_renderScale;
@@ -1786,6 +1788,16 @@ static void R_Register( void )
 	r_bloom_modulate = ri.Cvar_Get( "r_bloom_modulate", "0", CVAR_ARCHIVE_ND );
 	ri.Cvar_SetDescription( r_bloom_modulate, "Modulate extracted color:\n 0: off (color = color, i.e. no changes)\n 1: by itself (color = color * color)\n 2: by intensity (color = color * luma(color))" );
 	ri.Cvar_SetGroup( r_bloom_modulate, CVG_RENDERER );
+
+	r_bloom_knee = ri.Cvar_Get( "r_bloom_knee", "0.1", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_bloom_knee, "0", "0.5", CV_FLOAT );
+	ri.Cvar_SetDescription( r_bloom_knee, "Half-width of the ramp around \\r_bloom_threshold over which a color fades into bloom; 0 is a hard cut." );
+	ri.Cvar_SetGroup( r_bloom_knee, CVG_RENDERER );
+
+	r_bloom_fine = ri.Cvar_Get( "r_bloom_fine", "0", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_bloom_fine, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_bloom_fine, "Adds the half-resolution blur level to the bloom: a tighter glow that also follows texture detail. Default 0 starts at quarter resolution." );
+	ri.Cvar_SetGroup( r_bloom_fine, CVG_RENDERER );
 
 	if ( glConfig.vidWidth )
 		return;

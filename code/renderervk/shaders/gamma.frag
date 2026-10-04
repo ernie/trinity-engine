@@ -12,6 +12,7 @@ layout(set = 0, binding = 4) uniform sceneSampler bloom2;
 layout(set = 0, binding = 5) uniform sceneSampler bloom3;
 layout(constant_id = 4) const float bloomFactor = 0.5;
 layout(constant_id = 15) const int bloomEnabled = 1;
+layout(constant_id = 16) const int bloomFine = 0; // adds the half-resolution level
 #else
 layout(set = 0, binding = 0) uniform sceneSampler texture0;
 layout(set = 1, binding = 0) uniform sceneSampler texture1; // emissive highlight layer
@@ -162,8 +163,10 @@ void main() {
 	float coverage = 0.0;
 #ifdef USE_BLOOM_COMPOSITE
 	if ( bloomEnabled != 0 && push.bloomActive != 0 ) {
-		vec3 bloom = sceneSample(bloom0, frag_tex_coord).rgb + sceneSample(bloom1, frag_tex_coord).rgb
+		vec3 bloom = sceneSample(bloom1, frag_tex_coord).rgb
 			+ sceneSample(bloom2, frag_tex_coord).rgb + sceneSample(bloom3, frag_tex_coord).rgb;
+		if ( bloomFine != 0 )
+			bloom += sceneSample(bloom0, frag_tex_coord).rgb;
 		// bloom lands under the post-scene draws: the scene's alpha is what they let through
 		base = min( base + bloom * bloomFactor * scene.a, vec3(1.0) );
 	}

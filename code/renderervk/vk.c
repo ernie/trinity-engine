@@ -3578,13 +3578,13 @@ void vk_update_attachment_descriptors( void ) {
 
 		qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
 
-		// bloom images
+		// bloom images; slot 0 is the scene for the extracting pass, which halves it and needs the linear taps the blur relies on
 		if ( r_bloom->integer )
 		{
 			uint32_t i;
-			for ( i = 1; i < ARRAY_LEN( vk.bloom_image_descriptor ); i++ )
+			for ( i = 0; i < ARRAY_LEN( vk.bloom_image_descriptor ); i++ )
 			{
-				info.imageView = vk.bloom_image_view[i];
+				info.imageView = i == 0 ? vk.color_image_view : vk.bloom_image_view[i];
 				desc.dstSet = vk.bloom_image_descriptor[i];
 
 				qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
@@ -3672,7 +3672,7 @@ static void vk_init_target_descriptors( void ) {
 			vk_alloc_target_descriptor( &vk.xr_output.descriptor );
 
 		if ( r_bloom->integer ) {
-			for ( i = 1; i < ARRAY_LEN( vk.bloom_image_descriptor ); i++ ) {
+			for ( i = 0; i < ARRAY_LEN( vk.bloom_image_descriptor ); i++ ) {
 				vk_alloc_target_descriptor( &vk.bloom_image_descriptor[i] );
 			}
 		}
@@ -7557,7 +7557,7 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	VkGraphicsPipelineCreateInfo create_info;
 	VkViewport viewport;
 	VkRect2D scissor;
-	VkSpecializationMapEntry spec_entries[16];
+	VkSpecializationMapEntry spec_entries[17];
 	VkSpecializationInfo frag_spec_info;
 	VkPipeline *pipeline;
 	VkShaderModule fsmodule;
@@ -7583,6 +7583,7 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 		int screen_source;
 		int source_layer;
 		int bloom_enabled;
+		int bloom_fine;
 	} frag_spec_data;
 
 	switch ( program_index ) {
@@ -7677,6 +7678,7 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	// the eye pass writes through a UNORM view, so its output stays encoded
 	frag_spec_data.linear_sdr_output = 0;
 	frag_spec_data.bloom_enabled = r_bloom->integer ? 1 : 0;
+	frag_spec_data.bloom_fine = r_bloom_fine->integer;
 	frag_spec_data.screen_source =
 		program_index == VK_POST_SCREEN_MONO ? 2
 		: ( program_index == VK_POST_SCREEN_CAPTURE || program_index >= VK_POST_SCREEN_LEFT )
@@ -7753,7 +7755,10 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	spec_entries[15].constantID = 15;
 	spec_entries[15].offset = offsetof( struct FragSpecData, bloom_enabled );
 	spec_entries[15].size = sizeof( int );
-	frag_spec_info.mapEntryCount = 16;
+	spec_entries[16].constantID = 16;
+	spec_entries[16].offset = offsetof( struct FragSpecData, bloom_fine );
+	spec_entries[16].size = sizeof( int );
+	frag_spec_info.mapEntryCount = 17;
 	frag_spec_info.pMapEntries = spec_entries;
 	frag_spec_info.dataSize = sizeof( frag_spec_data );
 	frag_spec_info.pData = &frag_spec_data;
@@ -7911,14 +7916,16 @@ void vk_create_blur_pipeline( uint32_t index, uint32_t width, uint32_t height, q
 		float offset[3]; // x-offset, y-offset, correction
 		float threshold;
 		int mode, modulate;
+		float knee;
 	} spec;
-	static const struct { uint32_t id; size_t offset, size; } fields[6] = {
+	static const struct { uint32_t id; size_t offset, size; } fields[7] = {
 		{ 0, offsetof( struct BlurSpec, offset[0] ), sizeof( float ) },
 		{ 1, offsetof( struct BlurSpec, offset[1] ), sizeof( float ) },
 		{ 2, offsetof( struct BlurSpec, offset[2] ), sizeof( float ) },
 		{ 3, offsetof( struct BlurSpec, threshold ), sizeof( float ) },
 		{ 5, offsetof( struct BlurSpec, mode ), sizeof( int ) },
 		{ 6, offsetof( struct BlurSpec, modulate ), sizeof( int ) },
+		{ 7, offsetof( struct BlurSpec, knee ), sizeof( float ) },
 	};
 	VkSpecializationMapEntry spec_entries[ARRAY_LEN( fields )];
 	VkSpecializationInfo frag_spec_info;
@@ -7951,10 +7958,11 @@ void vk_create_blur_pipeline( uint32_t index, uint32_t width, uint32_t height, q
 		fsmodule = vk.multiview ? vk.modules.blur_fs_mv : vk.modules.blur_fs;
 	set_shader_stage_desc( shader_stages + 1, VK_SHADER_STAGE_FRAGMENT_BIT, fsmodule, "main" );
 
-	// blur.frag offsets the coordinate it samples the source with, so the
-	// offset is in source texels. Each horizontal pass reads the previous
-	// octave at twice its own width, the verticals read their own resolution
-	spec.offset[0] = 1.2 / (float) ( width * 2 ); // x offset
+	// blur.frag offsets the coordinate it samples the source with. Each horizontal pass reads the previous
+	// octave at twice its own width, so one output texel out lands every tap between two source texels:
+	// three 2x2 boxes, a [5 5 6 6 5 5] kernel that averages the most before the first pass thresholds.
+	// The verticals read their own resolution, where 1.2 texels emulates the 5-tap gaussian.
+	spec.offset[0] = 1.0 / (float) width; // x offset
 	spec.offset[1] = 1.2 / (float) height; // y offset
 	spec.offset[2] = 1.0; // intensity?
 
@@ -7967,6 +7975,7 @@ void vk_create_blur_pipeline( uint32_t index, uint32_t width, uint32_t height, q
 	spec.threshold = r_bloom_threshold->value;
 	spec.mode = r_bloom_threshold_mode->integer;
 	spec.modulate = r_bloom_modulate->integer;
+	spec.knee = r_bloom_knee->value;
 
 	for ( n = 0; n < ARRAY_LEN( fields ); n++ ) {
 		spec_entries[n].constantID = fields[n].id;
@@ -12259,7 +12268,7 @@ static void vk_bloom_blur( void )
 		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
 							vk_mono_source() ? vk.mono.pipeline.blur[i + 0] : vk.blur_pipeline[i + 0] );
 		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_post_process, 0, 1,
-								  i == 0 ? &vk.color_descriptor : &vk.bloom_image_descriptor[i+0], 0, NULL );
+								  &vk.bloom_image_descriptor[i+0], 0, NULL );
 		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
 		vk_end_render_pass();
 
