@@ -65,7 +65,6 @@ typedef struct vr_shared_s {
 	int   scoreboardCursorX;
 	int   scoreboardCursorY;
 	int   sp_intermission_active;
-	int   probeEchoBack;        // engine reflects probeEcho here at every sync-in
 
 	// ---- cg block: cgame-writable ----
 	int   weapon_select;
@@ -81,7 +80,6 @@ typedef struct vr_shared_s {
 	int   vote_active;
 	float sp_intermission_hud_origin[3];
 	float sp_intermission_hud_radius;
-	int   probeEcho;            // ABI conformance round-trip (see probeEchoBack)
 
 	// ---- uiShared block: cgame+ui-writable ----
 	float menuYaw;

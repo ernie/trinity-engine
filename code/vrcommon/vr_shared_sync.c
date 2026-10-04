@@ -15,10 +15,10 @@
 // boundaries drift. Moving or removing an existing field is a MAJOR bump
 // (update the pins); a new tail field is a MINOR bump.
 #define VR_ABI_ASSERT( name, expr ) typedef char name[ (expr) ? 1 : -1 ]
-VR_ABI_ASSERT( vr_abi_v1_size, sizeof( vr_shared_t ) == 352 );
-VR_ABI_ASSERT( vr_abi_v1_cg_first, offsetof( vr_shared_t, VR_SHARED_CG_FIRST ) == 240 );
-VR_ABI_ASSERT( vr_abi_v1_ui_first, offsetof( vr_shared_t, VR_SHARED_UI_FIRST ) == 320 );
-VR_ABI_ASSERT( vr_abi_v1_cfg_first, offsetof( vr_shared_t, VR_SHARED_CFG_FIRST ) == 336 );
+VR_ABI_ASSERT( vr_abi_v1_size, sizeof( vr_shared_t ) == 344 );
+VR_ABI_ASSERT( vr_abi_v1_cg_first, offsetof( vr_shared_t, VR_SHARED_CG_FIRST ) == 236 );
+VR_ABI_ASSERT( vr_abi_v1_ui_first, offsetof( vr_shared_t, VR_SHARED_UI_FIRST ) == 312 );
+VR_ABI_ASSERT( vr_abi_v1_cfg_first, offsetof( vr_shared_t, VR_SHARED_CFG_FIRST ) == 328 );
 
 vr_clientinfo_t vr;
 static qboolean activeMode;
@@ -92,7 +92,6 @@ void VR_SharedSyncIn( vr_shared_t *dst, int structSize ) {
 	s->scoreboardCursorX = vr.scoreboardCursorX;
 	s->scoreboardCursorY = vr.scoreboardCursorY;
 	s->sp_intermission_active = vr.sp_intermission_active;
-	s->probeEchoBack = vr.probeEcho;
 	s->pointerMode = vr.pointerMode;
 
 	// cg block
@@ -111,7 +110,6 @@ void VR_SharedSyncIn( vr_shared_t *dst, int structSize ) {
 	s->sp_intermission_hud_origin[1] = vr.sp_intermission_hud_origin[1];
 	s->sp_intermission_hud_origin[2] = vr.sp_intermission_hud_origin[2];
 	s->sp_intermission_hud_radius = vr.sp_intermission_hud_radius;
-	s->probeEcho = vr.probeEcho;
 
 	// uiShared block
 	s->menuYaw = vr.menuYaw;
@@ -150,7 +148,6 @@ static void VR_SyncOutCG( const vr_shared_t *s ) {
 	vr.sp_intermission_hud_origin[1] = s->sp_intermission_hud_origin[1];
 	vr.sp_intermission_hud_origin[2] = s->sp_intermission_hud_origin[2];
 	vr.sp_intermission_hud_radius = s->sp_intermission_hud_radius;
-	vr.probeEcho = s->probeEcho;
 }
 
 static void VR_SyncOutUI( const vr_shared_t *s ) {
