@@ -3466,7 +3466,8 @@ static VkSampler vk_find_sampler( const Vk_Sampler_Def *def ) {
 	desc.addressModeW = address_mode;
 	desc.mipLodBias = 0.0f;
 
-	if ( def->noAnisotropy || mipmap_mode == VK_SAMPLER_MIPMAP_MODE_NEAREST || mag_filter == VK_FILTER_NEAREST ) {
+	// anisotropy applies to every mipmapped linear sampler, so bilinear floors stay sharp at grazing angles like in the GL renderer
+	if ( def->noAnisotropy || mag_filter == VK_FILTER_NEAREST || maxLod < 1.0f ) {
 		desc.anisotropyEnable = VK_FALSE;
 		desc.maxAnisotropy = 1.0f;
 	} else {
