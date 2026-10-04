@@ -1,8 +1,8 @@
 # Optional OpenXR loader
 
 The client discovers the loader at runtime; flatscreen and dedicated-server
-operation do not require it. This helper builds Khronos OpenXR SDK 1.1.45 at
-the revision in `misc/release-dependencies.json`, matching the engine headers.
+operation do not require it. This helper builds the Khronos OpenXR SDK at
+the revision pinned in `misc/release-dependencies.json`, matching the engine headers.
 JSON support is built in. MinGW compiler support is linked into the DLL.
 
 Normal engine builds opt in with `BUILD_OPENXR_LOADER=1` (Make) or

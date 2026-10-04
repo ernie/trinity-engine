@@ -25,8 +25,9 @@ Entering VR selects Vulkan. A bundled OpenXR loader does not replace your
 headset vendor's runtime. Flatscreen play and dedicated servers do not require
 a headset or runtime.
 
-Supported: Windows x64 with PICOXR and Virtual Desktop VDXR runtimes. Linux
-and macOS OpenXR are available but untested.
+Supported: Windows x64 with the SteamVR, PICOXR and Virtual Desktop VDXR
+runtimes, and Linux arm64 on the Steam Frame. Linux x86_64 and macOS OpenXR are
+untested.
 
 See [VR setup and migration](docs/vr.md) for runtime setup, module compatibility,
 mirror controls, and migration from Trinity VR.
@@ -35,12 +36,12 @@ mirror controls, and migration from Trinity VR.
 
 The engine also supports crossplay between flatscreen and VR clients:
 
-**Server engine** — Advertises `vr_support=1` in serverinfo and reads each
+**Server engine**: Advertises `vr_support=1` in serverinfo and reads each
 client's `vr` userinfo key. A client that reports VR sends 32-bit buttons and VR
 head orientation data; the rest send the standard 16-bit fields. The server
 selects the field width per packet from that key.
 
-**Client engine** — Reports its display mode through the `vr` userinfo key and
+**Client engine**: Reports its display mode through the `vr` userinfo key and
 widens commands only on servers that advertise `vr_support`. Switching display
 mode keeps the connection.
 
@@ -183,17 +184,17 @@ xattr -cr Trinity.app
 
 ## The Trinity Ecosystem
 
-**[Trinity](https://github.com/ernie/trinity)** — A unified Quake III Arena / Team Arena game mod featuring unlagged weapons, VR head and torso tracking, an orbital follow camera for spectating and demo playback, Quake Live-style damage indicators, and visual enhancements. It provides the unified engine's VR-aware game modules and server-side support for crossplay with Trinity VR and Trinity Quest.
+**[Trinity](https://github.com/ernie/trinity)**: A unified Quake III Arena / Team Arena game mod featuring unlagged weapons, VR head and torso tracking, an orbital follow camera for spectating and demo playback, Quake Live-style damage indicators, and visual enhancements. It provides the VR-aware game modules and server-side support for crossplay between this engine's VR mode, Trinity Standalone and flatscreen players.
 
-**[Trinity Engine](https://github.com/ernie/trinity-engine)** — This project. Unified flatscreen and OpenXR VR client, dedicated server, and TrinityVision player, forked from Quake3e. Loads game modules at runtime; VR uses compatible cgame/UI QVMs or the packaged native fallback where permitted.
+**[Trinity Engine](https://github.com/ernie/trinity-engine)**: This project. Unified flatscreen and OpenXR VR client, dedicated server, and TrinityVision player, forked from Quake3e. Loads game modules at runtime; VR uses compatible cgame/UI QVMs or the packaged native fallback where permitted.
 
-**[Trinity VR](https://github.com/ernie/trinity-vr)** — Separate PCVR client for Windows, based on ioquake3 + ioq3quest VR with Trinity features compiled in.
+**[Trinity Standalone](https://github.com/ernie/trinity-standalone)**: Standalone-headset VR client for Meta Quest, PICO and the Steam Frame APK, based on ioquake3 with this engine's Vulkan renderer and VM subsystem. Loads the Trinity mod's QVMs at runtime and ships native module libraries built from a pinned Trinity release for the cases a flat-only QVM would break VR.
 
-**[Trinity Quest](https://github.com/ernie/trinity-quest)** — Meta Quest standalone VR client. Based on ioq3quest with Trinity features compiled in. Runs natively on Meta Quest headsets with full VR support and crossplay with Trinity VR and flatscreen players.
+**[Trinity VR](https://github.com/ernie/trinity-vr)**: The earlier separate PCVR client, sunset once this engine's VR mode is released.
 
-**[Trinity Tracker](https://github.com/ernie/trinity-tracker)** — A real-time statistics tracking and server administration platform. Monitors multiple Quake 3 servers, tracks player performance and match history, provides leaderboards, and serves a web interface with live updates via WebSocket. Includes CLI tools for server management and game asset extraction.
+**[Trinity Tracker](https://github.com/ernie/trinity-tracker)**: A real-time statistics tracking and server administration platform. Monitors multiple Quake 3 servers, tracks player performance and match history, provides leaderboards, and serves a web interface with live updates via WebSocket. Includes CLI tools for server management and game asset extraction.
 
-> **Note:** Trinity VR and Trinity Quest compile Trinity mod code into their binaries. This unified engine loads compatible modules at runtime. Pure servers require VR-compatible QVMs; bundled native fallback is limited to eligible non-pure baseq3 and missionpack sessions.
+> **Note:** both this engine and Trinity Standalone load the Trinity mod's QVMs at runtime and carry bundled native modules only as a fallback. Pure servers require VR-compatible QVMs; the native fallback is limited to non-pure baseq3 and missionpack sessions.
 
 ---
 

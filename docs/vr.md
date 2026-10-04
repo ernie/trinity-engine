@@ -9,8 +9,8 @@ for flatscreen play.
 
 Install and select the OpenXR runtime supplied by your headset or streaming
 software, then connect the headset through that software. Supported: Windows
-x64 with PICOXR and Virtual Desktop VDXR runtimes. Linux and macOS OpenXR are
-available but untested. On Linux, install a compatible OpenXR runtime and
+x64 with the SteamVR, PICOXR and Virtual Desktop VDXR runtimes, and Linux arm64
+on the Steam Frame; Linux x86_64 and macOS OpenXR are untested. On Linux, install a compatible OpenXR runtime and
 Vulkan driver. The loader packaged with the engine dispatches to that runtime
 and does not supply headset support by itself.
 
@@ -28,8 +28,9 @@ command set, so VR controller buttons beyond the first sixteen are not sent to
 them. The client widens commands from the server's `vr_support` serverinfo key
 while the server reads the `vr` userinfo key, so each side derives the width from
 its own configstring. `vr_status` reports the VR state, the requested and active
-modes, and the most recent failure. A request can wait for a headset; applying
-flatscreen cancels it.
+modes, and the most recent failure; `xr_info` reports the runtime, its API
+version, the enabled extensions and the controller models found. A request can
+wait for a headset; applying flatscreen cancels it.
 
 ## Staying in VR
 
@@ -104,7 +105,7 @@ with `vid_restart`.
 | `vr_desktopContentFit` | `0` contain, `1` fill/crop |
 | `vr_desktopMenuStyle` | `0` desktop menu view, `1` VR view |
 | `vr_screenCurvature` | Virtual screen curvature; `0` is flat, `0.5` is the default curve, `1` is the tightest |
-| `vr_controllerModels` | `1` draws the menu pointer in the headset while the virtual screen is up: a red ray from the pointing hand, a pool of light where it meets the screen, and the runtime's own controller models on runtimes that provide them. `0` goes back to the menus' own cursor with no ray and no controllers. The menus' HUD & Display page has it as "Virtual screen controllers" |
+| `vr_controllerModels` | `1` draws the menu pointer in the headset while the virtual screen is up: a ray from the pointing hand (blue from the off hand while the keyboard is up), a pool of light where it meets the screen, and the runtime's own controller models on runtimes that provide them. `0` goes back to the menus' own cursor with no ray and no controllers. The menus' HUD & Display page has it as "Virtual screen controllers" |
 | `vr_sensitivity` | Smooth thumbstick turning speed; `100` is normal, independent of mouse `sensitivity` |
 | `vr_snapturn` | Positive values select the snap-turn angle in degrees, with `1` meaning 45; nonpositive values enable smooth turning |
 
@@ -133,7 +134,7 @@ the Trinity paks; an older pak gives the same keyboard in a plain style.
 Switching between the two changes the image, not just performance. If the runtime's swapchain format has no sRGB encoding, the renderer falls back to the framebuffer path for that session and logs a warning.
 
 Supersampling, refresh rate, HUD, comfort, and foveation settings remain in the
-Trinity VR menus. Available refresh rates and eye-tracked foveation depend on
+Trinity mod's VR menus. Available refresh rates and eye-tracked foveation depend on
 the runtime and device; a requested value alone does not prove it was applied.
 
 ## Moving from Trinity VR

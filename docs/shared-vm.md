@@ -1,4 +1,4 @@
-# Shared VM subsystem — upstream merge notes
+# Shared VM subsystem: upstream merge notes
 
 These files are byte-identical with trinity-standalone: `vm.c`, `vm_local.h`,
 `vm_vr.h`, `vm_interpreted.c`, `vm_x86.c`, `vm_aarch64.c`, `vm_armv7l.c`,
@@ -14,7 +14,7 @@ declares the `VR_Shared*` sync functions `vm_vr_state.c` calls.
 **Merge upstream Quake3e here first**, then copy the shared files outward to
 trinity-standalone verbatim (verify with committed blob hashes, not
 working-tree diffs). Deliberate divergences from upstream are tagged with
-`[vm_vr]` comments, with these exceptions — unmarked but intentional:
+`[vm_vr]` comments, with these exceptions, unmarked but intentional:
 
 - `vm_x86.c` spells the game module's inlined floor/ceil traps
   `~TRAP_FLOOR` / `~TRAP_CEIL` (upstream: `~G_FLOOR` / `~G_CEIL`). Same

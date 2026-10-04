@@ -40,7 +40,7 @@ It is based on ioquake3-r1160 (latest non-SDL revision) with upstream patches an
 &nbsp;&nbsp; 0 - 8 bit, default, moderate color banding with multi-stage shaders<br>
 &nbsp;&nbsp; 1 - 16 bit, enhanced blending precision, no color banding, might decrease performance on AMD/Intel GPUs<br>
 </li>
-<li><b><a href="#r_bloom">\r_bloom</a></b> <font color=silver>0|<b>1</b>|2</font> - high-quality light bloom postprocessing effect</li>
+<li><b><a href="#r_bloom">\r_bloom</a></b> <font color=silver>0|<b>1</b></font> - high-quality light bloom postprocessing effect</li>
 <li><b>\r_dlightMode</b> <font color=silver>0|<b>1</b>|2</font> - dynamic light mode</li>
 &nbsp;&nbsp; 0 - VQ3 'fake' dynamic lights<br>
 &nbsp;&nbsp; 1 - new high-quality per-pixel dynamic lights, slightly faster than VQ3's on modern hardware<br>
