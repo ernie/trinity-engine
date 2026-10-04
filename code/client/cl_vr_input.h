@@ -12,8 +12,6 @@ void CL_VRInput_CancelCapture( void );
 void CL_VRInput_Frame( const refXRFrame_t *frame );
 void CL_VRInput_SetVirtualScreen( qboolean enabled );
 qboolean CL_VRInput_ApplyMove( usercmd_t *cmd );
-void CL_VRInput_QuaternionAngles( const float quaternion[4], float gripPitch, vec3_t angles );
-float CL_VRInput_StickCurve( float value, float deadzone );
 /* Bound kbutton state (cl_input.c): buttons, digital moves and walking, as the flatscreen command gets them. */
 void CL_VRInput_KeyState( usercmd_t *cmd );
 void CL_VRInput_HapticEvent( const char *event, int position, int flags, int intensity, float angle, float height );

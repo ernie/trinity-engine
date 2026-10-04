@@ -25,7 +25,7 @@ static qboolean holdsReady;
 static vrStack_t stack;
 static unsigned char keysNow[VRK_COUNT];
 static int weaponSelectHeld, stabiliseHeld;
-static int clickKey[VRK_COUNT], navKey[VRK_COUNT], navAnchorX, navAnchorY;
+static int clickKey[VRK_COUNT + 1], navKey[VRK_COUNT + 1], navAnchorX, navAnchorY; // the last slot is the console's
 
 /* The virtual screen is a monitor: the player's cg_fov over a symmetric crop, so its crop and 2D
  * center geometrically; derived from vr.virtual_screen so the two agree within a frame. */
@@ -55,11 +55,7 @@ static float VRInput_Cvar( const cvar_t *cv, float fallback ) {
 	return cv && VR_FloatFinite( cv->value ) ? cv->value : fallback;
 }
 
-float CL_VRInput_StickCurve( float value, float deadzone ) {
-	return VR_StickCurve( value, deadzone );
-}
-
-void CL_VRInput_QuaternionAngles( const float quaternion[4], float gripPitch, vec3_t angles ) {
+static void CL_VRInput_QuaternionAngles( const float quaternion[4], float gripPitch, vec3_t angles ) {
 	float q[4], length, x, y, z, w, s, c;
 	float forward[3], rightZ, upZ;
 	int i;
@@ -200,7 +196,7 @@ qboolean CL_VRInput_PointerOnScreen( int hand ) {
 }
 
 static void VRInput_Click( qboolean down ) {
-	const int key = VRInput_SourceKey(), slot = key >= 0 ? key : 0;
+	const int key = VRInput_SourceKey(), slot = key >= 0 ? key : VRK_COUNT;
 	const int menuHand = vr.menuLeftHanded ? 0 : 1;
 	const int hand = key >= 0 ? VR_KeyHand( (vrKey_t)key, vr.right_handed, vr_switchThumbsticks->integer ) : menuHand;
 	if ( !down ) {
@@ -254,7 +250,7 @@ static void VRInput_ClickUp_f( void ) {
 }
 
 static void VRInput_Nav( qboolean down ) {
-	const int key = VRInput_SourceKey(), slot = key >= 0 ? key : 0;
+	const int key = VRInput_SourceKey(), slot = key >= 0 ? key : VRK_COUNT;
 	const char *dir = Cmd_Argv( 1 );
 	const qboolean console = (Key_GetCatcher() & KEYCATCH_CONSOLE) != 0;
 	int target;
@@ -766,7 +762,7 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 						   qfalse );
 	if ( vr.pointerMode == VR_POINTER_STICK ) {
 		qboolean held = qfalse;
-		for ( i = 0; i < VRK_COUNT; i++ )
+		for ( i = 0; i < (int)ARRAY_LEN( navKey ); i++ )
 			held |= navKey[i] != 0;
 		if ( !menu )
 			vr.pointerMode = VR_POINTER_CURSOR;

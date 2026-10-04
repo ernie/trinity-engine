@@ -835,7 +835,7 @@ void CL_LoadingPump( qboolean redraw ) {
 	if ( VR_LoadingBudgetHeld( &scr_loadingBudget, start ) || !re.XRLoadingFrameDue || !re.XRLoadingFrameDue() )
 		return;
 	if ( CL_VR_BeginLoadingFrame( qtrue ) ) {
-		if ( !re.XRRedrawEnvironment() && redraw )
+		if ( !( re.XRRedrawEnvironment && re.XRRedrawEnvironment() ) && redraw )
 			SCR_UpdateScreen(); // the mode changed under us: the whole screen into the frame just begun
 		CL_VR_EndFrame();
 		VR_LoadingBudgetSpent( &scr_loadingBudget, start, Sys_Milliseconds() );

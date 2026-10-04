@@ -1,7 +1,6 @@
 #include "../vrcommon/vr_float.h"
 #include "vk_xr_input.h"
 /* Supported core/vendor profile component table; no runtime calls. */
-#include <string.h>
 static inline const char *CL_XRProfilePath( int profile ) {
 	static const char *paths[CL_XRP_COUNT] = {
 		"/interaction_profiles/oculus/touch_controller", "/interaction_profiles/bytedance/pico4_controller",

@@ -8,11 +8,6 @@ typedef struct {
 	int lastCostMs;
 } vrLoadingBudget_t;
 
-static inline void VR_LoadingBudgetInit( vrLoadingBudget_t *b ) {
-	b->lastReturnMs = 0;
-	b->lastCostMs = 0;
-}
-
 static inline void VR_LoadingBudgetSpent( vrLoadingBudget_t *b, int startMs, int returnMs ) {
 	b->lastReturnMs = returnMs;
 	b->lastCostMs = (int)( (unsigned)returnMs - (unsigned)startMs );
@@ -23,9 +18,5 @@ static inline void VR_LoadingBudgetSpent( vrLoadingBudget_t *b, int startMs, int
 /* Unsigned differences so a wrapped millisecond clock never locks the pump out. */
 static inline int VR_LoadingBudgetHeld( const vrLoadingBudget_t *b, int nowMs ) {
 	return b->lastCostMs > 0 && (unsigned)nowMs - (unsigned)b->lastReturnMs < (unsigned)b->lastCostMs;
-}
-
-static inline int VR_LoadingBudgetDue( const vrLoadingBudget_t *b, int nowMs, int lastEndMs, int periodMs ) {
-	return !VR_LoadingBudgetHeld( b, nowMs ) && (unsigned)nowMs - (unsigned)lastEndMs >= (unsigned)periodMs;
 }
 #endif
