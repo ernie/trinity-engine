@@ -1,4 +1,4 @@
-/* Virtual screen placement in OpenXR meters; identical in the standalone, trinity-vr and trinity-engine. */
+/* Virtual screen placement in OpenXR meters; identical in the standalone and the engine. */
 #ifndef VR_SCREEN_GEOMETRY_H
 #define VR_SCREEN_GEOMETRY_H
 #include <math.h>
@@ -173,8 +173,7 @@ static inline void VR_ScreenModelMatrix( const vrScreenGeometry_t *screen, int m
 	m[14] = screen->position[2];
 	m[15] = 1;
 }
-/* Where a ray meets the screen's surface carried on past its edges: the ray in the screen's own space, and how
- * far along it each crossing lies, nearer first. Returns how many there are. */
+/* Crossings of the ray with the screen's surface extended past its edges, nearer first; returns how many. */
 static inline int VR_ScreenSurface( const vrScreenGeometry_t *screen, const float origin[3], const float direction[3],
 	float o[3], float d[3], float roots[2] ) {
 	float c = cosf( screen->yaw ), s = sinf( screen->yaw ), ox = origin[0] - screen->position[0], oz = origin[2] - screen->position[2];
@@ -200,8 +199,7 @@ static inline int VR_ScreenSurface( const vrScreenGeometry_t *screen, const floa
 	roots[0] = -o[2] / d[2];
 	return 1;
 }
-/* How long to draw a ray that misses the screen: as far as the surface would be had it gone on past its edges,
- * and no more than half again the distance to the screen's middle. direction is a unit vector. */
+/* Length of a ray that misses the screen: to the extended surface, at most half again the distance to its middle. */
 static inline float VR_ScreenReach( const vrScreenGeometry_t *screen, const float origin[3], const float direction[3] ) {
 	float o[3], d[3], roots[2], middle[3], limit;
 	int n;

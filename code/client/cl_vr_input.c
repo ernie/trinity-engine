@@ -27,8 +27,7 @@ static unsigned char keysNow[VRK_COUNT];
 static int weaponSelectHeld, stabiliseHeld;
 static int clickKey[VRK_COUNT + 1], navKey[VRK_COUNT + 1], navAnchorX, navAnchorY; // the last slot is the console's
 
-/* The virtual screen is a monitor: the player's cg_fov over a symmetric crop, so its crop and 2D
- * center geometrically; derived from vr.virtual_screen so the two agree within a frame. */
+/* The virtual screen is a monitor: cg_fov over a symmetric crop, derived from vr.virtual_screen so the two agree. */
 static void VRInput_PublishFov( void ) {
 	if ( vr.virtual_screen ) {
 		float fovX = Cvar_VariableValue( "cg_fov" );
@@ -98,7 +97,7 @@ static void VRInput_HoldsReady( void ) {
 	}
 }
 
-/* Button commands set their input state now, as the old direct path did; the rest run from the command buffer. */
+/* Button commands set their input state at once; the rest run from the command buffer. */
 static qboolean VRInput_Immediate( const char *word ) {
 	static const char *words[] = {"+attack", "+forward", "+back", "+moveleft", "+moveright", "+moveup", "+movedown",
 								  "+left", "+right", "+lookup", "+lookdown", "+strafe", "+speed", "+mlook", "+key",
@@ -179,8 +178,7 @@ static void VRInput_Pulse( int hand ) {
 		input.hapticEnd[hand] = cls.realtime + 200;
 }
 
-/* A hover tick: the pool crossing onto a key, 20 ms at 0.25, scaled by vr_hapticIntensity. It never holds the
- * motor, so a press right after it still gets its pulse. */
+/* A hover tick never holds the motor, so a press right after it still gets its pulse. */
 void CL_VRInput_HoverTick( int hand ) {
 	if ( !re.XRHaptic || cls.realtime < input.hapticEnd[hand] )
 		return;
@@ -429,8 +427,7 @@ void CL_VRInput_Init( void ) {
 	/* Share the existing mouse/VR UI setting; keep the engine's default. */
 	vrSensitivity = Cvar_Get( "vr_sensitivity", "100", CVAR_ARCHIVE );
 	cgStereoSeparation = Cvar_Get( "cg_stereoSeparation", "0", 0 );
-	/* Modules may initialize before the first predicted frame. Keep projection
-	 * denominators usable until the runtime supplies its actual stereo FOV. */
+	/* Usable projection denominators until the runtime supplies its stereo FOV. */
 	vr.weapon_zoomLevel = 1;
 	vr.fov_y = rawFovX = 90;
 	vr.fov_angle_left = rawFovDown = -(float)M_PI / 4;
@@ -537,8 +534,7 @@ static void VRInput_ScreenCursor( const refXRFrame_t *frame, int hand, int *x, i
 	*y = (int)(.5f * targetY + .5f * *y);
 }
 
-/* On the screen the drawn ray ends on the cursor, which trails the aim by its smoothing, in a pool of light. Off
- * it the ray runs as long along the aim, and there is no pool. */
+/* On the screen the ray ends on the cursor, which trails the aim by its smoothing; off it there is no pool. */
 static qboolean VRInput_ShowPointer( const refXRFrame_t *frame, int hand, int cursorX, int cursorY ) {
 	const clXRPose_t *aim = &frame->input.hands[hand].aim;
 	const float cursor[2] = {cursorX / 640.0f, cursorY / 480.0f};
@@ -668,8 +664,7 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 		CL_VRInput_QuaternionAngles( other->aim.orientation, 0, vr.offhandaimangles );
 	CL_VRBind_SetProfile( frame->input.hands[1].profile >= 0 ? frame->input.hands[1].profile
 															 : frame->input.hands[0].profile );
-	/* A visible session renders valid tracked views without input focus.
-	 * Publishing their FOV/poses is independent of allowing gameplay actions. */
+	/* A visible session tracks without input focus: poses publish, actions do not. */
 	if ( !frame->focused || !frame->input.focused ) {
 		CL_VRInput_Reset();
 		input.tracked = qtrue;
@@ -722,9 +717,7 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 			}
 		}
 	}
-	/* The UI refresh draws the pointer, but UI_MOUSE_EVENT updates hover/focus.
-	 * Deliver it before a same-frame click, with stick ownership already
-	 * published so pointing cannot undo navigation selection. */
+	/* Hover must update before a same-frame click, after stick ownership is published. */
 	if ( (Key_GetCatcher() & KEYCATCH_UI) && vr.menuCursorActive && vr.pointerMode != VR_POINTER_STICK &&
 		!VKeyboard_IsActive() && !vr.weapon_adjust && !vr.menuYawLocked )
 		CL_MouseEvent( 0, 0 );
@@ -772,9 +765,7 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 				vr.pointerMode = VR_POINTER_CURSOR;
 		}
 	}
-	/* Outside stick navigation the mode says who draws the cursor: this frame's ray and pool of light, or the
-	 * module, as it always does with vr_controllerModels off. The off hand points too while the keyboard is up,
-	 * since its trigger types. */
+	/* Drawn ray or module cursor; the off hand points too while the keyboard is up. */
 	if ( vr.pointerMode != VR_POINTER_STICK ) {
 		const int menuHand = vr.menuLeftHanded ? 0 : 1;
 		qboolean drawn = qfalse;
@@ -828,8 +819,7 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	if ( VRInput_Cvar( vr_snapturn, 45 ) <= 0 && !VRInput_ModalLayer() && !Key_GetCatcher() && input.previousTime &&
 		 !vr.weapon_select_using_thumbstick ) {
 		float elapsed = Com_Clamp( 0, 100, input.time - input.previousTime ) * .001f;
-		/* VR sensitivity is independent of mouse sensitivity; 100 is normal speed.
-		 * The reference full-stick rate is 32767 * .022 degrees/second. */
+		/* The reference full-stick rate is 32767 * .022 degrees/second. */
 		cl.viewangles[YAW] -= vr.thumbstick_location[VR_STICK_TURN][0] * (32767.0f * .022f) *
 							  (VRInput_Cvar( vrSensitivity, 100 ) / 100.0f) * elapsed;
 	}
@@ -868,8 +858,7 @@ qboolean CL_VRInput_ApplyMove( usercmd_t *cmd ) {
 	cmd->serverTime = cl.serverTime;
 	for ( i = 0; i < 3; i++ )
 		cmd->angles[i] = ANGLE2SHORT( cl.viewangles[i] );
-	/* The catcher owns actions, but command metadata identifies the
-	 * headset to the server while a menu, chat, or scoreboard is open. */
+	/* Buttons are gated by the catcher, but BUTTON_TALK still marks a headset to the server. */
 	catcher = Key_GetCatcher();
 	if ( catcher )
 		cmd->buttons |= BUTTON_TALK;
@@ -892,7 +881,7 @@ qboolean CL_VRInput_ApplyMove( usercmd_t *cmd ) {
 	side = cosf( angle ) * x - sinf( angle ) * forward;
 	forward = cosf( angle ) * forward + sinf( angle ) * x;
 	if ( vr.use_6dof && input.previousTime && input.time > input.previousTime ) {
-		/* Convert room-scale metres per millisecond to command movement units. */
+		/* Convert room-scale meters per millisecond to command movement units. */
 		float factor = 10000.0f / (72.0f * (input.time - input.previousTime));
 		float px = -vr.hmdposition_delta[0] * factor, py = vr.hmdposition_delta[2] * factor;
 		float yaw = -vr.hmdorientation[YAW] * (float)M_PI / 180;
@@ -935,8 +924,7 @@ qboolean CL_VRInput_ApplyMove( usercmd_t *cmd ) {
 		VectorCopy( vr.calculated_weaponangles, angles );
 		angles[PITCH] -= SHORT2ANGLE( cl.snap.ps.delta_angles[PITCH] );
 		angles[YAW] += cl.viewangles[YAW] - vr.hmdorientation[YAW];
-		// Servers reading 32-bit commands take head roll from the angles; this option sends it
-		// to the rest.
+		// 32-bit servers always get head roll; vr_sendRollToServer extends it to 16-bit ones
 		angles[ROLL] = (vr_sendRollToServer->integer || CL_VR_UsercmdButtonBits() == 32)
 							? Com_Clamp( -60, 60, vr.hmdorientation[ROLL] )
 							: 0;

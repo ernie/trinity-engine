@@ -9,10 +9,7 @@
 #include <mach-o/dyld.h>
 #endif
 
-/*
-Module selection behind the shared [vm_vr] seam. Native VR fallback is an
-explicit handoff choice, never an implicit change to normal QVM selection.
-*/
+// Module selection behind the shared [vm_vr] seam; the native fallback is an explicit handoff, never implicit.
 
 typedef struct {
 	qboolean selected;
@@ -25,8 +22,7 @@ static qboolean VM_VRNativeIndex( vmIndex_t index ) {
 	return index == VM_CGAME || index == VM_UI;
 }
 
-// Resolve the executable location, not fs_game, downloads, homepath or cwd.
-// Loading a fixed child of this directory keeps the module a bundled binary.
+// a fixed child of the executable's directory, never fs_game, downloads, homepath or cwd, so the module stays a bundled binary
 static qboolean VM_VRNativePath( char *path, int size, vmIndex_t index, qboolean missionpack ) {
 	char directory[MAX_OSPATH];
 #ifdef _WIN32
@@ -61,8 +57,6 @@ void VM_VRCancelNativeFallback( vmIndex_t index ) {
 	vrNative[index].missionpack = qfalse;
 }
 
-// Each caller owns this reference. Preflight releases it immediately; VM_Create
-// keeps its fresh reference until the ordinary VM_Free path unloads it.
 static void *VM_VRLoadNativeFallback( vmIndex_t index, qboolean missionpack,
 	vmMainFunc_t *main, dllEntry_t *entry ) {
 	char path[MAX_OSPATH];
@@ -183,8 +177,7 @@ qboolean VM_VRSelectModule( vm_t *vm, vmInterpret_t *interpret, qboolean qvmOnly
 		dllEntry_t entry;
 		vmMainFunc_t main;
 		void *handle;
-		// Recheck at consumption: a prepare from an earlier connection grants
-		// no permission to substitute native code on a later pure connection.
+		// rechecked here: an earlier connection's prepare grants nothing to a later pure one
 		if ( qvmOnly || Cvar_VariableIntegerValue( "fs_restrict" ) ) {
 			Com_Printf( "%s: native VR fallback blocked by pure/restricted policy\n", vm->name );
 			return qfalse;

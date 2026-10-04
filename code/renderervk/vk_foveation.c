@@ -415,8 +415,7 @@ VkResult VK_FovUpload( vkFovResources_t *r, VkCommandBuffer cmd, uint32_t slot, 
 	if ( map->width != r->eyeWidth || map->height != r->eyeHeight || map->texelWidth != r->caps.texelWidth ||
 		map->texelHeight != r->caps.texelHeight )
 		return VK_ERROR_INITIALIZATION_FAILED;
-	/* Disabled/menu maps are uniformly full-rate regardless of tracked centers.
-	 * Capabilities and attachment geometry are immutable for this resource owner. */
+	/* Disabled and menu maps are uniformly full rate. */
 	if ( r->uploaded && ((r->uploadedMap.strength <= 0 && map->strength <= 0) ||
 						!memcmp( &r->uploadedMap, map, sizeof( *map ) )) ) {
 		r->uploadedSerial = serial;

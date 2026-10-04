@@ -107,8 +107,7 @@ static flareProbe_t r_flareProbes[NUM_COMMAND_BUFFERS][MAX_FLARES];
 static uint32_t r_flareProbeCount[NUM_COMMAND_BUFFERS];
 static uint64_t r_flareGeneration;
 
-/* Called only after this command slot's fence. Other slots may be in flight:
- * never read or clear their storage, even for a recycled flare. */
+/* Runs after this slot's fence only; other slots may be in flight, so never touch their storage. */
 void RB_BeginFlareFrame( qboolean completed ) {
 	uint32_t slot = vk.cmd_index, i;
 	byte *base;
@@ -570,19 +569,19 @@ static void RB_TestFlare( flare_t *f ) {
 
 	backEnd.pc.c_flareTests++;
 
-	/*
-		We don't have equivalent of glReadPixels() in vulkan
-		and explicit depth buffer reading may be very slow and require surface conversion.
+/*
+	We don't have equivalent of glReadPixels() in vulkan
+	and explicit depth buffer reading may be very slow and require surface conversion.
 
-		So we will use storage buffer and exploit early depth tests by
-		rendering test dot in orthographic projection at projected flare coordinates
-		window-x, window-y and world-z: if test dot is not covered by
-		any world geometry - it will invoke fragment shader which will
-		fill storage buffer at desired location, then we discard fragment.
-		When the owning command slot fence completes we read its storage region: a non-zero value means
-		our flare showed in that submitted frame;
-		multisampled image will cause multiple fragment shader invocations.
-	*/
+	So we will use storage buffer and exploit early depth tests by
+	rendering test dot in orthographic projection at projected flare coordinates
+	window-x, window-y and world-z: if test dot is not covered by
+	any world geometry - it will invoke fragment shader which will
+	fill storage buffer at desired location, then we discard fragment.
+	When the owning command slot fence completes we read its storage region: a non-zero value means
+	our flare showed in that submitted frame;
+	multisampled image will cause multiple fragment shader invocations.
+*/
 
 	offset = RB_ReserveFlareProbe( f, qfalse );
 

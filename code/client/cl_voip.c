@@ -133,8 +133,7 @@ void CL_InitVoip( void )
 	}
 	clc.voipCodecInitialized = qtrue;
 	clc.voipMuteAll = qfalse;
-	// Disconnect stops capture without changing the user's VAD preference.
-	// Reapply it once the new connection can accept voice capture.
+	// disconnect stopped capture without touching the VAD preference; reapply it
 	if ( cl_voipUseVAD->integer )
 		cl_voipUseVAD->modified = qtrue;
 	Cmd_AddCommand( "voip", CL_Voip_f );
@@ -341,8 +340,7 @@ void CL_CaptureVoip( void )
 	// Capture-device edge events. Validation gates only the rising edge;
 	// falling edge always honors so we clean up if state went bad.
 	if ( cl_voipCapture->modified ) {
-		// A sound restart may finish before the first active snapshot. Hold its
-		// pending capture start until loading completes; stops are not deferred.
+		// a capture start during loading waits for the first active snapshot; stops never wait
 		if ( cl_voipCapture->integer && (cls.state == CA_LOADING || cls.state == CA_PRIMED) )
 			return;
 		cl_voipCapture->modified = qfalse;

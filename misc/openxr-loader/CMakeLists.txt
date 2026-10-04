@@ -43,9 +43,7 @@ set(BUILD_WITH_SYSTEM_JSONCPP OFF CACHE BOOL "" FORCE)
 # The engine loads this exact basename in every configuration. The SDK's
 # Windows default adds "d" in Debug, which makes that build undiscoverable.
 set(OPENXR_DEBUG_POSTFIX "" CACHE STRING "Engine runtime loader basename" FORCE)
-# Adding the SDK here keeps --build --target openxr_loader resolving under
-# Visual Studio generators as well as Makefiles; EXCLUDE_FROM_ALL keeps its
-# headers, import library and CMake package out of the runtime install prefix.
+# added here so --target openxr_loader resolves under every generator; EXCLUDE_FROM_ALL keeps the SDK out of the install prefix
 add_subdirectory("${TRINITY_OPENXR_SOURCE_DIR}" sdk EXCLUDE_FROM_ALL)
 if(MINGW)
     # Avoid private compiler/JSON DLL dependencies in the game distribution.

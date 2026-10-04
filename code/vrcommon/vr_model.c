@@ -442,8 +442,7 @@ static int VRM_Build( const cgltf_data *data, const cgltf_options *options, int 
 			if ( imageIndex[g] >= 0 )
 				m->image = imageIndex[g];
 			else
-				/* the color lives in a texture of a kind this parser does not decode (Meta's are Basis Universal), so
-				 * a matte mid-gray stands in for it rather than the material's white base */
+				/* an undecodable texture gets a matte mid-gray rather than the material's white base */
 				for ( k = 0; k < 3; k++ )
 					m->color[k] *= 0.62f;
 		}
@@ -679,8 +678,7 @@ size_t VR_ModelPack( const vrModel_t *model, void *out, unsigned *offsets ) {
 	return size;
 }
 
-/* One vertex's headlight color from its normal and the vector to the eye, both in one space; lit is the
- * material's color scaled to bytes. toEye NULL means no eye to light from, so the ambient floor. */
+/* lit is the material's color in bytes; toEye NULL means no eye to light from, so the ambient floor. */
 static void VRM_Light( const vrModelMaterial_t *material, const float lit[3], const float *n, const float *toEye,
 					   unsigned char *rgba ) {
 	const float nn = n[0] * n[0] + n[1] * n[1] + n[2] * n[2];
@@ -726,8 +724,7 @@ void VR_ModelShade( const vrModel_t *model, int primitive, const float world[16]
 	}
 }
 
-/* The matrix each joint of a skin carries its bound vertices by: its world matrix after its inverse bind.
- * Returns the joint count, 0 when there is no such skin. */
+/* Each joint's world matrix after its inverse bind; returns the joint count, 0 without such a skin. */
 static int VRM_SkinMatrices( const vrModel_t *model, int skin, const float *world, float *matrices ) {
 	const vrModelSkin_t *s;
 	int j;

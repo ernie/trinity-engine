@@ -1,16 +1,12 @@
-// code/vrcommon/vr_shared.h
+// Engine <-> module VR state ABI, shared by trinity-engine, trinity-standalone and the mods; append fields only.
 #ifndef __VR_SHARED
 #define __VR_SHARED
 
 #include "../qcommon/q_shared.h"
 #include "vr_safe_types.h"
 
-// Engine <-> game-module VR state ABI. QVM-safe: 4-byte scalar types only,
-// no pointers, identical layout on 64-bit host and 32-bit QVM.
-// Preserve existing field offsets; append compatible fields only at the struct tail.
-// Additive changes (new tail field, new trap) bump the MINOR; reordering,
-// removing, or retyping an existing field or trap bumps the MAJOR. The engine
-// runs a QVM whose major matches and whose minor it can meet or exceed.
+// QVM-safe: 4-byte scalar types only, no pointers, identical layout on 64-bit host and 32-bit QVM.
+// Additive changes bump the MINOR; layout changes bump the MAJOR.
 #define VR_API_MAJOR 1
 #define VR_API_MINOR 0
 #define VR_API_STR2(x) #x
@@ -96,9 +92,7 @@ typedef struct vr_shared_s {
 	int   pointerMode;          // VR_POINTER_*: who presents the menu selection
 } vr_shared_t;
 
-// Block-start field markers. The ABI asserts in vr_shared_sync.c pin their
-// offsets so a layout change that would silently corrupt cross-writer state
-// fails the build. The per-writer sync-out copies each field by name.
+// Block starts; vr_shared_sync.c pins their offsets at compile time.
 #define VR_SHARED_CG_FIRST   weapon_select
 #define VR_SHARED_UI_FIRST   menuYaw
 #define VR_SHARED_CFG_FIRST  no_crosshair

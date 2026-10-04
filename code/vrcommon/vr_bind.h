@@ -1,7 +1,6 @@
 #ifndef VR_BIND_H
 #define VR_BIND_H
-/* VR binding logic with no engine dependencies: key identities, input sampling, contexts, hold ownership,
- * display names and default layouts. The client owns storage and runs the bound commands. */
+/* Engine-free binding logic; the client owns storage and runs the bound commands. */
 #include "vr_input_types.h"
 
 #define VR_BINDING_MAX 256
@@ -80,12 +79,11 @@ int VR_KeyHand( vrKey_t key, int rightHanded, int switchSticks );
 void VR_ResolveStack( const vrSignals_t *s, vrStack_t *out );
 int VR_ContextExclusive( vrContext_t context );
 int VR_StackHas( const vrStack_t *stack, vrContext_t context );
-/* Alt sets first while alt is held, then plain sets; each pass stops at an exclusive layer. Returns the layer or -1;
- * *altSet (may be NULL) says which set answered. */
+/* Alt sets first while alt is held, then plain; each pass stops at an exclusive layer. Returns the layer or -1, the
+ * answering set in *altSet (NULL allowed). */
 int VR_ResolveKey( const vrStack_t *stack, int alt, vrKey_t key, vrLookup_t lookup, void *user, const char **binding,
 				   int *altSet );
-/* Whether a stick (VRK_MOVESTICK or VRK_TURNSTICK) is spoken for while alt is held: one of its directions has an Alt
- * binding in an active layer. Its deflection then stays out of moving and turning. */
+/* A stick with an Alt direction binding in an active layer stays out of moving and turning while alt is held. */
 int VR_StickTaken( const vrStack_t *stack, int alt, vrKey_t stick, vrLookup_t lookup, void *user );
 
 void VR_HoldsInit( vrHolds_t *h );
@@ -97,8 +95,7 @@ int VR_ReleaseAll( vrHolds_t *h, vrBindEvent_t *events, int maxEvents );
 int VR_HoldsSetMapping( vrHolds_t *h, int mapping, vrBindEvent_t *events, int maxEvents );
 /* Whether an owned hold's binding runs command (one ';'-separated part, compared exactly). */
 int VR_HoldsBound( const vrHolds_t *h, const char *command );
-/* Bindings-menu capture: once every key of a gesture is let go, its key, or -1 meanwhile. The first key pressed wins
- * unless a deeper stage of the same control joined it (grip click over grip, stick click over that stick's direction). */
+/* The gesture's key once every key is let go, -1 meanwhile; a deeper stage of the same control wins (grip click over grip). */
 int VR_CaptureKey( vrHolds_t *h, const unsigned char now[VRK_COUNT] );
 
 /* Whether a controller of the profile's family has the input behind key. */
@@ -110,12 +107,10 @@ void VR_ForEachDefault( int profile,
 						void *user );
 /* The index-th key the profile's defaults bind to command in context's plain or Alt set, or -1. */
 int VR_DefaultKey( int profile, vrContext_t context, int alt, const char *command, int index );
-/* The key that has to be Escape because no button this controller has is bound to it in global: its default Menu
- * button. -1 while one is. */
+/* The default Menu key when no present key is bound to "+key ESCAPE" in global; -1 otherwise. */
 int VR_EscapeFallback( int profile, vrLookup_t lookup, void *user );
 const char *VR_ContextName( vrContext_t context );
-/* "<layer>" or "<layer>+alt", without regard to case. *alt says which set; a NULL alt refuses the suffix.
- * -1 when unknown. */
+/* "<layer>" or "<layer>+alt", case-free; a NULL alt refuses the suffix. -1 when unknown. */
 int VR_ContextFromName( const char *name, int *alt );
 /* Maps cg_followMode to the VR follow mode; free-fly (2) exists only in TV playback. */
 int VR_FollowModeFor( int followMode, int tvPlayback );

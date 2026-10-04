@@ -692,8 +692,7 @@ Con_DrawNotify
 Draws the last few lines of output transparently over the game top
 ================
 */
-/* Notify glyphs use the HUD target's pixel coordinates, independently of the
- * framebuffer-dependent smallchar dimensions used by the flat console. */
+/* Notify glyphs use the HUD target's pixels, not the flat console's framebuffer-sized smallchars. */
 static void Con_DrawNotifyCharVR(float x, float y, float scale, int ch)
 {
 	float s, t;
@@ -706,8 +705,7 @@ static void Con_DrawNotifyCharVR(float x, float y, float scale, int ch)
 		cls.charSetShader);
 }
 
-/* Match the static in-world HUD transform without changing global screen
- * coordinates (menus and the solid console have different requirements). */
+/* Matches the in-world HUD transform without touching the screen coordinates menus and the solid console use. */
 static void Con_AdjustNotifyVR(float *x, float *y)
 {
 	float scale, tanUp, tanDown, tanHeight, opticalOffset = 0.0f;
@@ -955,8 +953,7 @@ static void Con_DrawSolidConsole( float frac ) {
 	if ( lines > cls.glconfig.vidHeight )
 		lines = cls.glconfig.vidHeight;
 
-	// Console glyphs use framebuffer pixels. Keep the background and border
-	// in that same space; the virtual-screen compositor crops them together.
+	// background and border share the glyphs' framebuffer space; the compositor crops them together
 	wf = cls.glconfig.vidWidth;
 	yf = lines;
 	con.xadjust = 0;

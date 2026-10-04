@@ -1,5 +1,4 @@
-/* Optional OpenXR Vulkan2 presentation. The renderer owns the live runtime;
- * desktop probing uses a separate, short-lived instance in the client. */
+/* OpenXR Vulkan2 presentation; the client's desktop probe uses its own short-lived instance. */
 #include "tr_local.h"
 #include "vk_xr.h"
 #include "vk_xr_live.h"
@@ -292,8 +291,7 @@ uint32_t VK_XR_ApiVersion( uint32_t version ) {
 							   XR_VERSION_MINOR( xr.requirements.minApiVersionSupported ), 0 );
 	maximum = VK_MAKE_VERSION( XR_VERSION_MAJOR( xr.requirements.maxApiVersionSupported ),
 							   XR_VERSION_MINOR( xr.requirements.maxApiVersionSupported ), 0 );
-	/* Fragment-rate attachment support needs Vulkan 1.1 feature queries.
-	 * Negotiate only what both the loader and XR runtime permit. */
+	/* Fragment-rate attachments need Vulkan 1.1 queries; request only what loader and runtime allow. */
 	if ( version < VK_API_VERSION_1_1 && maximum >= VK_API_VERSION_1_1 ) {
 		PFN_vkEnumerateInstanceVersion enumerate = (PFN_vkEnumerateInstanceVersion)ri.VK_GetInstanceProcAddr(
 			VK_NULL_HANDLE, "vkEnumerateInstanceVersion" );
@@ -375,10 +373,9 @@ void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device
 		ri.Error( ERR_DROP, "%s", failure );
 		return;
 	}
-	ri.Printf( PRINT_ALL, "OpenXR swapchain %ux%u, 2 layers, %u images, usage 0x%x, format list %s, create flags 0x%x of 0x%x\n",
-			   xr.target.width, xr.target.height, xr.target.count, (unsigned)VK_XRVK_TARGET_USAGE,
-			   xr.formatList ? "enabled" : "unavailable", (unsigned)xr.target.createFlags,
-			   (unsigned)targetFlags );
+	ri.Printf( PRINT_ALL, "OpenXR swapchain %ux%u, 2 layers, %u images, format list %s, create flags 0x%x of 0x%x\n",
+			   xr.target.width, xr.target.height, xr.target.count, xr.formatList ? "enabled" : "unavailable",
+			   (unsigned)xr.target.createFlags, (unsigned)targetFlags );
 	xrDevice = device;
 	xrPhysical = physical;
 	{
@@ -474,8 +471,7 @@ qboolean VK_XR_EyeSize( int *recW, int *recH, int *maxW, int *maxH ) {
 	return *recW > 0 && *recH > 0;
 }
 
-/* Module layouts cache glConfig at registration. A runtime resolution change
- * must rebuild them through vid_restart, not just replace GPU attachments. */
+/* Modules cache glConfig at registration, so a runtime resolution change needs vid_restart. */
 qboolean VK_XR_ResolutionChanged( void ) {
 	XrViewConfigurationView views[2];
 	uint32_t count, i, width = 0, height = 0;
@@ -772,10 +768,7 @@ int VK_XR_EndFrame( void ) {
 	if ( !xr.frameBegun ) {
 		return failed || xr.lost ? -1 : 0;
 	}
-	/* Vulkan2 accepts outstanding work on the bound graphics queue. CopyEyes
-	 * restores COLOR_ATTACHMENT_OPTIMAL before submission; the runtime orders
-	 * its reads on that same queue. Device idle is only needed for teardown.
-	 * Recorded commands alone must not make a dropped frame presentable. */
+	/* The runtime orders its reads on our queue; only a submitted frame may present. */
 	if ( !VKXR_Check( VK_XRVK_End( &xr, submitted && !failed ), "xrEndFrame" ) ) {
 		return -1;
 	}
@@ -1016,13 +1009,11 @@ qboolean VK_XR_EyeView( int eye, refdef_t *view, float fov[4] ) {
 	}
 	pose = &xr.views[eye].pose;
 	center = VKXR_CenterPose();
-	// The module supplies center-head view origin/orientation. Convert only IPD
-	// displacement here: OpenXR +X right/+Y up/-Z forward to Q3 forward/left/up.
+	// only the IPD displacement: OpenXR +X right/+Y up/-Z forward to Q3 forward/left/up
 	offset[0] = -(pose->position.z - (xr.views[0].pose.position.z + xr.views[1].pose.position.z) * 0.5f);
 	offset[1] = -(pose->position.x - (xr.views[0].pose.position.x + xr.views[1].pose.position.x) * 0.5f);
 	offset[2] = pose->position.y - (xr.views[0].pose.position.y + xr.views[1].pose.position.y) * 0.5f;
-	// Positions above are in tracking space; convert using the center head's
-	// inverse orientation before the game-view axes to avoid double yaw.
+	// tracking space to the center head's frame, so yaw isn't applied twice
 	{
 		const XrQuaternionf *q = &center.orientation;
 		float v[3] = {-offset[1], offset[2], -offset[0]}, cross[3], cross2[3];
@@ -1036,8 +1027,7 @@ qboolean VK_XR_EyeView( int eye, refdef_t *view, float fov[4] ) {
 		offset[1] = -v[0];
 		offset[2] = v[1];
 	}
-	// Cgame publishes its current camera scale before submitting this view.
-	// Keep spectator/zoom policy there; eye separation is measured in meters.
+	// eye separation is in meters; cgame owns spectator and zoom scale
 	scale = worldscale ? worldscale->value : 32.0f;
 	scale *= worldscaleScaler ? worldscaleScaler->value : 1.0f;
 	for ( axis = 0; axis < 3; axis++ ) {

@@ -1,8 +1,7 @@
 #ifndef VR_DEFAULTS_H
 #define VR_DEFAULTS_H
 
-/* The Steam Frame build launches in VR with no desktop mirror, and neither choice is archived: a +set on the launch
- * line plays flat for one session without ever reaching the config. Every other build keeps the player's choice. */
+/* The Frame build launches in VR with no mirror, unarchived, so a +set plays flat for one session; other builds keep the player's choice. */
 #ifdef TRINITY_FRAME
 #define VR_ENABLED_DEFAULT "1"
 #define VR_MIRROR_DEFAULT "0"

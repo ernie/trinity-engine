@@ -1,11 +1,6 @@
 #ifndef __VR_SAFE_TYPES
 #define __VR_SAFE_TYPES
 
-// Rules:
-// * no SDL
-// * no OpenGL
-// * no OpenXR
-
 typedef enum
 {
 	VRFM_NONE = 0,      // Not following / mirror not yet synced (zero must stay inert)

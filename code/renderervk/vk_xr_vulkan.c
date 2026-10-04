@@ -280,9 +280,7 @@ XrResult VK_XRVK_Bind( vkXRVk_t *ctx, const XrGraphicsBindingVulkan2KHR *binding
 	CHECK( ctx->xr.CreateSession( ctx->instance, &sessionInfo, &ctx->session ) );
 	memset( &spaceInfo, 0, sizeof( spaceInfo ) );
 	spaceInfo.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
-	/* Gameplay expects floor-relative meters. Prefer the runtime's calibrated
-	 * STAGE floor; runtimes without STAGE use the 1.675 m default eye height.
-	 * This same space locates views AND actions. */
+	/* STAGE gives floor-relative meters; LOCAL falls back with the 1.675 m default eye height. */
 	spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_STAGE;
 	spaceInfo.poseInReferenceSpace.orientation.w = 1;
 	result = ctx->xr.CreateReferenceSpace( ctx->session, &spaceInfo, &ctx->space );

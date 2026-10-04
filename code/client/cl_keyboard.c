@@ -1,10 +1,4 @@
-//
 // cl_keyboard.c -- on-screen virtual keyboard for VR
-//
-// Key events go out through CL_KeyEvent/CL_CharEvent, so the console and UI
-// menus need no keyboard-specific handling. Layout and modifier state live in
-// cl_vkb_layout.c; this file points, sends and draws.
-//
 
 #include "client.h"
 #include "cl_vr_input.h"
@@ -139,8 +133,7 @@ static float VKB_TextWidth( const char *s, float scale ) {
 	return width;
 }
 
-/* Draws the pak font's string centered on (cx, cy) at an em of pixelHeight virtual pixels; the caller checks the font loaded.
- * The cap height sits on the center for every string, so a key's label keeps its baseline when Shift or Caps swaps it. */
+/* The cap height sits on the center for every string, so a label keeps its baseline when Shift or Caps swaps it. */
 static void VKB_DrawText( const char *s, float cx, float cy, float pixelHeight, const float *color ) {
 	const float scale = VKB_FontScale( pixelHeight );
 	const float baseline = cy + assets.font.glyphs['H'].top * scale / 2;
@@ -270,7 +263,6 @@ static void VKeyboard_DrawCap( const vkbKey_t *key, const vkbRect_t *r, qboolean
 		VKB_Draw9( assets.glow, r->x - 2, r->y + r->h - 8, r->w + 4, 14, VKB_GLOW_CORNER / 2, emberUnderline );
 }
 
-/* Every glow goes down before any cap, so the spread shows evenly around a hovered key instead of under its right-hand neighbor. */
 static void VKeyboard_DrawGlow( const vkbRect_t *r, const float *color ) {
 	if ( assets.cap && assets.glow )
 		VKB_Draw9( assets.glow, r->x - VKB_GLOW_SPREAD, r->y - VKB_GLOW_SPREAD,

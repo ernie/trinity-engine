@@ -652,8 +652,7 @@ static void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 		}
 	}
 
-	// Keep snapshots/commands current under a fullscreen menu without drawing
-	// the covered scene. Stereo menus only need one cgame update per frame.
+	// keep snapshots current under a fullscreen menu without drawing the covered scene; once per stereo frame
 	if ( VR_IsActiveMode() && uiFullscreen && stereoFrame != STEREO_RIGHT ) {
 		CL_CGameUpdate();
 	}
@@ -749,15 +748,13 @@ void SCR_UpdateScreen( void ) {
 	if ( !scr_initialized )
 		return; // not initialized yet
 
-	/* Loading pacifiers outside CL_Frame own their XR frame. Calls made inside
-	 * an existing frame must neither acquire another image nor end that frame. */
+	/* A pacifier outside CL_Frame owns its XR frame; one inside an open frame must not nest. */
 	loadingFrame = CL_VR_BeginLoadingFrame( qfalse );
 	if ( re.DesktopTrackingStatus ) {
 		re.DesktopTrackingStatus( VR_IsActiveMode() && CL_VR_WaitingForTracking(), cls.charSetShader, cls.vrTrackingIcon );
 	}
 	if ( CL_VR_RenderingBlocked() ) {
-		/* A desktop-only frame while XR says not to render: no UI/cgame calls,
-		 * stereo scene commands, or headset image submission. */
+		/* XR says not to render: a desktop-only frame with no module calls or headset submission. */
 		if ( CL_VR_DesktopWaitingFrame() && re.DesktopTrackingStatus ) {
 			re.BeginFrame( STEREO_CENTER );
 			re.EndFrame( NULL, NULL );
@@ -768,8 +765,7 @@ void SCR_UpdateScreen( void ) {
 		return;
 	}
 
-	// OpenXR paces its own frames. Discarding an acquired XR frame here would
-	// submit no image layer and blank the loading screen between updates.
+	// XR paces frames; never discard an acquired one
 	if ( !CL_VR_RenderStereo() && framecount == cls.framecount ) {
 		int ms = Sys_Milliseconds();
 		if ( next_frametime && ms - next_frametime < 0 ) {
@@ -815,9 +811,7 @@ void SCR_UpdateScreen( void ) {
 	scr_lastUpdate = Sys_Milliseconds();
 }
 
-/* The renderer calls this between asset loads. A stretch of loading with no pacifier leaves the headset
- * without frames until the runtime shows its waiting card, so a loading frame goes out once the last
- * update is older than the interval. Never inside an update or an open VR frame: that would nest frames. */
+/* Redraw at most every SCR_LOADING_PUMP_MS; otherwise a tracked frame, never inside an update or an open frame. */
 #define SCR_LOADING_PUMP_MS 100
 static vrLoadingBudget_t scr_loadingBudget;
 
@@ -829,8 +823,7 @@ void CL_LoadingPump( qboolean redraw ) {
 		SCR_UpdateScreen();
 		return;
 	}
-	// between redraws, and through the local server's spawn: the surroundings alone, tracked, around the screen
-	// as it was, paced by the display; a frame that blocked on the GPU buys the loader the same time back
+	// tracked frame: last screen recomposed with fresh poses; a GPU-blocked frame pays the loader back
 	start = Sys_Milliseconds();
 	if ( VR_LoadingBudgetHeld( &scr_loadingBudget, start ) || !re.XRLoadingFrameDue || !re.XRLoadingFrameDue() )
 		return;

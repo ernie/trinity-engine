@@ -303,9 +303,7 @@ ELSE()
 	ENDIF()
 ENDIF()
 
-# MSVC x64 calls these helpers from qcommon and from dynamically loaded
-# renderers. Each DLL needs its own MASM object; a static renderer shares the
-# executable's qcommon object and must not add a duplicate definition.
+# each renderer DLL needs its own MASM helpers; a static renderer shares the executable's
 IF(MSVC AND WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
 	SET(TRINITY_MSVC_TARGET_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
 	IF(CMAKE_C_COMPILER_ARCHITECTURE_ID)
@@ -375,14 +373,12 @@ ELSEIF(WIN32)
 		code/win32/win_shared.c
 		code/win32/win_syscon.c
 		code/win32/win_resource.rc)
-	# The resource script names assets relative to the repository root.
-	# Supply that search path when building outside the source directory.
+	# the resource script names assets relative to the repository root
 	SET_SOURCE_FILES_PROPERTIES(code/win32/win_resource.rc PROPERTIES
 		INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}")
 
 	IF(USE_SDL)
-		# Also supplies the Windows microphone-capture backend, so an SDL/VoIP
-		# configuration must not pick up win_snd.c.
+		# code/sdl also supplies the Windows microphone backend, so an SDL/VoIP build must not pick up win_snd.c
 		AUX_SOURCE_DIRECTORY(code/sdl Q3_UI_SRCS)
 		list(APPEND Q3_UI_SRCS code/win32/win_discord.c)
 	ELSE()
@@ -459,8 +455,7 @@ if(BUILD_OPENXR_LOADER AND NOT EMSCRIPTEN)
 	endif()
 	add_subdirectory(misc/openxr-loader openxr-loader)
 	add_dependencies(${CNAME}${BINEXT} openxr_loader)
-	# The SDK keeps its Visual Studio output directory for its own post-build
-	# commands. Stage that result next to the engine for direct solution builds.
+	# the SDK's post-build commands need its own output directory; stage the result beside the engine
 	if(CMAKE_GENERATOR MATCHES "^Visual Studio")
 		add_custom_command(TARGET ${CNAME}${BINEXT} POST_BUILD
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -475,8 +470,7 @@ endif()
 include(TrinityNative)
 if(TARGET trinity-native)
 	add_dependencies(${CNAME}${BINEXT} trinity-native)
-	# Keep the trusted module directory and dynamic renderers adjacent to the
-	# installed executable. A native-enabled prefix is a runnable client.
+	# the trusted module directory and the renderers sit beside the installed executable
 	if(WIN32)
 		install(TARGETS ${CNAME}${BINEXT}
 			RUNTIME_DEPENDENCY_SET trinity_client_dependencies

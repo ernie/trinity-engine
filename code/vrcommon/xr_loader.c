@@ -39,8 +39,7 @@ void XRLoader_UnloadLibrary( void *lib ) {
 #include <unistd.h>
 #endif
 
-/* App bundles and portable Linux packages may carry an optional loader next
- * to the executable. Neither lookup depends on the launch working directory. */
+/* A loader beside the executable comes first; neither lookup depends on the working directory. */
 static void *XRLoader_OpenUnix( void ) {
 #ifdef __APPLE__
 	const char *name = "libopenxr_loader.dylib";
@@ -212,8 +211,7 @@ static xrLoaderStatus_t XRLoader_Open( xrLoaderState_t *st, xrLoaderInfo_t *info
 	ci.type = XR_TYPE_INSTANCE_CREATE_INFO;
 	strcpy( ci.applicationInfo.applicationName, "Trinity Engine" );
 	strcpy( ci.applicationInfo.engineName, "Trinity Engine" );
-	/* the same request the session makes: OpenXR 1.1, or 1.0 from a runtime that turns 1.1 down with any code
-	 * but the ones no other request would get past */
+	/* 1.1 first; retry 1.0 unless the failure was one 1.0 would share */
 	ci.applicationInfo.apiVersion = XR_MAKE_VERSION( 1, 1, 0 );
 	result = create( &ci, &st->instance );
 	if ( XR_FAILED( result ) && result != XR_ERROR_RUNTIME_UNAVAILABLE && result != XR_ERROR_LIMIT_REACHED &&

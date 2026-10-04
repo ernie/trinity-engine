@@ -68,9 +68,6 @@ static qboolean CL_VR_Wanted( void ) {
 	return vr_enabled && (vr_enabled->latchedString ? atoi( vr_enabled->latchedString ) : vr_enabled->integer) != 0;
 }
 static vrAction_t CL_VR_Send( vrEvent_t *ev ) {
-	vrState_t before = machine.state;
-	vrAction_t action;
-
 	ev->now = cls.realtime;
 	ev->wanted = CL_VR_Wanted();
 	ev->vrActive = VR_IsActiveMode();
@@ -78,10 +75,7 @@ static vrAction_t CL_VR_Send( vrEvent_t *ev ) {
 	ev->settled = cls.state == CA_ACTIVE || ev->disconnected;
 	ev->safePoint = VRState_SafePoint( cls.state == CA_ACTIVE, ev->disconnected, ev->vrActive, CL_GameSwitch() );
 	ev->modChange = (Cvar_Flags( "fs_game" ) & CVAR_MODIFIED) != 0;
-	action = VRState_Reduce( &machine, ev );
-	if ( machine.state != before )
-		Com_DPrintf( "VR state %s -> %s\n", VRState_Name( before ), VRState_Name( machine.state ) );
-	return action;
+	return VRState_Reduce( &machine, ev );
 }
 static vrAction_t CL_VR_Step( vrEventType_t type, int value ) {
 	vrEvent_t ev;
@@ -92,9 +86,7 @@ static vrAction_t CL_VR_Step( vrEventType_t type, int value ) {
 	return CL_VR_Send( &ev );
 }
 
-/* The cvar write only queues a userinfo update. Command width follows
- * clc.vrIdentity, the identity in the last userinfo the client sent, so the
- * width holds until CL_WritePacket carries the update ahead of the move. */
+/* Width follows clc.vrIdentity, the last userinfo sent, until CL_WritePacket carries the new one. */
 static void CL_VR_SetMode( qboolean active ) {
 	VR_SetActiveMode( active );
 	Cvar_Set2( "vr", active ? "1" : "0", qtrue );
@@ -298,9 +290,7 @@ void CL_VR_PrepareRenderer( void ) {
 	}
 }
 void CL_VR_CGameLoading( void ) {
-	/* The replacement renderer and UI are ready. Activate before CG_INIT
-	 * registers its VR mirror, so nested loading updates use screen mode.
-	 * Rendering remains blocked until cgame has registered its VR interface. */
+	/* Activate before CG_INIT so its nested loading updates use screen mode; rendering stays blocked until cgame registers. */
 	if ( !machine.running || !machine.xrRenderer || !cls.rendererStarted || !VM_VRRegistered( uivm ) )
 		return;
 	if ( !re.XRSetActive || !re.XRSetActive( qtrue ) ) {
@@ -413,7 +403,7 @@ static void CL_VR_FrameChecks( void ) {
 		probe = VRState_Probe( cachedProbe.status, cachedProbe.vulkanEnable2 );
 		if ( probe == VRPROBE_READY ) {
 			XRLoader_WatchEnd();
-			Com_DPrintf( "OpenXR headset appeared; restarting video for VR\n" );
+			Com_Printf( "OpenXR headset appeared; restarting video for VR\n" );
 		}
 		if ( CL_VR_Step( VREV_HEADSET, probe ) == VRACT_INCAPABLE )
 			CL_VR_Incapable();
@@ -440,7 +430,7 @@ static void CL_VR_FrameChecks( void ) {
 		(cls.state == CA_ACTIVE || cls.state == CA_DISCONNECTED) ) {
 		nextTargetCheck = cls.realtime + 1000;
 		if ( re.XRResolutionChanged() ) {
-			Com_DPrintf( "OpenXR eye resolution changed; restarting video for VR\n" );
+			Com_Printf( "OpenXR eye resolution changed; restarting video for VR\n" );
 			CL_VR_Step( VREV_REQUEST, VRPENDING_NOW );
 			return;
 		}
@@ -536,9 +526,7 @@ static qboolean CL_VR_BeginFrameInternal( qboolean updateInput ) {
 	if ( updateInput ) {
 		qboolean nextScreen;
 		CL_VRInput_Frame( &xrFrame );
-		/* Controller Escape can change the UI catcher during input dispatch.
-		 * Keep the pre-input screen for cursor hit tests, then publish the
-		 * resulting menu state before this frame is drawn. */
+		/* Input may toggle the UI catcher; republish the screen state before the frame draws. */
 		nextScreen = VR_IsActiveMode() && CL_VR_UseVirtualScreen();
 		if ( nextScreen != vr.virtual_screen ) {
 			CL_VRInput_SetVirtualScreen( nextScreen );
@@ -558,8 +546,7 @@ static qboolean CL_VR_BeginFrameInternal( qboolean updateInput ) {
 qboolean CL_VR_BeginFrame( void ) {
 	return CL_VR_BeginFrameInternal( qtrue );
 }
-/* A tracked frame draws nothing from the modules, so it may also cover the local server's spawn, before the
- * cgame exists, and needs no VR-ready VM. */
+/* Tracked frames draw no module content, so they need no VR-ready VM. */
 qboolean CL_VR_BeginLoadingFrame( qboolean tracked ) {
 	const qboolean loading = tracked ? cls.state >= CA_CONNECTING && cls.state <= CA_PRIMED
 									 : cls.state == CA_LOADING || cls.state == CA_PRIMED;
@@ -568,8 +555,7 @@ qboolean CL_VR_BeginLoadingFrame( qboolean tracked ) {
 		return qfalse;
 	if ( machine.running && (!machine.xrRenderer || (!tracked && (!VM_VRRegistered( uivm ) || !VM_VRRegistered( cgvm )))) )
 		return qfalse;
-	/* Loading callbacks can run inside CG_INIT. Update the tracked screen,
-	 * but never dispatch controller events into a partially initialized VM. */
+	/* Loading can run inside CG_INIT: update the tracked screen but never dispatch input into the VM. */
 	CL_VR_BeginFrameInternal( qfalse );
 	return frame.open;
 }

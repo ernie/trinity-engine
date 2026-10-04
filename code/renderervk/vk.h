@@ -175,8 +175,7 @@ typedef struct {
 /* How a frame finishes: flatscreen or direct mode, the stereo eye pass, or the mono capture pass. */
 typedef enum { VK_POST_FLOW_LEGACY, VK_POST_FLOW_WORLD, VK_POST_FLOW_SCREEN } vkPostFlow_t;
 
-/* Mono screen sources reuse XR array images; only their compatible pass,
- * framebuffer and pipeline handles differ. vk.c owns this target lifetime. */
+/* Mono sources reuse the XR array images with their own pass, framebuffer and pipelines. */
 typedef struct {
 	qboolean sourceActive;
 	struct {
@@ -693,7 +692,7 @@ typedef struct {
 	uint32_t surface_beam_pipeline;
 	uint32_t surface_axis_pipeline;
 	uint32_t dot_pipeline;
-	uint32_t dot_total_pipeline; // multiview probe that counts every fragment it draws, untested
+	uint32_t dot_total_pipeline; // multiview probe that counts every fragment it draws
 
 	VkPipeline gamma_composite_pipeline;	// flatscreen scene, bloom and gamma in one draw
 	VkPipeline capture_pipeline;

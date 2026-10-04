@@ -2234,7 +2234,6 @@ static ALCdevice *alDevice;
 static ALCcontext *alContext;
 
 /* Follow default output changes without invalidating sources or sound handles.
- * A named s_alDevice stays pinned; drivers without the extension stay put.
  * https://openal-soft.org/openal-extensions/SOFT_reopen_device.txt */
 typedef ALCboolean (ALC_APIENTRY *sndReopenDevice_t)(ALCdevice *, const ALCchar *, const ALCint *);
 static sndReopenDevice_t alReopenDevice;
@@ -2261,8 +2260,7 @@ static void ALC_APIENTRY S_AL_OutputEvent( ALCenum eventType, ALCenum deviceType
 
 static const char *S_AL_DefaultOutput(void)
 {
-	/* OpenAL Soft's default-name query reads the cached enumeration. Refresh
-	 * it first or a headset connected after startup is never discovered. */
+	/* the default-name query reads the cached enumeration, so refresh it or a headset connected later is never found */
 	if (enumeration_all_ext) qalcGetString(NULL, ALC_ALL_DEVICES_SPECIFIER);
 	return qalcGetString(NULL, enumeration_all_ext ?
 		ALC_DEFAULT_ALL_DEVICES_SPECIFIER : ALC_DEFAULT_DEVICE_SPECIFIER);

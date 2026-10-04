@@ -655,9 +655,7 @@ static void CL_ForceFixedDlights( void ) {
 	}
 }
 
-/* Preserve the existing QVM frame entry point when no image can be drawn.
- * Queries, asset registration, sound and server-command processing continue;
- * only per-frame drawing is discarded, before it reaches any renderer. */
+/* Draw syscalls are swallowed while cgameUpdateOnly; queries, sounds and server commands still run. */
 static qboolean CL_CGameDrawCall( int call ) {
 	switch ( call ) {
 	case CG_UPDATESCREEN:
@@ -1145,8 +1143,6 @@ void CL_InitCGame( void ) {
 	}
 	cls.state = CA_LOADING;
 	CL_VR_CGameLoading();
-	// CG_INIT registers its VR mirror before nested loading-screen updates.
-	// Establish screen mode first so those updates use the correct coordinates.
 	CL_VRInput_SetVirtualScreen( VR_IsActiveMode() );
 	vr.first_person_following = qfalse;
 

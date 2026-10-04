@@ -235,8 +235,7 @@ void S_UpdateEntityPosition( int entityNum, const vec3_t origin )
 }
 
 
-/* Window focus belongs to desktop presentation. Active VR keeps audio even
- * when its mirror is unfocused or minimized; requested VR alone does not. */
+/* Active VR keeps audio with its mirror unfocused or minimized; requested VR alone does not. */
 qboolean S_ShouldMuteForFocus( void )
 {
 	if ( VR_IsActiveMode() ) return qfalse;
@@ -533,8 +532,7 @@ void S_Init( void )
 
 			S_SoundInfo();
 #ifdef USE_VOIP
-			// A replacement device is not recording yet, whatever the capture
-			// setting says. Resume through the normal client gates.
+			// a replacement device is not recording yet; resume through the normal client gates
 			if ( cl_voipCapture && cl_voipCapture->integer )
 				cl_voipCapture->modified = qtrue;
 #endif

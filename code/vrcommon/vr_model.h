@@ -1,5 +1,4 @@
-/* A runtime-supplied controller model (binary glTF) reduced to what one unlit pass can draw: geometry, rigid or skinned,
- * a matrix per node, and headlight colors per vertex. No engine, Vulkan or OpenXR dependencies. */
+/* A runtime's controller model (binary glTF) reduced to what one unlit pass draws; no engine, Vulkan or OpenXR dependencies. */
 #ifndef VR_MODEL_H
 #define VR_MODEL_H
 #include <stddef.h>
@@ -53,13 +52,11 @@ typedef struct {
 	int doubleSided;
 } vrModelMaterial_t;
 
-/* Image formats the parser keeps. KTX2 (Basis Universal, as Meta's controller models carry) is kept only in a build
- * that defines VR_MODEL_KTX2; elsewhere it counts as undecodable and the material falls back to a matte gray. */
+/* KTX2 (Basis Universal, as Meta's models carry) is kept only with VR_MODEL_KTX2; elsewhere the material falls back to gray. */
 #define VR_MODEL_IMAGE_PNG 0
 #define VR_MODEL_IMAGE_JPEG 1
 #define VR_MODEL_IMAGE_KTX2 2
-/* The encoded file as the asset carried it. pixels is the caller's: RGBA it decoded, from the allocator the model
- * was parsed with, released with the model. */
+/* pixels is the caller's decoded RGBA, from the model's allocator, released with the model. */
 typedef struct {
 	const unsigned char *data;
 	int size, format;
@@ -86,13 +83,11 @@ int VR_ModelParse( const void *glb, size_t size, vrModelAlloc_t alloc, vrModelFr
 void VR_ModelFree( vrModel_t *model, vrModelFree_t release );
 /* The pixel size an encoded image declares, read from its header without decoding it. 0 when there is none to read. */
 int VR_ModelImageSize( const vrModelImage_t *image, int *width, int *height );
-/* Keyframe index of the node's channels as a pose, the rest transform standing in for a channel it lacks.
- * 0 when the node has no keyframe there. */
+/* The node's pose at keyframe index, the rest transform standing in for a missing channel; 0 when it has none there. */
 int VR_ModelKeyframe( const vrModel_t *model, int node, int index, vrModelPose_t *pose );
 /* map[i] becomes the node named names[i], or -1. */
 void VR_ModelBindNodes( const vrModel_t *model, const char ( *names )[VR_MODEL_NAME_SIZE], int count, int *map );
-/* world receives 16 floats per node with the root pose applied; visible one byte per node.
- * states may be NULL for the rest pose. */
+/* world gets 16 floats per node with the root pose applied, visible one byte per node; states NULL means the rest pose. */
 void VR_ModelPose( const vrModel_t *model, const vrModelPose_t *root, const vrModelNodeState_t *states,
 				   const int *map, int count, float *world, unsigned char *visible );
 /* The static half of drawing, for a GPU buffer: a primitive after another, each vertexCount positions (4 floats,
@@ -101,13 +96,10 @@ void VR_ModelPose( const vrModel_t *model, const vrModelPose_t *root, const vrMo
 #define VR_MODEL_PACK_ST( vertexCount ) ( (unsigned)( vertexCount ) * 16 )
 #define VR_MODEL_PACK_INDEX( vertexCount ) ( (unsigned)( vertexCount ) * 24 )
 size_t VR_ModelPack( const vrModel_t *model, void *out, unsigned *offsets );
-/* The per-frame half: headlight colors for one primitive as a node's world matrix poses it, 4 bytes a vertex.
- * A side facing the eye is lit, grazing least; the back of a single-sided material stays at the ambient floor. */
+/* Headlight colors for one posed primitive, 4 bytes a vertex; the back of a single-sided material stays at the ambient floor. */
 void VR_ModelShade( const vrModel_t *model, int primitive, const float world[16], const float eye[3],
 					unsigned char *rgba );
-/* A skinned primitive's vertices under the node matrices VR_ModelPose made, in their space: 4 floats a position
- * (w 1, as VR_ModelPack lays them out) and 3 a unit normal; either may be NULL. A primitive without joints
- * comes out as it is, since its node's own matrix carries it. */
+/* Skinned positions (4 floats, as VR_ModelPack lays them out) and unit normals (3), either NULL; an unskinned primitive comes out as is. */
 void VR_ModelSkin( const vrModel_t *model, int primitive, int skin, const float *world, float *positions, float *normals );
 /* VR_ModelSkin's positions and VR_ModelShade's colors in one pass, the eye in the space of world. */
 void VR_ModelSkinShade( const vrModel_t *model, int primitive, int skin, const float *world, const float eye[3],

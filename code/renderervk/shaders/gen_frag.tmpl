@@ -520,9 +520,7 @@ void main() {
 
 	gl_FragDepth = gl_FragCoord.z;
 #else
-	// Alpha tests above retain cutout silhouettes. Texture/specular alpha is
-	// not transparency when this is an opaque material's replacement stage, and a
-	// scene stage restoring full transmittance writes 1 too.
+	// opaque replacement stages and the scene stage restoring transmittance write full alpha
 	if (hud_opaque_coverage != 0) base.a = 1.0;
 	// Ordinary 2D materials can also target a linear desktop swapchain.
 	if (desktop_output != 0) base.rgb *= pc.desktopOverbright;

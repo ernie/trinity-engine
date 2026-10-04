@@ -25,9 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "vk_xr.h"
 #include <math.h>
 
-/* Conservative four-sided enclosure in center-camera coordinates. Every
- * corner ray and both origins lie inside each halfspace. If a ray crosses
- * the center horizon, disable culling rather than inventing a finite bound. */
+/* Halfspaces enclosing both eyes' frusta in center-camera space; a ray past the horizon disables culling. */
 static void VK_MultiviewPlanes( const float center[3][3], const float origins[2][3],
 								const float axes[2][3][3], const float fov[2][4], float planes[5][4] ) {
 	float lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
@@ -1190,8 +1188,7 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, qboolean *isMirror 
 		pointAnd &= pointFlags;
 	}
 
-	// The center projection does not bound canted stereo eyes. World traversal
-	// already culled against their conservative enclosure.
+	// world traversal already culled canted eyes against their enclosure
 	if ( pointAnd && !tr.viewParms.xrMultiview ) {
 		tess.numIndexes = 0;
 		return qtrue;
@@ -1233,8 +1230,7 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, qboolean *isMirror 
 		return qfalse;
 	}
 
-	// Retain a portal if either eye can see its front within range. Do not let
-	// a close back-facing eye satisfy the range test for the other eye.
+	// keep a portal either eye sees from the front in range; a close back-facing eye doesn't count
 	for ( eyeIndex = 0; eyeIndex < numEyes; eyeIndex++ ) {
 		if ( numTriangles[eyeIndex] &&
 			shortest[eyeIndex] <= (tess.shader->portalRange * tess.shader->portalRange) ) {
@@ -1319,8 +1315,7 @@ static void R_GetModelViewBounds( int *mins, int *maxs, float ndc[4] )
 
 
 /* Multiview shares one scissor, so take the union of the surface's pixel bounds in both eyes;
- * a vertex behind either eye widens to the whole viewport. cullFov gets each eye's field
- * narrowed to the surface, for culling the view drawn through it. */
+ * cullFov gets each eye's field narrowed to the surface, for culling the view drawn through it. */
 static void R_GetEyeModelViewBounds( int *mins, int *maxs, float cullFov[2][4] )
 {
 	const float margin = 0.02f; // of the eye's tangent range, so rounding never culls the surface's own edge

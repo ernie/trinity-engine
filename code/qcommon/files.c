@@ -498,11 +498,8 @@ static qboolean FS_PakIsPure( const pack_t *pack ) {
 		return qfalse;	// not on the pure server pak list
 	}
 
-	// Non-pure mode: Trinity paks still require a server checksum match
-	// so the correct version loads even without sv_pure.  VR clients
-	// (q3vr, ioq3quest) force non-pure because they run native cgame/
-	// game/ui, but we still want pak8t/pak3t/announcer to track the
-	// server's version.
+	// Non-pure mode: Trinity paks still require a server checksum match so the
+	// correct version loads even without sv_pure, as the standalone runs non-pure.
 	if ( fs_numServerReferencedPaks ) {
 		i = FS_TrinityPakIndex( pack );
 		if ( i >= 0 && pack->checksum != fs_serverReferencedPaks[i] )
@@ -2012,7 +2009,7 @@ int FS_Read( void *buffer, int len, fileHandle_t f ) {
 		}
 		return len;
 	} else {
-		// inflated an eighth of a megabyte at a time: a 4x texture is tens of megabytes, and a load's headset frames go between the pieces
+		// block reads so CL_LoadingPump can run between pieces of a large inflate
 		remaining = len;
 		while ( remaining > 0 ) {
 			block = remaining < FS_ZIP_READ_BLOCK ? remaining : FS_ZIP_READ_BLOCK;

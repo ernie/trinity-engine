@@ -7,9 +7,8 @@ static ID_INLINE int VK_HudCoverage( int is2D, unsigned first, unsigned current 
 	return (current & GLS_BLEND_BITS) ? 2 : 1;
 }
 
-/* RGB blended over a transparent target is premultiplied. Accumulate coverage
- * independently: source-over must not square the source alpha. Additive light
- * and opaque-material detail affect color without adding coverage. */
+/* RGB over a transparent target is premultiplied, so coverage accumulates apart from it: source-over must not
+ * square the source alpha, and additive light adds color without coverage. */
 static ID_INLINE void VK_HudAlphaBlend( unsigned stateBits, int coverage,
 	VkPipelineColorBlendAttachmentState *blend ) {
 	if ( coverage == 2 || (stateBits & GLS_DSTBLEND_BITS) == GLS_DSTBLEND_ONE ) {

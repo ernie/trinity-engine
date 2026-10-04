@@ -139,17 +139,14 @@ typedef struct {
 	qboolean (*XRSetActive)( qboolean active );
 	int (*XRBeginFrame)( refXRFrame_t *frame );
 	int (*XREndFrame)( void );
-	// a tracked loading frame: XRLoadingFrameDue says one can go out now (the mode allows it and a display period has
-	// passed since the last frame); inside the XR frame then begun, XRRedrawEnvironment draws the virtual screen's
-	// surroundings for the current head pose around the screen as last captured, and submits
+	// loading frame: Due says one may go out; RedrawEnvironment redraws the last captured screen for the current pose and submits
 	qboolean (*XRLoadingFrameDue)( void );
 	qboolean (*XRRedrawEnvironment)( void );
 	int (*XRStatus)( void ); // 0 absent, 1 initialized, 2 active, -1 lost
 	const char *(*XRLastError)( void );
 	qboolean (*XRHaptic)( int hand, float amplitude, int durationMs );
 	void (*XRSetVirtualScreen)( qboolean enabled, qboolean menuYawLocked, refXRFrame_t *frame );
-	// this frame's menu pointer for a hand: the ray in tracking space, and where on the virtual screen (0..1 across
-	// and down) its cursor's pool of light falls, NULL for none; a NULL origin hides both; blue draws it blue, not red
+	// a hand's menu pointer: ray in tracking space and cursor (0..1) on the screen; NULL origin hides it
 	void (*XRSetPointer)( int hand, const float *origin, const float *end, const float *cursor, qboolean blue );
 	void (*XRSetZoom)( qboolean zoomed, float *level );
 	void (*SceneComplete)( void );
@@ -280,8 +277,7 @@ typedef struct {
 	// which pak supplies a file, so model detail levels come from the full-detail model's own pak
 	qboolean	(*FS_FileIsInPAK)( const char *name, int *pCheckSum, char *pakName );
 
-	// called between the steps of a load so the headset keeps getting frames; redraw says the caller sits where a
-	// redrawn loading screen may register shaders (no shader mid-parse), otherwise only a tracked frame may go out
+	// between load steps, so the headset keeps getting frames; see CL_LoadingPump
 	void	(*LoadingPump)( qboolean redraw );
 
 } refimport_t;

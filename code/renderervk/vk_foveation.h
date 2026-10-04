@@ -27,10 +27,7 @@ typedef struct {
 	VkPhysicalDeviceFragmentDensityMapOffsetFeaturesQCOM offsetFeature;
 	VkPhysicalDeviceTilePropertiesFeaturesQCOM tileFeature;
 } vkFovCaps_t;
-/* Before VkDevice creation, runtime-selected physical device only. Unsupported
- * hardware returns SUCCESS with supported=0. Full shading rate wins, otherwise a
- * non-subsampled density map. Caller appends extensions and chains
- * VK_FovFeatures into device creation only when supported. */
+/* Before VkDevice creation; unsupported hardware returns VK_SUCCESS with supported = 0. */
 VkResult VK_FovQuery( vkFovCaps_t *, VkInstance, VkPhysicalDevice, PFN_vkGetInstanceProcAddr,
 					  uint32_t apiVersion );
 /* The selected backend's feature structs, chained ahead of next. */
@@ -66,9 +63,7 @@ typedef struct {
 	/* Density maps: the next map is written to scratch; current is what the image holds. */
 	uint8_t *scratch, *current;
 } vkFovResources_t;
-/* No global Vulkan dispatch or engine allocations. Caller must enable queried
- * feature/extensions before creation. Extents are per-eye; the image always has
- * two layers. Failure fully rolls back resources. */
+/* Extents are per eye; the image always has two layers. Failure fully rolls back. */
 VkResult VK_FovCreate( vkFovResources_t *, VkDevice, PFN_vkGetDeviceProcAddr,
 					   const VkPhysicalDeviceMemoryProperties *, const vkFovCaps_t *, uint32_t eyeWidth,
 					   uint32_t eyeHeight, uint32_t slots, VkImageCreateFlags flags );
@@ -77,21 +72,15 @@ void VK_FovCopyDensity( vkFovResources_t *, VkCommandBuffer, uint32_t slot );
 /* Appends the density map as the pass's last attachment; attachments must have room for it. */
 void VK_FovDensityAttachment( VkRenderPassCreateInfo *, VkAttachmentDescription *attachments,
 							  VkRenderPassFragmentDensityMapCreateInfoEXT * );
-/* After the slot fence, before any scene pass. An identical effective map is
- * reused across frames; repeated serials never rewrite in-flight staging.
- * Use one monotonically increasing serial across map loads. */
+/* After the slot fence, before any scene pass; one monotonically increasing serial across map loads. */
 VkResult VK_FovUpload( vkFovResources_t *, VkCommandBuffer, uint32_t slot, uint64_t serial,
 					   const vkFovMap_t * );
 /* A recorded upload is not durable if its command buffer is discarded. */
 void VK_FovDiscardUpload( vkFovResources_t * );
-/* Build the extra LOAD/STORE attachment, reference and subpass chain.
- * Caller must keep all three structs alive through vkCreateRenderPass2. */
+/* The caller keeps the attachment, reference and subpass chain alive through vkCreateRenderPass2. */
 void VK_FovAttachment( const vkFovResources_t *, uint32_t index, VkAttachmentDescription2 *,
 					   VkAttachmentReference2 *, VkFragmentShadingRateAttachmentInfoKHR * );
-/* Bounded one-subpass bridge from VkRenderPassCreateInfo for the scene and
- * post-scene passes. Up to five original attachments/color outputs, three deps;
- * preserves multiview masks, correlations and dependency offsets;
- * rejects unknown pNext/input attachments instead of dropping semantics. */
+/* One-subpass bridge: up to five attachments, three deps; unknown pNext or input attachments are rejected, not dropped. */
 VkResult VK_FovCreateRenderPass( const vkFovResources_t *, const VkRenderPassCreateInfo *,
 								 PFN_vkCreateRenderPass2, VkRenderPass * );
 /* GPU idle; destroy framebuffer references to view before this call. */

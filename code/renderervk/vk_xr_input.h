@@ -65,9 +65,8 @@ XrResult VK_XRInput_Attach( vkXRInput_t *ctx, XrSession session );
 void VK_XRInput_UpdateProfiles( vkXRInput_t *ctx );
 const char *VK_XRInput_ProfileName( const vkXRInput_t *ctx, int hand );
 float VK_XRInput_PitchCorrection( const vkXRInput_t *ctx, int hand );
-/* Every output starts neutral. focused must mean active VR AND XR FOCUSED.
- * baseSpace must match rendered views; time is the predicted display time.
- * Inputs/poses remain OpenXR coordinates; engine owns gameplay transforms. */
+/* focused means active VR and XR FOCUSED; poses stay in OpenXR coordinates and baseSpace must match the rendered
+ * views at the predicted display time. */
 XrResult VK_XRInput_Sample( vkXRInput_t *ctx, XrSpace baseSpace, XrTime time, int focused,
 							clXRInputSample_t *sample );
 void VK_XRInput_Reset( vkXRInput_t *ctx );

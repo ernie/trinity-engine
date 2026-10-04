@@ -3103,12 +3103,10 @@ static shader_t *FinishShader( void ) {
 	colorBlend = qfalse;
 	depthMask = qfalse;
 	fogCollapse = qfalse;
-	/* Normalize before fog/sort and pipeline derivation: captured HUD RGB is
-	 * premultiplied, so fog must attenuate both RGB and coverage together. */
+	/* captured HUD RGB is premultiplied, so fog must attenuate color and coverage together */
 	if ( !Q_stricmp( shader.name, "sprites/vr/hud" ) ) {
 		stages[0].stateBits = VK_HudCompositeBlend( stages[0].stateBits );
-		/* Draw after world alpha/additive effects. Assign before insertion into
-		 * sortedShaders so the draw-surface key uses the HUD's final order. */
+		/* after world alpha effects; set before sortedShaders insertion so the sort key sees it */
 		shader.sort = SS_BLEND2;
 	}
 

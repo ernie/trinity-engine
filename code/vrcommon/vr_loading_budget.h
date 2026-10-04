@@ -1,5 +1,4 @@
-/* A tracked loading frame that blocked on a busy GPU holds the next one off for its own cost, measured from its
- * return, so the loader keeps at least half the wall clock; cheap frames stay display-paced. */
+/* A loading frame that blocked on the GPU holds the next off for its own cost, so the loader keeps half the wall clock. */
 #ifndef VR_LOADING_BUDGET_H
 #define VR_LOADING_BUDGET_H
 

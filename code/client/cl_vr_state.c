@@ -236,7 +236,7 @@ static vrAction_t VRState_ReduceEvent( vrMachine_t *m, const vrEvent_t *ev ) {
 		case VREV_ERROR:
 			return VRState_OnError( m, ev );
 		case VREV_DISCONNECT_ERROR:
-			/* A disconnect moves a switch rebuild or transition to the next safe point; a pending error recovery stays to be counted. */
+			/* A disconnect defers a switch rebuild or transition to the next safe point; a pending error recovery stays. */
 			if ( m->pending == VRPENDING_AT_HUNK_USERS ||
 				(m->state == VRSTATE_TRANSITION && m->pending != VRPENDING_AFTER_ERROR) ) {
 				m->pending = VRPENDING_AT_SAFE_POINT;

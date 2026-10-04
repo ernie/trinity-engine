@@ -13,8 +13,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-/* Subtraction is modulo the selected queue's valid timestamp width. A
- * measured frame must be shorter than one counter wrap period. */
+/* Modulo the queue's timestamp width, so a measured frame must be shorter than one counter wrap. */
 static uint64_t VK_GPUTimeDelta( uint64_t start, uint64_t end, unsigned bits ) {
 	uint64_t mask = bits == 64 ? UINT64_MAX : (((uint64_t)1 << bits) - 1);
 	return (end - start) & mask;
@@ -57,7 +56,7 @@ static PFN_vkGetQueryPoolResults qvkGetQueryPoolResults;
 static PFN_vkCmdResetQueryPool qvkCmdResetQueryPool;
 static PFN_vkCmdWriteTimestamp qvkCmdWriteTimestamp;
 static VkQueryPool gpuTimePool;
-static float gpuTimeSamples[4096];
+static float gpuTimeSamples[1024];
 static int gpuTimeCount, gpuTimeWindow;
 static unsigned gpuTimeGeneration;
 #define VK_GPU_TIME_QUERIES 10
@@ -66,7 +65,7 @@ static const struct { unsigned query; const char *name; } gpuSegments[] = {
 	{ 6, "scene" }, { 8, "bloom blur" }, { 2, "post" },
 	{ 3, "mirror" }, { 9, "eye output" }, { 1, "end" },
 };
-static float gpuSegmentSamples[ARRAY_LEN( gpuSegments )][4096];
+static float gpuSegmentSamples[ARRAY_LEN( gpuSegments )][1024];
 static int gpuSegmentCount[ARRAY_LEN( gpuSegments )];
 static void vk_gpu_time_stamp( VkCommandBuffer command, unsigned query );
 
@@ -476,6 +475,7 @@ static void vk_foveation_create( void ) {
 	VkPhysicalDeviceMemoryProperties memory;
 	VkResult result;
 	r_foveationDebugCvar = ri.Cvar_Get( "r_foveationDebug", "0", 0 );
+	ri.Cvar_SetDescription( r_foveationDebugCvar, "Tints the eye image by the fragment size foveation gave each region, over the bins and the gaze." );
 	if ( !vk_foveation_caps.supported || !vk.multiview ) {
 		return;
 	}
@@ -597,7 +597,7 @@ static qboolean vk_fdm_scope( float *radiusX, float *radiusY ) {
 }
 
 /* With offsets the map is fixed and slid onto the gaze; without them it is redrawn around the gaze each frame.
- * A host-reading driver takes a map that rides the frame a frame late, which only the first map cannot afford. */
+ * A map that rides the frame shows a frame late on a host-reading driver; an image holding no map is filled out of band. */
 static void vk_fdm_update( void ) {
 	vkFovMap_t map;
 	const vkFdmGeometry_t *g = &vk_fdm.geometry;
@@ -2728,10 +2728,8 @@ static qboolean vk_create_device( VkPhysicalDevice physical_device, int device_i
 				vk_foveation_caps.backend = VK_FOV_BACKEND_NONE;
 				vk_foveation_caps.extensionCount = 0;
 			}
-			ri.Printf( PRINT_ALL, "Vulkan foveation: %s (API %u.%u, %u device extensions, result %d)\n",
-					   vk_foveation_caps.reason ? vk_foveation_caps.reason : "capability query unavailable",
-					   VK_VERSION_MAJOR( vk_instance_api ), VK_VERSION_MINOR( vk_instance_api ),
-					   vk_foveation_caps.availableExtensions, (int)result );
+			ri.Printf( PRINT_ALL, "Vulkan foveation: %s\n",
+					   vk_foveation_caps.reason ? vk_foveation_caps.reason : "capability query unavailable" );
 			if ( vk_foveation_caps.fdmReason )
 				ri.Printf( PRINT_ALL, "Vulkan foveation: no density map: %s\n", vk_foveation_caps.fdmReason );
 			if ( vk_foveation_caps.backend == VK_FOV_BACKEND_FDM ) {
@@ -4481,9 +4479,7 @@ static void vk_alloc_persistent_pipelines( void )
 
 void vk_create_blur_pipeline( uint32_t index, uint32_t width, uint32_t height, qboolean horizontal_pass );
 
-/* Threshold native scene pixels in VR.
- * The desktop capture can be much smaller and has a different aspect ratio;
- * reducing the eye image to it before extraction aliases bright details. */
+/* VR thresholds the eye image at native size; the smaller desktop capture aliases bright detail. */
 static uint32_t vk_bloom_width( void ) {
 	return vk.multiview ? vk.sceneWidth : gls.captureWidth;
 }
@@ -4839,9 +4835,6 @@ static void vk_create_attachments( void )
 		if ( r_bloom->integer ) {
 			uint32_t width = vk_bloom_width();
 			uint32_t height = vk_bloom_height();
-
-			ri.Printf( PRINT_ALL, "Vulkan bloom extent: %ux%u (%s)\n", width, height,
-					   vk.multiview ? "VR scene" : "desktop capture" );
 
 			for ( i = 1; i < ARRAY_LEN( vk.bloom_image ); i += 2 ) {
 				width /= 2;
@@ -5841,9 +5834,7 @@ static void vk_screen_target_init( void ) {
 image_t *vk_screen_image( void ) {
 	return vk_screen.image.descriptor ? &vk_screen.image : NULL;
 }
-/* The composition framebuffers borrow the direct-mode target views.
- * Retire them before swapchain recreation destroys those views. Keep the mono
- * capture image and descriptor alive across desktop resizes. */
+/* Framebuffers on the direct-mode target views go before the swapchain does; the capture image survives resizes. */
 static void vk_screen_composition_shutdown( void ) {
 	uint32_t i;
 	for ( i = 0; i < vk.xr_direct.count; i++ ) {
@@ -6079,8 +6070,7 @@ void vk_hud_end( void ) {
 	vk_hud_invalidate_caches();
 }
 
-/* Shader stages must retain this stable image address across a flat map load.
- * Its black fallback descriptor needs no HUD attachment allocation. */
+/* Shader stages keep this address across a flat map load; its black fallback needs no HUD attachment. */
 image_t *vk_hud_image( void ) {
 	return vk_hud.image.descriptor ? &vk_hud.image : NULL;
 }
@@ -7971,10 +7961,8 @@ void vk_create_blur_pipeline( uint32_t index, uint32_t width, uint32_t height, q
 		fsmodule = vk.multiview ? vk.modules.blur_fs_mv : vk.modules.blur_fs;
 	set_shader_stage_desc( shader_stages + 1, VK_SHADER_STAGE_FRAGMENT_BIT, fsmodule, "main" );
 
-	// blur.frag offsets the coordinate it samples the source with. Each horizontal pass reads the previous
-	// octave at twice its own width, so one output texel out lands every tap between two source texels:
-	// three 2x2 boxes, a [5 5 6 6 5 5] kernel that averages the most before the first pass thresholds.
-	// The verticals read their own resolution, where 1.2 texels emulates the 5-tap gaussian.
+	// Horizontal passes read the previous octave at twice their width, one texel out, so each tap straddles two source
+	// texels (a [5 5 6 6 5 5] kernel); verticals read their own resolution, where 1.2 texels emulates the 5-tap gaussian.
 	spec.offset[0] = 1.0 / (float) width; // x offset
 	spec.offset[1] = 1.2 / (float) height; // y offset
 	spec.offset[2] = 1.0; // intensity?
@@ -8135,9 +8123,8 @@ static qboolean vk_blend_reads_destination( VkBlendFactor factor ) {
 		   factor == VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
 }
 
-/* Post-scene draws blend into the scene image as they always did; their alpha instead tracks what they let through
- * (whatever multiplies the destination), so the composite can add bloom underneath them. Exact for scalar
- * multipliers, through the source's luminance for per-channel ones. Returns the shader's alpha mode. */
+/* Post-scene alpha tracks what the draw lets through (whatever multiplies the destination) so the composite can add
+ * bloom under it; exact for scalar factors, via source luminance for per-channel ones. Returns the shader's alpha mode. */
 static int vk_transmittance_blend( VkPipelineColorBlendAttachmentState *t ) {
 	const VkBlendFactor src = t->srcColorBlendFactor, dst = t->dstColorBlendFactor;
 	const qboolean srcAlphaColor = src == VK_BLEND_FACTOR_SRC_ALPHA || src == VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA ||
@@ -8177,7 +8164,6 @@ static int vk_transmittance_blend( VkPipelineColorBlendAttachmentState *t ) {
 		case VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR:
 			if ( srcAlphaColor ) {
 				// the color blend needs the real alpha, so the scene shows through unscaled
-				ri.Printf( PRINT_DEVELOPER, "post-scene blend %i/%i scales the scene per channel; bloom keeps it\n", src, dst );
 				t->dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
 			} else {
 				t->dstAlphaBlendFactor = dst == VK_BLEND_FACTOR_SRC_COLOR ? VK_BLEND_FACTOR_SRC_ALPHA
@@ -8195,7 +8181,6 @@ static int vk_transmittance_blend( VkPipelineColorBlendAttachmentState *t ) {
 		t->dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
 		mode = 0;
 	} else if ( vk_blend_reads_destination( src ) || vk_blend_reads_destination( dst ) ) {
-		ri.Printf( PRINT_DEVELOPER, "post-scene blend %i/%i reads the scene; bloom keeps it\n", src, dst );
 		t->dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
 		mode = 0;
 	}
@@ -9217,9 +9202,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		// composite; 2D drawn in the scene pass (bloom off, frames without a world) lowers it the same way
 		frag_spec_data[13].i = 1 + vk_transmittance_blend( &attachment_blend_state );
 	} else if ( renderPassIndex == RENDER_PASS_MAIN || renderPassIndex == RENDER_PASS_MONO_MAIN ) {
-		// the scene image's alpha is 1 after the scene: full transmittance until post-scene draws lower it.
-		// Stages feeding a later destination-alpha blend keep writing it, and their shader's last stage
-		// writes 1 back, through the shader when its own color blend doesn't read the alpha
+		// scene alpha is full transmittance until post-scene draws lower it; stages feeding a later destination-alpha
+		// blend keep writing it and their shader's last stage writes 1 back
 		switch ( def->scene_alpha ) {
 		case 1:
 			break;
@@ -9491,8 +9475,7 @@ static void get_viewport(VkViewport *viewport, Vk_Depth_Range depth_range) {
 }
 
 static void VK_ClampScissor( VkRect2D *r, int width, int height ) {
-	/* The HUD target has its own dimensions. Clamping against the desktop can
-	 * underflow an unsigned extent when an icon lies below its bottom edge. */
+	/* Clamp to the HUD target's own size; the desktop's can underflow an extent below its bottom edge. */
 	if ( r->offset.x < 0 ) {
 		r->offset.x = 0;
 	}
@@ -9696,8 +9679,7 @@ void vk_update_mvp( const float *m ) {
 		get_mvp_transform( push );
 	}
 	if ( vk.multiview ) {
-		/* Mono source passes retain the array descriptor ABI but use identity
-		 * view matrices: their ordinary camera transform is already in push. */
+		/* Mono passes keep the array descriptor layout with identity view matrices; the camera is already in push. */
 		Com_Memset( eyes, 0, sizeof( eyes ) );
 		for ( eye = 0; eye < 2; eye++ ) {
 			eyes[eye][0] = eyes[eye][5] = eyes[eye][10] = eyes[eye][15] = 1;
@@ -10169,8 +10151,7 @@ int vk_foveation_block_at( int eye, float ndcX, float ndcY ) {
 	return VK_FdmBlockAtNdc( vk_foveation.current, g, eye, ndcX, ndcY, vk_fdm.offset[eye] );
 }
 
-/* A fullscreen tint samples gl_ShadingRateEXT in the scene pass, where the
- * attachment is bound. It is created lazily and shares the target lifetime. */
+/* Samples gl_ShadingRateEXT in the scene pass, where the attachment is bound; created lazily with the target. */
 void vk_draw_foveation_debug( void ) {
 	VkViewport viewport;
 	VkRect2D scissor;
@@ -10379,8 +10360,7 @@ static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBu
 	qvkCmdBeginRenderPass( vk.cmd->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE );
 	// a frame abandoned inside the scene pass must not end this pass with density map offsets
 	vk_fdm.passOpen = qfalse;
-	/* Postprocess passes bind static-rate pipelines; do not reuse draw state
-	 * from an earlier scene pass when returning to dynamic scene pipelines. */
+	/* Postprocess passes bind static-rate pipelines, so scene draw state must not carry over. */
 	vk_foveation_invalidate_rate();
 
 	vk.cmd->last_pipeline = VK_NULL_HANDLE;
@@ -10561,9 +10541,7 @@ static void vk_gpu_segments_print( int window ) {
 	ri.Printf( PRINT_ALL, "%s", line );
 }
 
-/* Query pairs: full main commands, desktop mirror, separately submitted HUD; 6..9 split main by pass.
- * All stamps are outside render passes (multiview replicates in-pass queries).
- * Results are consumed only after the slot's existing completion fence. */
+/* Stamps sit outside render passes (multiview replicates in-pass queries) and are read after the slot's fence. */
 static void vk_gpu_time_collect( qboolean completed ) {
 	uint64_t queries[12], marks[8];
 	VkResult res;
@@ -10786,8 +10764,7 @@ static void vk_resize_geometry_buffer( void )
 	/* None of this recording reaches the GPU, including its rate-map upload. */
 	VK_FovDiscardUpload( &vk_foveation );
 
-	/* Discard the auxiliary HUD recording with the overflowing main frame.
-	 * Otherwise its next BeginCommandBuffer targets a buffer mid-recording. */
+	/* Drop the HUD recording with the overflowing frame, or its next Begin targets a buffer mid-recording. */
 	vk_hud_end();
 	if ( vk.cmd->hud_begun ) {
 		VK_CHECK( qvkEndCommandBuffer( vk.cmd->hud_command_buffer ) );
@@ -10827,8 +10804,7 @@ static float vk_hdr_paper_white( void )
 	return (float)( r_hdrPeak->value * pow( 0.264964, sysgamma ) );
 }
 
-/* Multiview render-pass boundaries invalidate push constants. Initialize all
- * HDR values at each output draw, including fields inactive in SDR. */
+/* Multiview pass boundaries invalidate push constants, so every output draw pushes all HDR fields. */
 static void vk_post_process_push( VkPipelineLayout layout ) {
 	struct {
 		int32_t hdrCalibrate;
@@ -10908,9 +10884,8 @@ static void vk_screen_mip_barrier( uint32_t base, uint32_t count, VkImageLayout 
 						   &barrier );
 }
 
-/* Crops the gamma-corrected mono output into the virtual-screen texture, filtered down to the eye's density, and
- * rebuilds its mips. The first capture after the views are located resizes the texture to that density: nothing
- * submitted still reads it once the queue has drained, and this frame has not bound it yet. */
+/* Crops the gamma-corrected mono output into the virtual-screen texture at the eye's density and rebuilds its mips;
+ * the first capture after the views are located resizes the texture. */
 static void vk_capture_screen_source( VkImage srcImage, VkFormatProperties properties ) {
 	VkImageBlit copy;
 	int i, crop[4];
@@ -11101,10 +11076,7 @@ static const byte vk_xr_pool_rgba[2][VK_XR_POOL_RINGS + 1][4] = {
 	{{255, 190, 170, 255}, {255, 64, 52, 230}, {255, 48, 40, 110}, {255, 48, 40, 0}},
 	{{170, 200, 255, 255}, {90, 140, 255, 230}, {77, 128, 255, 110}, {77, 128, 255, 0}}};
 
-/* Each hand's pointer: a strip along its ray, turned toward the head, widening with distance to look even and
- * fading from the hand toward where it lands, and, while the ray is on the screen, its cursor as a pool of light
- * there, hot at the point a click lands and fading out. Both test against the controllers' depth, so they draw
- * after them. */
+/* Ray strip facing the head plus, on the screen, the cursor's pool; both depth-test against the controllers, so they draw after them. */
 static void vk_draw_screen_pointers( const vrScreenGeometry_t *screen, const vec3_t eye ) {
 	/* each ring's radius as a share of the screen's height */
 	static const float radius[VK_XR_POOL_RINGS] = {0.0035f, 0.008f, 0.017f};
@@ -11423,8 +11395,7 @@ static void vk_render_virtual_screen( vkMonoTargets_t *source ) {
 }
 
 /* MIRROR */
-/* Pure layout policy: each draw samples one complete array layer. The
- * viewport performs fit/fill and the scissor bounds its destination slot. */
+/* Each draw samples one array layer; the viewport fits or fills and the scissor bounds the slot. */
 typedef struct {
 	float viewport[4];
 	int scissor[4];
@@ -11577,8 +11548,7 @@ void VK_DesktopTrackingStatus( qboolean visible, qhandle_t font, qhandle_t icon 
 	desktopTrackingFont = font;
 	desktopTrackingIcon = icon;
 }
-/* Only the desktop presentation attachment is bound here. Never the eye or
- * virtual-screen capture targets; headset output rebinds its own pipeline. */
+/* Binds only the desktop attachment; headset output rebinds its own pipeline. */
 static void vk_draw_tracking_status( void ) {
 	renderPass_t savedPass = vk.renderPassIndex;
 	float outputScale[2] = {1.0f, (float)(1 << tr.overbrightBits)};
@@ -11966,9 +11936,7 @@ void vk_end_frame( void )
 }
 
 
-/* A loading frame with the screen as last captured: the composition redraws the floor, the screen, the controllers
- * and the pointers for the head pose of the XR frame the client has begun, and the frame submits. Nothing here
- * reaches the shader or image registries, so it may run from inside a load. */
+/* Nothing here reaches the shader or image registries, so it may run from inside a load. */
 qboolean RE_XRLoadingFrameDue( void ) {
 	return tr.registered && !vk.frame_count && VK_XR_ScreenVisible() && vk_screen.image.handle && VK_XR_LoadingFrameDue();
 }

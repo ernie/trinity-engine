@@ -1206,7 +1206,7 @@ void CL_PacketEvent( const netadr_t *from, msg_t *msg );
 void CL_ConsolePrint( const char *text );
 
 qboolean CL_MapLoading( void );
-// between a load's steps; redraw says a redrawn loading screen may register shaders from the caller
+// redraw: the caller tolerates shader registration from a redrawn loading screen
 void CL_LoadingPump( qboolean redraw );
 // do a screen update before starting to load a map
 // when the server is going to load a new map, the entire hunk

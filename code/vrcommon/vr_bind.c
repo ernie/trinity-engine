@@ -396,8 +396,7 @@ int VR_CaptureKey( vrHolds_t *h, const unsigned char now[VRK_COUNT] ) {
 	return key;
 }
 
-/* Console-pad style, one letter per word with the hand first (LT, RGC, LTR); directions are the character sheet's
- * arrows the on-screen keyboard draws (135 up, 134 down, 136 left, 141 right); one-hand buttons keep their label. */
+/* Console-pad style, one letter per word with the hand first (LT, RGC, LTR); directions use the character sheet's arrows. */
 const char *VR_KeyDisplayName( vrKey_t key, int profile, int rightHanded, int switchSticks, char *buf, int size ) {
 	static const char *roleLabels[] = {"T", "G", "GC", "TR", "B", "TP"};
 	static const char *dirLabels[] = {"\x87", "\x86", "\x88", "\x8d"};

@@ -186,9 +186,7 @@ static int FindNearestDisplay( int *x, int *y, int w, int h )
 }
 
 
-/* Publish desktop sizes for UI modules, independently of the XR eye extent.
- * Refresh on every window creation so vid_restart cannot carry over another
- * display's modes. SDL lists refresh rates separately; the UI needs sizes. */
+/* r_availableModes: desktop sizes for the UI, refreshed per window so another display's list never carries over. */
 static void GLimp_DetectAvailableModes( void )
 {
 	char modes[ MAX_STRING_CHARS ] = { 0 };
@@ -494,9 +492,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 
 		if ( mirror && vr_mirrorEnabled && !vr_mirrorEnabled->integer )
 		{
-			// A disabled mirror keeps no window on the desktop. HIDDEN marks the
-			// window minimized, so the renderer skips the swapchain while the
-			// headset keeps drawing.
+			// a hidden window counts as minimized, so the renderer skips the swapchain while the headset draws
 			SDL_HideWindow( SDL_window );
 		}
 

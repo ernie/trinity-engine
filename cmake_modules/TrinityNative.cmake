@@ -61,8 +61,7 @@ set(TRINITY_UI_DIR    "${TRINITY_CODE_DIR}/ui")
 # Parse srcs.mk: three variables (QA_SRC, CG_SRC, UI_SRC) holding flat
 # basename lists with backslash continuations plus $(DIR)/x_syscalls.asm
 # entries, where CG_SRC and UI_SRC each appear in both arms of a single
-# ifeq ($(CONFIG),missionpack)/else/endif conditional. Exactly that shape;
-# anything else is a configure error.
+# ifeq ($(CONFIG),missionpack)/else/endif conditional.
 function(trinity_parse_manifest MANIFEST)
     file(READ "${MANIFEST}" CONTENT)
     string(REPLACE "\r\n" "\n" CONTENT "${CONTENT}")

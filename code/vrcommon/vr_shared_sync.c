@@ -1,9 +1,3 @@
-// Engine <-> module VR state sync (see vr_shared.h for the ABI).
-// Sync-in copies every block within the module's registered ABI size, so each
-// module sees fresh cross-module state without overrunning older mirrors.
-// Sync-out copies only blocks the module type is a declared writer of, so a
-// stale mirror cannot clobber another writer.
-
 #include <stddef.h>
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
@@ -11,9 +5,7 @@
 #include "vr_shared.h"
 #include "vr_state.h"
 
-// ABI v1.0 is frozen: these fail to compile if vr_shared_t's size or block
-// boundaries drift. Moving or removing an existing field is a MAJOR bump
-// (update the pins); a new tail field is a MINOR bump.
+// A layout drift fails to compile here; moving a field is a MAJOR bump, a new tail field a MINOR one.
 #define VR_ABI_ASSERT( name, expr ) typedef char name[ (expr) ? 1 : -1 ]
 VR_ABI_ASSERT( vr_abi_v1_size, sizeof( vr_shared_t ) == 344 );
 VR_ABI_ASSERT( vr_abi_v1_cg_first, offsetof( vr_shared_t, VR_SHARED_CG_FIRST ) == 236 );
@@ -46,10 +38,7 @@ qboolean VR_IsActiveMode( void ) {
 }
 
 void VR_SharedSyncIn( vr_shared_t *dst, int structSize ) {
-	// Fill a full scratch, then copy only the bytes the module's struct has, so an
-	// older (smaller) module's mirror is never overwritten. structSize is clamped
-	// to [0,sizeof] and captured at registration, never re-read from module memory:
-	// a hostile QVM can shrink what we write but never push it past its own block.
+	// structSize was clamped and captured at registration: a hostile QVM can shrink what we write but never push it past its block
 	vr_shared_t scratch;
 	vr_shared_t *s = &scratch;
 	// eng block
@@ -122,8 +111,7 @@ void VR_SharedSyncIn( vr_shared_t *dst, int structSize ) {
 	s->local_server = vr.local_server;
 	s->single_player = vr.single_player;
 
-	// copy only the module-declared bytes; the module owns the header
-	// (structSize/apiVersion at offset 0), so start at the first engine field.
+	// the module owns the header (structSize, apiVersion), so copy from the first engine field
 	if ( structSize > (int)sizeof( scratch ) )
 		structSize = (int)sizeof( scratch );
 	if ( structSize > (int)offsetof( vr_shared_t, fov_x ) )
@@ -164,9 +152,6 @@ static void VR_SyncOutCFG( const vr_shared_t *s ) {
 }
 
 void VR_SharedSyncOut( const vr_shared_t *src, int writer, int structSize ) {
-	// Read only the module-declared bytes (clamped/captured at registration),
-	// zero beyond; a hostile or older module can shrink what we read but never
-	// push us past its block.
 	vr_shared_t scratch;
 	const vr_shared_t *s = &scratch;
 	if ( structSize > (int)sizeof( scratch ) )
@@ -192,10 +177,7 @@ void VR_SharedSyncOut( const vr_shared_t *src, int writer, int structSize ) {
 	}
 }
 
-// A uiShared writer went away without a clean shutdown (error drop, forced
-// unload, restart): release the interaction latches it may hold, or the renderer
-// stays locked out of menuYaw re-anchoring and input stays routed to the cursor
-// branches. menuYaw needs no reset; the renderer re-anchors it once unlocked.
+// A dropped UI or cgame writer leaves latches set; clear them or the router and re-anchor stay locked.
 void VR_SharedModuleUnloaded( int writer ) {
 	if ( writer == VR_WRITER_UI ) vr.menuCursorActive = qfalse;
 	if ( writer == VR_WRITER_CGAME || writer == VR_WRITER_UI ) {

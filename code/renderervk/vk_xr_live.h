@@ -17,10 +17,8 @@ typedef struct {
 	unsigned enabledCount;
 	char runtimeName[XR_MAX_RUNTIME_NAME_SIZE];
 } vkXRLive_t;
-/* Explicit VR requests only. Instance asks for OpenXR 1.1, then 1.0, and enables Vulkan2 plus optional extensions it finds.
- * The controller model extensions are among them; a runtime that lists them but refuses
- * the instance gets a second attempt without them.
- * No session/graphics creation. Close after every session/action owner is gone. */
+/* OpenXR 1.1 then 1.0, Vulkan2 plus the optional extensions found; a runtime that lists the controller model
+ * extensions but refuses the instance gets a second attempt without them. No session or graphics creation. */
 XrResult VK_XRLive_Open( vkXRLive_t *ctx );
 void VK_XRLive_Close( vkXRLive_t *ctx );
 #endif
