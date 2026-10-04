@@ -150,7 +150,7 @@ void VR_InitCvars( void )
 	vr_foveationCaps = Cvar_Get( "vr_foveationCaps", "none", CVAR_ROM );
 
 	// Values are:  scale,right,up,forward,pitch,yaw,roll
-	Cvar_Get( "vr_weapon_adjustment_1", "1,-4.0,7,-10,-20,-15,0", CVAR_ARCHIVE );
+	Cvar_Get( "vr_weapon_adjustment_1", "0.8,-4.0,7.0,-10.0,8.0,-2.4,9.5", CVAR_ARCHIVE );
 	Cvar_Get( "vr_weapon_adjustment_2", "0.8,-3.0,5.5,0,0,0,0", CVAR_ARCHIVE );
 	Cvar_Get( "vr_weapon_adjustment_3", "0.8,-3.3,8,3.7,0,0,0", CVAR_ARCHIVE ); // shotgun
 	Cvar_Get( "vr_weapon_adjustment_4", "0.75,-5.4,6.5,-4,0,0,0", CVAR_ARCHIVE );
