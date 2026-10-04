@@ -24,9 +24,9 @@ void main() {
 	vec4 col1 = mix(background, gridGrey, lineAlpha);
 	vec4 col2 = mix(background, dotWhite, dotAlpha);
 
-	float distToCamera = length(vec3(P.x, 0.0, P.y));
+	float distToCenter = length(vec3(P.x, 0.0, P.y));
 
 	out_color = max(col1, col2);
-	out_color.gb *= 1.0 - (distToCamera / 5.0);
-	out_color.a *= 1.0 - (distToCamera / 15.0);
+	out_color.gb *= max(0.0, 1.0 - (distToCenter / 5.0));
+	out_color.a *= 1.0 - (distToCenter / 15.0);
 }

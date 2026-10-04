@@ -373,14 +373,8 @@ static cvar_t *r_foveationDebugCvar, *vr_mirrorEnabled, *vr_desktopContentType, 
 static PFN_vkCmdEndRenderPass2 vk_fdm_end_pass;
 static PFN_vkGetFramebufferTilePropertiesQCOM vk_fdm_tile_properties;
 // what a map is drawn from, less the HUD carve
-typedef struct {
-	int strength, eyeTracked;
-	qboolean scope;
-	float radius[2], display[2][4];
-} vkFdmDrawn_t;
 static struct {
 	vkFdmGeometry_t geometry;
-	vkFdmDrawn_t drawn; // the uploaded map's
 	int32_t ref[2][2], offset[2][2];
 	float center[2][2];
 	int strength;
@@ -466,7 +460,6 @@ static void vk_fdm_create( void ) {
 	vk_fdm.geometry.texelWidth = vk_foveation_caps.texelWidth;
 	vk_fdm.geometry.texelHeight = vk_foveation_caps.texelHeight;
 	Com_Memset( vk_fdm.offset, 0, sizeof( vk_fdm.offset ) );
-	Com_Memset( &vk_fdm.drawn, 0, sizeof( vk_fdm.drawn ) );
 	vk_fdm.strength = 0;
 	vk_set_object_name( (uint64_t)vk_foveation.image, "engine density map", VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_EXT );
 	// the pass loads the map, so it starts at full density
@@ -589,10 +582,6 @@ static void vk_fdm_tile_size( VkFramebuffer framebuffer ) {
 			   g->tileHeight / g->texelHeight );
 }
 
-/* Offsets: the fixed map changes only with level, field of view, scope or bins, and the host reads it as
- * the pass is recorded, so those changes are uploaded and waited on out of band; a moved HUD carve goes in
- * the frame and shows a frame late. Without offsets the map is redrawn around the gaze inside the frame,
- * and a host-reading driver sees it a frame late. */
 /* The scope's opening in pixels: the mod's reticle masks outside an ellipse across the 2D area
  * (CG_DrawWeapReticle, indentX 0.16), which spans the eye's width and VK_XR_ScopeScaleY of its height. */
 #define VK_FDM_SCOPE_INDENT 0.16f
@@ -607,11 +596,12 @@ static qboolean vk_fdm_scope( float *radiusX, float *radiusY ) {
 	return qtrue;
 }
 
+/* With offsets the map is fixed and slid onto the gaze; without them it is redrawn around the gaze each frame.
+ * A host-reading driver takes a map that rides the frame a frame late, which only the first map cannot afford. */
 static void vk_fdm_update( void ) {
 	vkFovMap_t map;
 	const vkFdmGeometry_t *g = &vk_fdm.geometry;
 	const qboolean offsets = vk_fdm_offsets();
-	vkFdmDrawn_t drawn;
 	qboolean scope;
 	float radiusX = 0, radiusY = 0;
 	int e;
@@ -645,13 +635,6 @@ static void vk_fdm_update( void ) {
 	} else {
 		Com_Memset( vk_fdm.offset, 0, sizeof( vk_fdm.offset ) );
 	}
-	Com_Memset( &drawn, 0, sizeof( drawn ) );
-	drawn.strength = map.strength;
-	drawn.eyeTracked = map.eyeTracked;
-	drawn.scope = scope;
-	drawn.radius[0] = radiusX;
-	drawn.radius[1] = radiusY;
-	Com_Memcpy( drawn.display, map.display, sizeof( drawn.display ) );
 	// direct mode draws the HUD inside the foveated pass, so its quad stays at full density unless the gaze drives the map
 	for ( e = 0; e < 2; e++ ) {
 		if ( vk.xrDirect && map.strength > 0 && !map.eyeTracked && vk_fdm.hudValid[e] )
@@ -660,15 +643,13 @@ static void vk_fdm_update( void ) {
 	}
 	if ( !vk_foveation.uploaded || memcmp( vk_foveation.scratch, vk_foveation.current, vk_foveation.bytes ) ) {
 		Com_Memcpy( vk_foveation.current, vk_foveation.scratch, vk_foveation.bytes );
-		// only a moved HUD carve may land a frame late; anything else would show the old map for a frame
-		if ( offsets && ( !vk_foveation.uploaded || memcmp( &drawn, &vk_fdm.drawn, sizeof( drawn ) ) ) ) {
+		if ( offsets && !vk_foveation.uploaded ) {
 			VkCommandBuffer command = begin_command_buffer();
 			VK_FovCopyDensity( &vk_foveation, command, vk.cmd_index );
 			end_command_buffer( command, "density map" );
 		} else {
 			VK_FovCopyDensity( &vk_foveation, vk.cmd->command_buffer, vk.cmd_index );
 		}
-		vk_fdm.drawn = drawn;
 	}
 }
 
@@ -809,7 +790,6 @@ static void vk_create_mono_pipeline( const VkGraphicsPipelineCreateInfo *source,
 	if ( !pass )
 		return;
 	if ( *pipeline ) {
-		vk_wait_idle();
 		qvkDestroyPipeline( vk.device, *pipeline, NULL );
 		*pipeline = VK_NULL_HANDLE;
 	}
@@ -4514,6 +4494,7 @@ static uint32_t vk_bloom_height( void ) {
 
 void vk_update_post_process_pipelines( void )
 {
+	vk_wait_idle(); // retires every pipeline replaced below in one wait
 	if ( vk.fboActive ) {
 		if ( !vk.multiview )
 			vk_create_post_process_pipeline( VK_POST_DESKTOP_COMPOSITE, 0, 0 );
@@ -7678,7 +7659,6 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 		fsmodule = vk.modules.gamma_fs_array;
 
 	if ( *pipeline != VK_NULL_HANDLE ) {
-		vk_wait_idle();
 		qvkDestroyPipeline( vk.device, *pipeline, NULL );
 		*pipeline = VK_NULL_HANDLE;
 	}
@@ -7970,7 +7950,6 @@ void vk_create_blur_pipeline( uint32_t index, uint32_t width, uint32_t height, q
 	pipeline = &vk.blur_pipeline[ index ];
 
 	if ( *pipeline != VK_NULL_HANDLE ) {
-		vk_wait_idle();
 		qvkDestroyPipeline( vk.device, *pipeline, NULL );
 		*pipeline = VK_NULL_HANDLE;
 	}

@@ -838,7 +838,7 @@ static void R_MarkLeaves (void) {
 
 	// if r_showcluster was just turned on, remark everything 
 	if ( tr.pvsCache.valid && tr.pvsCache.world == tr.world &&
-		tr.viewCluster == cluster && tr.pvsCache.center == cluster &&
+		tr.pvsCache.center == cluster &&
 		tr.pvsCache.multiview == tr.viewParms.xrMultiview &&
 		tr.pvsCache.eye[0] == eyeCluster[0] && tr.pvsCache.eye[1] == eyeCluster[1] &&
 		tr.pvsCache.novis == r_novis->integer && !tr.refdef.areamaskModified &&
