@@ -810,8 +810,7 @@ static int Con_DrawNotifyVR(void)
 	conVRGlyph_t glyph;
 	const short *lines[NUM_CON_TIMES];
 	int lineCount, n;
-	if (vr.weapon_zoomed ||
-		(vr_showConsoleMessages && !vr_showConsoleMessages->integer) ||
+	if ((vr_showConsoleMessages && !vr_showConsoleMessages->integer) ||
 		!re.HUDBufferStart || !re.HUDBufferEnd) return 0;
 	/* Mode 0 has no floating HUD; the renderer overlays its lines as in mode 2. */
 	if (mode != 1) {
@@ -874,7 +873,8 @@ static void Con_DrawNotify( void )
 	int		currentColorIndex;
 
 	if (VR_IsActiveMode()) {
-		if (vr.weapon_zoomed) return;
+		// the scope and the weapon adjust overlay hide the full HUD; the notify lines hide with it
+		if (vr.weapon_zoomed || vr.weapon_adjust) return;
 		v = Con_DrawNotifyVR();
 		goto drawChat;
 	}
