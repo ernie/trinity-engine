@@ -523,7 +523,7 @@ static void R_InitExtensions( void )
 static void R_SetGammaSupport( void )
 {
 	// The desktop gamma ramp never reaches the headset
-	gls.deviceSupportsGamma = gls.hardwareGamma && !VK_XR_Enabled();
+	gls.deviceSupportsGamma = gls.hardwareGamma && !VK_XR_Enabled() && !VK_OSHDROn();
 	glConfig.deviceSupportsGamma = gls.deviceSupportsGamma && !r_ignorehwgamma->integer;
 }
 
@@ -606,7 +606,14 @@ static void InitOpenGL( void )
 
 		glConfig.deviceSupportsGamma = qfalse;
 
-		ri.GLimp_InitGamma( &glConfig );
+		// even the probe sets a ramp, and a ramp drops Windows out of HDR mode
+		if ( r_ignorehwgamma->integer ) {
+			ri.Printf( PRINT_ALL, "...hardware gamma ramp not used (r_ignorehwgamma)\n" );
+		} else if ( VK_OSHDROn() ) {
+			ri.Printf( PRINT_ALL, "...display is in HDR mode, leaving the hardware gamma ramp alone\n" );
+		} else {
+			ri.GLimp_InitGamma( &glConfig );
+		}
 
 		gls.hardwareGamma = glConfig.deviceSupportsGamma;
 		R_SetGammaSupport();
@@ -1825,7 +1832,8 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_ext_max_anisotropy, "Sets maximum anisotropic level for your graphics driver. Requires \\r_ext_texture_filter_anisotropic." );
 
 	//r_stencilbits = ri.Cvar_Get( "r_stencilbits", "8", CVAR_ARCHIVE_ND | CVAR_LATCH );
-	r_ignorehwgamma = ri.Cvar_Get( "r_ignorehwgamma", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	// gamma lives in the shader with r_fbo; the ramp only remains for the FBO-less path and drops Windows out of HDR mode
+	r_ignorehwgamma = ri.Cvar_Get( "r_ignorehwgamma", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ignorehwgamma, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_ignorehwgamma, "Overrides hardware gamma capabilities." );
 

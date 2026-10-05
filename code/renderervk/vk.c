@@ -2363,6 +2363,12 @@ static osHdrState_t vk_query_os_hdr_state( void )
 }
 #endif
 
+// Windows leaves HDR mode as soon as a hardware gamma ramp is set, so the display layer asks before touching one.
+qboolean VK_OSHDROn( void )
+{
+	return vk_query_os_hdr_state() == OSHDR_ON;
+}
+
 
 static qboolean vk_select_surface_format( VkPhysicalDevice physical_device, VkSurfaceKHR surface )
 {
