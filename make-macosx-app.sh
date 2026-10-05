@@ -151,7 +151,7 @@ TRINITY_SERVER_ARCHS=""
 DEDICATED_NAME="trinity.ded"
 
 ICNSDIR="code/unix"
-ICNS="quake3_flat.icns"
+ICNS="trinity.icns"
 PKGINFO="APPLTRNT"
 
 OBJROOT="build"
@@ -257,7 +257,7 @@ PLIST="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
     <key>CFBundleExecutable</key>
     <string>${EXECUTABLE_NAME}</string>
     <key>CFBundleIconFile</key>
-    <string>quake3_flat</string>
+    <string>trinity</string>
     <key>CFBundleIdentifier</key>
     <string>org.trinity.${PRODUCT_NAME}</string>
     <key>CFBundleInfoDictionaryVersion</key>

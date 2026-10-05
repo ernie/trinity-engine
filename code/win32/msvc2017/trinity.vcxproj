@@ -417,7 +417,7 @@
     <ClInclude Include="..\win_local.h" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="..\qe3.ico" />
+    <Image Include="..\trinity.ico" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\win_resource.rc" />

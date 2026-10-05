@@ -356,10 +356,10 @@ ELSEIF(UNIX)
 
 	IF(APPLE)
 		SET(EXE_TYPE MACOSX_BUNDLE)
-		list(APPEND Q3_SRCS code/unix/quake3_flat.icns)
-		set_source_files_properties(code/unix/quake3_flat.icns PROPERTIES
+		list(APPEND Q3_SRCS code/unix/trinity.icns)
+		set_source_files_properties(code/unix/trinity.icns PROPERTIES
 			MACOSX_PACKAGE_LOCATION Resources)
-		SET(MACOSX_BUNDLE_ICON_FILE quake3_flat.icns)
+		SET(MACOSX_BUNDLE_ICON_FILE trinity.icns)
 	ENDIF()
 ELSEIF(WIN32)
 	SET(EXE_TYPE WIN32)

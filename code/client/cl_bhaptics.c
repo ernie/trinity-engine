@@ -59,7 +59,7 @@ int CL_BHaptics_Open( clBHaptics_t *ctx ) {
 		memset( ctx, 0, sizeof( *ctx ) );
 		return 0;
 	}
-	init( "q3vr", "Quake 3 VR" );
+	init( "trinity", "Trinity" );
 	ctx->initialized = 1;
 	return 1;
 }
