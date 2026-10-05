@@ -355,6 +355,7 @@ void NORETURN FORMAT_PRINTF(2, 3) QDECL Com_Error( errorParm_t code, const char 
 
 	// The longjmp abandons whatever the unwound stack had in progress, so its cleanup below starts clean.
 	com_gameRestarting = qfalse;
+	Cvar_LoadingConfig( qfalse );
 #ifndef DEDICATED
 	CL_AbortUnwind( code );
 #endif
@@ -622,20 +623,22 @@ be after execing the config and default.
 */
 void Com_StartupVariable( const char *match ) {
 	int i;
-	const char *name;
+	const char *cmd, *name;
 
 	for ( i = 0; i < com_numConsoleLines; i++ ) {
 		Cmd_TokenizeString( com_consoleLines[i] );
-		if ( Q_stricmp( Cmd_Argv( 0 ), "set" ) ) {
+		cmd = Cmd_Argv( 0 );
+		if ( Q_stricmp( cmd, "set" ) && Q_stricmp( cmd, "seta" ) && Q_stricmp( cmd, "setu" ) && Q_stricmp( cmd, "sets" ) ) {
+			continue;
+		}
+		// without a value these only print the cvar, which the command buffer does later
+		if ( Q_stricmp( cmd, "set" ) && Cmd_Argc() < 3 ) {
 			continue;
 		}
 
 		name = Cmd_Argv( 1 );
 		if ( !match || Q_stricmp( name, match ) == 0 ) {
-			if ( Cvar_Flags( name ) == CVAR_NONEXISTENT )
-				Cvar_Get( name, Cmd_ArgsFrom( 2 ), CVAR_USER_CREATED );
-			else
-				Cvar_Set2( name, Cmd_ArgsFrom( 2 ), qfalse );
+			Cvar_SetStartup( name, Cmd_ArgsFrom( 2 ) );
 		}
 	}
 }
@@ -3124,6 +3127,7 @@ For controlling environment variables
 */
 static void Com_ExecuteCfg( void )
 {
+	Cvar_LoadingConfig( qtrue );
 	Cbuf_ExecuteText(EXEC_NOW, "exec default.cfg\n");
 	Cbuf_Execute(); // Always execute after exec to prevent text buffer overflowing
 
@@ -3141,6 +3145,7 @@ static void Com_ExecuteCfg( void )
 		Cbuf_ExecuteText(EXEC_NOW, "exec autoexec.cfg\n");
 		Cbuf_Execute();
 	}
+	Cvar_LoadingConfig( qfalse );
 }
 
 

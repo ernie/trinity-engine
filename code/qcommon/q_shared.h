@@ -953,8 +953,10 @@ default values.
 
 #define CVAR_DEVELOPER		0x10000 // can be set only in developer mode
 #define CVAR_NOTABCOMPLETE	0x20000 // no tab completion in console
+#define CVAR_NOCLI			0x40000 // a command-line value lasts the session unsaved; kept through a game switch only with CVAR_NORESTART
 
 #define CVAR_ARCHIVE_ND		(CVAR_ARCHIVE | CVAR_NODEFAULT)
+#define CVAR_ARCHIVE_NOCLI	(CVAR_ARCHIVE | CVAR_NOCLI)
 
 // These flags are only returned by the Cvar_Flags() function
 #define CVAR_MODIFIED		0x40000000	// Cvar was modified
@@ -999,6 +1001,8 @@ struct cvar_s {
 	cvar_t		*hashPrev;
 	int			hashIndex;
 	cvarGroup_t	group;				// to track changes
+	char		*cliSaved;			// the value a command-line set replaced; NULL means the default
+	qboolean	cliHeld;			// the value is still the command-line one
 };
 
 #define	MAX_CVAR_VALUE_STRING	256

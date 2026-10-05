@@ -15,10 +15,17 @@ Vulkan driver. The loader packaged with the engine dispatches to that runtime
 and does not supply headset support by itself.
 
 Use `trinity.exe +set vr_enabled 1` on Windows, or the packaged Linux executable
-with `+set vr_enabled 1`. Use `+set vr_enabled 0` for flatscreen. The preference
-is archived; `set vr_enabled 1` in `baseq3/autoexec.cfg` (or the selected game
-directory's `autoexec.cfg`) can set your preferred startup mode. Command-line
-`+set` values override the configuration at startup.
+with `+set vr_enabled 1`. Use `+set vr_enabled 0` for flatscreen. The mode you
+choose in the menu or at the console is saved, on every build. A `vr_enabled` or
+`vr_mirrorEnabled` value given on the launch line (`+set`, `+seta`, `+setu` or
+`+sets`) lasts the whole session, through video restarts and game directory
+switches, but is not saved: the configuration keeps the value it had. If you
+change the setting during that session, your change is saved. `set vr_enabled 1`
+in `baseq3/autoexec.cfg` (or the selected game directory's `autoexec.cfg`) can
+set your preferred startup mode. The Steam Frame package launches in VR with the
+desktop mirror off by default, so a `+set vr_enabled 0` on the launch line plays
+flat for one session. Its `vrpreferences.json` carries the SteamVR per-app
+resolution, refresh rate and motion smoothing settings.
 
 In the System menu, change **Display Mode** and select **Apply**. At the console,
 use `set vr_enabled 1; vid_restart` or `set vr_enabled 0; vid_restart`. Entering
