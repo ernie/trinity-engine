@@ -60,34 +60,9 @@ void VR_InitMirrorCvars( void ) {
 	Cvar_CheckRange( vr_mirrorHeight, "240", "16384", CV_INTEGER );
 }
 
-/* Released configs carry VR settings that bindings replaced (button maps, schema, adjust toggle); drop them once. */
-static void VR_UnsetOldButtonMaps( void ) {
-	static const char *slots[] = {
-		"PRIMARYGRIP", "SECONDARYGRIP", "PRIMARYTRIGGER", "SECONDARYTRIGGER",
-		"PRIMARYTHUMBSTICK", "SECONDARYTHUMBSTICK", "A", "B", "X", "Y",
-		"RTHUMBLEFT", "RTHUMBRIGHT", "RTHUMBFORWARD", "RTHUMBBACK",
-		"RTHUMBFORWARDRIGHT", "RTHUMBBACKRIGHT", "RTHUMBBACKLEFT", "RTHUMBFORWARDLEFT",
-		"PRIMARYTRACKPAD", "SECONDARYTRACKPAD", "PRIMARYTHUMBREST", "SECONDARYTHUMBREST",
-		"LBUMPER", "RBUMPER", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT",
-		"PRIMARYGRIPCLICK", "SECONDARYGRIPCLICK"
-	};
-	int i, alternate;
-	for ( i = 0; i < (int)ARRAY_LEN( slots ); i++ )
-		for ( alternate = 0; alternate < 2; alternate++ ) {
-			const char *name = va( "vr_button_map_%s%s", slots[i], alternate ? "_ALT" : "" );
-			if ( Cvar_Flags( name ) & CVAR_USER_CREATED )
-				Cbuf_AddText( va( "unset %s\n", name ) );
-		}
-	if ( Cvar_Flags( "vr_controlSchema" ) & CVAR_USER_CREATED )
-		Cbuf_AddText( "unset vr_controlSchema\n" );
-	if ( Cvar_Flags( "vr_weaponAdjust" ) & CVAR_USER_CREATED )
-		Cbuf_AddText( "unset vr_weaponAdjust\n" );
-}
-
 void VR_InitCvars( void )
 {
 	cvar_t *vr_hudDepth;
-	VR_UnsetOldButtonMaps();
 	Cvar_Get( "vr_platform", "pc", CVAR_ROM );	// advertise the VR platform to UI modules
 	vr_worldscale = Cvar_Get( "vr_worldscale", "32.0", CVAR_ARCHIVE );
 	vr_worldscaleScaler = Cvar_Get( "vr_worldscaleScaler", "1.0", CVAR_ARCHIVE );
