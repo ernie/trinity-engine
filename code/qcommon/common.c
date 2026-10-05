@@ -60,6 +60,11 @@ static jmp_buf abortframe;	// an ERR_DROP occurred, exit the entire frame
 static qboolean com_gameRestarting;
 
 int		CPU_Flags = 0;
+#ifdef USE_X87
+int32_t	x87_cw_orig = 0;
+int32_t	x87_cw_rint = 0;
+int32_t	x87_cw_cvfi = 0;
+#endif
 
 static fileHandle_t logfile = FS_INVALID_HANDLE;
 static fileHandle_t com_journalFile = FS_INVALID_HANDLE ; // events are written here
@@ -1783,6 +1788,11 @@ Goals:
   permanent allocations to the other side.  Permanent allocations should be
   kept on the side that has the current greatest wasted highwater mark.
 
+  ec-: We behave more deterministic now with explicit preference: low for client,
+  high for server data - which allows us to get more predictable data location.
+  We use this _at least_ to avoid redundant CM + BSP file loads on the client side.
+  Original intention was to minimize paging/dTLB missess (?) which is neglible
+  comparing to IO/unzipping savings on the client side.
 ==============================================================================
 */
 
@@ -2230,7 +2240,7 @@ The server calls this after the level and game VM have been loaded
 ===================
 */
 void Hunk_SetMark( void ) {
-	hunk_low.mark = hunk_low.permanent;
+	//hunk_low.mark = hunk_low.permanent; // do not touch client side
 	hunk_high.mark = hunk_high.permanent;
 }
 
@@ -2244,7 +2254,7 @@ The client calls this before starting a vid_restart or snd_restart
 */
 void Hunk_ClearToMark( void ) {
 	hunk_low.permanent = hunk_low.temp = hunk_low.mark;
-	hunk_high.permanent = hunk_high.temp = hunk_high.mark;
+	// hunk_high.permanent = hunk_high.temp = hunk_high.mark; // do not touch server side
 }
 
 
@@ -2299,24 +2309,47 @@ void Hunk_Clear( void ) {
 #ifdef HUNK_DEBUG
 	hunkblocks = NULL;
 #endif
+
+	FS_ResetLoadStack();
 }
 
 
 static void Hunk_SwapBanks( void ) {
-	hunkUsed_t	*swap;
-
 	// can't swap banks if there is any temp already allocated
 	if ( hunk_temp->temp != hunk_temp->permanent ) {
-		return;
-	}
-
-	// if we have a larger highwater mark on this side, start making
-	// our permanent allocations here and use the other side for temp
-	if ( hunk_temp->tempHighwater - hunk_temp->permanent >
-		hunk_permanent->tempHighwater - hunk_permanent->permanent ) {
-		swap = hunk_temp;
+		// we have hard preference so this is an error now
+		Com_Error( ERR_DROP, "cant' swap banks" );
+	} else {
+		// original code seems to select most recently touched/paged allocation for permanent storage
+		// we just stick to our preference for predictable allocation
+		hunkUsed_t *swap = hunk_temp;
 		hunk_temp = hunk_permanent;
 		hunk_permanent = swap;
+	}
+}
+
+
+/*
+=================
+Hunk_AllocPreference
+
+Set preference for h_current allocations
+=================
+*/
+void Hunk_AllocPreference( ha_pref preference )
+{
+	if ( preference == h_current ) {
+		// Com_Error( ERR_DROP, "invalid preference" );
+	} else {
+		if ( preference == h_low ) {
+			if ( hunk_permanent != &hunk_low ) {
+				Hunk_SwapBanks();
+			}
+		} else {
+			if ( hunk_permanent != &hunk_high ) {
+				Hunk_SwapBanks();
+			}
+		}
 	}
 }
 
@@ -2335,8 +2368,7 @@ void *Hunk_Alloc( size_t size, ha_pref preference ) {
 #endif
 	void	*buf;
 
-	if ( s_hunkData == NULL)
-	{
+	if ( s_hunkData == NULL ) {
 		Com_Error( ERR_FATAL, "Hunk_Alloc: Hunk memory system not initialized" );
 	}
 
@@ -2344,15 +2376,20 @@ void *Hunk_Alloc( size_t size, ha_pref preference ) {
 		Com_Error( ERR_FATAL, "Hunk_Alloc: %"PRIz"u > INT_MAX", size );
 	}
 
-	// can't do preference if there is any temp allocated
-	if (preference == h_dontcare || hunk_temp->temp != hunk_temp->permanent) {
-		Hunk_SwapBanks();
-	} else {
-		if (preference == h_low && hunk_permanent != &hunk_low) {
-			Hunk_SwapBanks();
-		} else if (preference == h_high && hunk_permanent != &hunk_high) {
-			Hunk_SwapBanks();
-		}
+	switch ( preference ) {
+		case h_low:
+			if ( hunk_permanent != &hunk_low ) {
+				Hunk_SwapBanks();
+			}
+			break;
+		case h_high:
+			if ( hunk_permanent != &hunk_high ) {
+				Hunk_SwapBanks();
+			}
+			break;
+		default:
+			// h_current
+			break;
 	}
 
 #ifdef HUNK_DEBUG
@@ -2429,8 +2466,6 @@ void *Hunk_AllocateTempMemory( size_t size ) {
 		Com_Error( ERR_FATAL, "Hunk_AllocateTempMemory: %"PRIz"u > INT_MAX", size );
 	}
 
-	Hunk_SwapBanks();
-
 	size = PAD(size, sizeof(intptr_t)) + sizeof( hunkHeader_t );
 
 	if ( hunk_temp->temp + hunk_permanent->permanent + size > s_hunkTotal ) {
@@ -2457,6 +2492,37 @@ void *Hunk_AllocateTempMemory( size_t size ) {
 
 	// don't bother clearing, because we are going to load a file over it
 	return buf;
+}
+
+
+/*
+==================
+Hunk_GetTempMemory
+==================
+*/
+int Hunk_GetTempMemory( void **buf )
+{
+	if ( hunk_temp == &hunk_high ) {
+		const int size = hunk_high.temp - hunk_high.permanent;
+		if ( size > 0 ) {
+			hunkHeader_t *hdr = (hunkHeader_t *)(s_hunkData + s_hunkTotal - hunk_high.temp);
+			if ( hdr->magic != HUNK_MAGIC )
+				Com_Error( ERR_DROP, "incorrect hunk_high magic" );
+			*buf = (void *)(hdr + 1);
+			return hdr->size;
+		}
+	} else {
+		const int size = hunk_low.temp - hunk_low.permanent;
+		if ( size > 0 ) {
+			hunkHeader_t* hdr = (hunkHeader_t*)(s_hunkData + hunk_low.permanent);
+			if ( hdr->magic != HUNK_MAGIC )
+				Com_Error( ERR_DROP, "incorrect hunk_low magic" );
+			*buf = (void*)(hdr + 1);
+			return hdr->size;
+		}
+	}
+	*buf = NULL;
+	return 0;
 }
 
 
@@ -2517,6 +2583,62 @@ void Hunk_ClearTempMemory( void ) {
 		hunk_temp->temp = hunk_temp->permanent;
 	}
 }
+
+
+/*
+=================
+Hunk_MoveTempMemory
+
+Move current hunk temp allocation () to preferred zone (low/high).
+If alloction is already at desired zone - do nothing.
+Return pointer to moved data.
+Return NULL if there is no temp allocation.
+=================
+*/
+void *Hunk_MoveTempMemory( ha_pref preference ) {
+	int size;
+
+	if ( s_hunkData == NULL || preference == h_current ) {
+		return NULL;
+	}
+
+	size = hunk_temp->temp - hunk_temp->permanent;
+	if ( size <= 0 ) {
+		return NULL;
+	}
+
+	if ( preference == h_low ) {
+		byte *dst = s_hunkData + hunk_low.permanent;
+		if ( hunk_temp == &hunk_high ) {
+			byte *src = s_hunkData + s_hunkTotal - hunk_high.temp;
+			memmove( dst, src, size ); // could overlap so no memcpy
+			hunk_temp->temp = hunk_temp->permanent; // reset temp mark
+			hunk_temp->tempHighwater = 0;
+			hunk_permanent->temp += size;
+			if ( hunk_permanent->temp > hunk_permanent->tempHighwater ) {
+				hunk_permanent->tempHighwater = hunk_permanent->temp;
+			}
+		}
+		return dst;
+	} else {
+		byte *dest = s_hunkData + s_hunkTotal - hunk_high.temp;
+		if ( hunk_temp == &hunk_low ) {
+			byte *src = s_hunkData + hunk_low.permanent;
+			dest -= size;
+			memmove( dest, src, size ); // could overlap so no memcpy
+			hunk_temp->temp = hunk_temp->permanent; // reset temp mark
+			hunk_temp->tempHighwater = 0;
+			hunk_permanent->temp += size;
+			if ( hunk_permanent->temp > hunk_permanent->tempHighwater ) {
+				hunk_permanent->tempHighwater = hunk_permanent->temp;
+			}
+		}
+		return dest;
+	}
+
+	return NULL;
+}
+
 
 /*
 ===================================================================
@@ -3691,6 +3813,7 @@ static int hex_code( const int code ) {
 
 static const char *parseAffinityMask( const char *str, uint64_t *outv, int level ) {
 	uint64_t v, mask = 0;
+	int hex;
 
 	while ( *str != '\0' ) {
 		if ( *str == 'A' || *str == 'a' ) {
@@ -3708,8 +3831,8 @@ static const char *parseAffinityMask( const char *str, uint64_t *outv, int level
 			++str;
 			continue;
 		}
-		else if ( *str == '0' && (str[1] == 'x' || str[1] == 'X') && (v = hex_code( str[2] )) >= 0 ) {
-			int hex;
+		else if ( *str == '0' && (str[1] == 'x' || str[1] == 'X') && (hex = hex_code( str[2] )) >= 0 ) {
+			v = hex;
 			str += 3; // 0xH
 			while ( (hex = hex_code( *str )) >= 0 ) {
 				v = v * 16 + hex;
@@ -3729,8 +3852,9 @@ static const char *parseAffinityMask( const char *str, uint64_t *outv, int level
 
 		if ( level == 0 ) {
 			while ( *str == '+' || *str == '-' ) {
+				const char op = *str;
 				str = parseAffinityMask( str + 1, &v, level + 1 );
-				switch ( *str ) {
+				switch ( op ) {
 					case '+': mask |= v; break;
 					case '-': mask &= ~v; break;
 					default: str = ""; break;
@@ -3765,6 +3889,44 @@ static void Com_SetAffinityMask( const char *str )
 	}
 }
 #endif // USE_AFFINITY_MASK
+
+
+#ifdef USE_X87
+#ifdef _MSC_VER
+#if id386
+/*
+=================
+Q_GetFPUCW
+=================
+*/
+void Q_GetFPUCW( unsigned short *cw )
+{
+	__asm {
+		mov ecx, cw;
+		fnstcw [ecx];
+	}
+}
+void Q_SetFPUCW( unsigned short *cw )
+{
+	__asm {
+		mov ecx, cw;
+		fldcw [ecx];
+	}
+}
+#else // idx64
+// .asm versions
+#endif // idx64
+#else // GCC/clang
+void Q_GetFPUCW( unsigned short *cw )
+{
+	asm volatile("fnstcw %0" : "=m" (*cw));
+}
+void Q_SetFPUCW( unsigned short *cw )
+{
+	asm volatile("fldcw %0" : "=m" (*cw));
+}
+#endif // GCC/clang
+#endif // USE_X87
 
 
 /*
@@ -4007,6 +4169,17 @@ void Com_Init( char *commandLine ) {
 	}
 	Com_Printf( "%s\n", Cvar_VariableString( "sys_cpustring" ) );
 
+#ifdef USE_X87
+	// initialize x87 FPU control words:
+	Q_GetFPUCW( (unsigned short*) &x87_cw_orig );
+	x87_cw_orig |= 0x003F; // set all exception mask bits
+	x87_cw_orig = (x87_cw_orig & 0xFCFF) | 0x0200; // default rounding, *enforced* double precision
+	x87_cw_rint = (x87_cw_orig & 0xFCFF) | 0x0000; // default rounding, single precision
+	x87_cw_cvfi = (x87_cw_orig & 0xF0FF) | 0x0C00; // round to zero, single precision
+	// this is mostly for MINGW/GCC to reset extended precision:
+	Q_SetFPUCW( (unsigned short*) &x87_cw_orig );
+#endif
+
 #ifdef USE_AFFINITY_MASK
 	// get initial process affinity - we will respect it when setting custom affinity masks
 	eCoreMask = pCoreMask = affinityMask = Sys_GetAffinityMask();
@@ -4017,7 +4190,7 @@ void Com_Init( char *commandLine ) {
 		Com_SetAffinityMask( com_affinityMask->string );
 		com_affinityMask->modified = qfalse;
 	}
-#endif
+#endif // USE_AFFINITY_MASK
 
 	// Pick a random port value
 	Com_RandomBytes( (byte*)&qport, sizeof( qport ) );

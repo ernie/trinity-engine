@@ -19,7 +19,7 @@ along with Quake III Arena source code; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
-// qcommon.h -- definitions common between client and server, but not game.or ref modules
+// qcommon.h -- definitions common between client and server, but not game or ref modules
 #ifndef _QCOMMON_H_
 #define _QCOMMON_H_
 
@@ -576,7 +576,7 @@ set r_draworder 0	as above, but creates the cvar if not present
 Cvars are restricted from having the same names as commands to keep this
 interface from being ambiguous.
 
-The are also occasionally used to communicated information between different
+They are also occasionally used to communicate information between different
 modules of the program.
 
 */
@@ -662,7 +662,7 @@ void	Cvar_Restart( qboolean unsetVM );
 void	Cvar_CompleteCvarName( const char *args, int argNum );
 
 extern	int			cvar_modifiedFlags;
-// whenever a cvar is modifed, its flags will be OR'd into this, so
+// whenever a cvar is modified, its flags will be OR'd into this, so
 // a single check can determine if any CVAR_USERINFO, CVAR_SERVERINFO,
 // etc, variables have been modified since the last check.  The bit
 // can then be cleared to allow another change detection.
@@ -685,6 +685,12 @@ issues.
 #define FS_GENERAL_REF	0x01
 #define FS_UI_REF		0x02
 #define FS_CGAME_REF	0x04
+#define FS_QAGAME_REF	0x08
+
+#define FS_PURE_REF		( FS_GENERAL_REF | FS_UI_REF | FS_CGAME_REF )
+#define FS_ALL_REF		( FS_PURE_REF | FS_QAGAME_REF )
+#define FS_LOCK_REF		( FS_UI_REF | FS_CGAME_REF | FS_QAGAME_REF )
+
 // number of id paks that will never be autodownloaded from baseq3/missionpack
 #define NUM_ID_PAKS		9
 #define NUM_TA_PAKS		4
@@ -753,6 +759,7 @@ qboolean FS_CompareZipChecksum( const char *zipfile );
 int		FS_GetZipChecksum( const char *zipfile );
 
 int		FS_LoadStack( void );
+void	FS_ResetLoadStack( void );
 
 int		FS_GetFileList(  const char *path, const char *extension, char *listbuf, int bufsize );
 
@@ -774,7 +781,7 @@ int		FS_FOpenFileRead( const char *qpath, fileHandle_t *file, qboolean uniqueFIL
 // It is generally safe to always set uniqueFILE to true, because the majority of
 // file IO goes through FS_ReadFile, which Does The Right Thing already.
 
-void FS_TouchFileInPak( const char *filename );
+void FS_TouchFileInPak( const char *filename, int refbits );
 
 void FS_BypassPure( void );
 void FS_RestorePure( void );
@@ -894,6 +901,7 @@ void FS_SetFilenameCallback( fnamecallback_f func );
 
 char *FS_CopyString( const char *in );
 
+qboolean FS_CreatePath( const char *ospath );
 
 // AVI pipes
 
@@ -961,6 +969,18 @@ extern	int	CPU_Flags;
 #define CPU_ARMv7  0x01
 #define CPU_IDIVA  0x02
 #define CPU_VFPv3  0x04
+
+#if id386
+#define USE_X87
+#endif
+
+#ifdef USE_X87
+void Q_GetFPUCW( unsigned short *cw );
+void Q_SetFPUCW( unsigned short *cw );
+extern int32_t x87_cw_orig;	// double precision, round to nearest - global/syscalls
+extern int32_t x87_cw_rint;	// single precision, round to nearest - qvm/snapvector
+extern int32_t x87_cw_cvfi;	// single precision, truncate to zero - ftol()
+#endif
 
 // TTimo
 // centralized and cleaned, that's the max string you can send to a Com_Printf / Com_DPrintf (above gets truncated)
@@ -1141,7 +1161,10 @@ void Hunk_ClearTempMemory( void );
 void *Hunk_AllocateTempMemory( size_t size );
 void Hunk_FreeTempMemory( void *buf );
 int	Hunk_MemoryRemaining( void );
-void Hunk_Log( void);
+void Hunk_Log( void );
+int  Hunk_GetTempMemory( void **buf );
+void *Hunk_MoveTempMemory( ha_pref preference );
+void Hunk_AllocPreference( ha_pref preference );
 
 unsigned int Com_TouchMemory( void );
 
@@ -1182,7 +1205,7 @@ void CL_PacketEvent( const netadr_t *from, msg_t *msg );
 
 void CL_ConsolePrint( const char *text );
 
-void CL_MapLoading( void );
+qboolean CL_MapLoading( void );
 // between a load's steps; redraw says a redrawn loading screen may register shaders from the caller
 void CL_LoadingPump( qboolean redraw );
 // do a screen update before starting to load a map

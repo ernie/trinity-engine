@@ -496,7 +496,7 @@ static void VM_LoadSymbols( vm_t *vm ) {
 			break;
 		}
 		chars = strlen( token );
-		sym = Hunk_Alloc( sizeof( *sym ) + chars, h_high );
+		sym = Hunk_Alloc( sizeof( *sym ) + chars, h_current );
 		*prev = sym;
 		prev = &sym->next;
 		sym->next = NULL;
@@ -864,7 +864,7 @@ vmHeader_t *VM_LoadQVM( vm_t *vm, qboolean alloc ) {
 
 	if ( alloc ) {
 		// allocate zero filled space for initialized and uninitialized data
-		vm->dataBase = Hunk_Alloc( dataAlloc, h_high );
+		vm->dataBase = Hunk_Alloc( dataAlloc, h_current );
 		vm->dataMask = dataLength - 1;
 		vm->dataAlloc = dataAlloc;
 	} else {
@@ -894,7 +894,7 @@ vmHeader_t *VM_LoadQVM( vm_t *vm, qboolean alloc ) {
 		Com_Printf( "Loading %d jump table targets\n", vm->numJumpTableTargets );
 
 		if ( alloc ) {
-			vm->jumpTableTargets = (int32_t *) Hunk_Alloc( header->jtrgLength, h_high );
+			vm->jumpTableTargets = (int32_t *) Hunk_Alloc( header->jtrgLength, h_current );
 		} else {
 			if ( vm->numJumpTableTargets != previousNumJumpTableTargets ) {
 				VM_Free( vm );
@@ -925,7 +925,7 @@ vmHeader_t *VM_LoadQVM( vm_t *vm, qboolean alloc ) {
 		vm->numJumpTableTargets = length >> 2;
 		Com_Printf( "Loading %d external jump table targets\n", vm->numJumpTableTargets );
 		if ( alloc == qtrue ) {
-			vm->jumpTableTargets = (int32_t *) Hunk_Alloc( length, h_high );
+			vm->jumpTableTargets = (int32_t *) Hunk_Alloc( length, h_current );
 		} else {
 			Com_Memset( vm->jumpTableTargets, 0, length );
 		}
@@ -1249,7 +1249,7 @@ const char *VM_CheckInstructions( instruction_t *buf,
 								int dataLength )
 {
 	static char errBuf[ 128 ];
-	instruction_t *opStackPtr[ PROC_OPSTACK_SIZE ];
+	instruction_t *opStackPtr[ PROC_OPSTACK_SIZE + 1 ];
 	int i, m, n, v, op0, op1, opStack, pstack;
 	instruction_t *ci, *proc;
 	int startp, endp;
@@ -1400,6 +1400,20 @@ const char *VM_CheckInstructions( instruction_t *buf,
 			}
 			// mark jump target
 			buf[v].jused = 1;
+#if (id386 || idx64)
+			// mark NaN-checks for vm_x86
+			if ( ops[ci->op].flags & FPU ) {
+				switch ( ci->op ) {
+					case OP_EQF:
+					case OP_LTF:
+					case OP_LEF:
+						ci->nanchk = 1;
+						break;
+					default:
+						break;
+				}
+			}
+#endif
 			continue;
 		}
 
@@ -1638,6 +1652,13 @@ __noJTS:
 		}
 	}
 
+	// explicitly mark all jump targets with unsafe bit
+	for ( i = 0, ci = buf; i < instructionCount; i++, ci++ ) {
+		if ( ci->jused ) {
+			ci->safe = 0;
+		}
+	}
+
 	VM_Fixup( buf, instructionCount );
 
 	return NULL;
@@ -1820,7 +1841,7 @@ vm_t *VM_Create( vmIndex_t index, syscall_t systemCalls, dllSyscall_t dllSyscall
 
 	// allocate space for the jump targets, which will be filled in by the compile/prep functions
 	vm->instructionCount = header->instructionCount;
-	//vm->instructionPointers = Hunk_Alloc(vm->instructionCount * sizeof(*vm->instructionPointers), h_high);
+	//vm->instructionPointers = Hunk_Alloc(vm->instructionCount * sizeof(*vm->instructionPointers), h_current );
 	vm->instructionPointers = NULL;
 
 	// copy or compile the instructions
