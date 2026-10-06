@@ -81,7 +81,7 @@ On the Vulkan renderer, Trinity Engine can output true HDR (scRGB linear FP16) t
 HDR display, for brighter highlights and more lifelike color than standard dynamic range.
 It requires the Vulkan renderer, `r_fbo 1`, and an HDR-capable display with HDR enabled in
 the OS. This is separate from `r_hdr`, which only sets internal framebuffer precision.
-Toggle it in-game under **Setup → Graphics → HDR Display** and tune it under
+Toggle it in-game under **Setup → Display → HDR Display** and tune it under
 **Setup → Display → HDR Calibration**, or set the cvars directly:
 
 - `r_hdrDisplay` (default `0`) — master toggle; `1` enables true HDR output. Latched
@@ -102,6 +102,11 @@ Toggle it in-game under **Setup → Graphics → HDR Display** and tune it under
   in above paper-white.
 - `r_hdrActive` (read-only) — `1` when HDR output is genuinely live (HDR swapchain up and the
   display's HDR switch on).
+- `r_hdrStatus` (read-only): HDR state of the outputs being shown (the window, or in VR the
+  headset and the desktop mirror when it is on): `active` (HDR output is live), `available`
+  (can be turned on with `r_hdrDisplay`), `nofbo` (needs `r_fbo 1`), `ossetting` (the display
+  can show HDR but its HDR switch is off in the system display settings) or `unsupported` (no
+  output being shown can display HDR). The menus enable their HDR rows from it.
 
 ### TV (TrinityVision, of course :wink:) Demo System
 

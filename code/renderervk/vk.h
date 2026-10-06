@@ -726,6 +726,7 @@ typedef struct {
 	qboolean hdrColorspaceExt;	// VK_EXT_swapchain_colorspace enabled at instance creation
 	qboolean hdrActive;		// scRGB FP16 HDR swapchain selected and in use
 	int hdrOsState;			// detected OS HDR switch state (osHdrState_t)
+	qboolean hdrDesktopCapable;	// the desktop surface can show HDR, whether or not it was requested
 	qboolean msaaActive;
 
 	qboolean offscreenRender;

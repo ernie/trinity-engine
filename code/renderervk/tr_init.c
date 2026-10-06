@@ -95,6 +95,7 @@ cvar_t	*r_hdrSoftKnee;
 cvar_t	*r_hdrPeak;
 cvar_t	*r_hdrCalibrate;
 cvar_t	*r_hdrActive;
+cvar_t	*r_hdrStatus;
 cvar_t	*r_bloom;
 cvar_t	*r_bloom_threshold;
 cvar_t	*r_bloom_intensity;
@@ -1906,6 +1907,15 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_hdrActive,
 		"Read-only: 1 when HDR output is genuinely live (HDR swapchain up and the display's HDR switch on), else 0." );
 
+	r_hdrStatus = ri.Cvar_Get( "r_hdrStatus", "unsupported", CVAR_ROM );
+	ri.Cvar_SetDescription( r_hdrStatus,
+		"Read-only HDR output state of the outputs being shown (the window, or in VR the headset and the desktop mirror when it is on):\n"
+		" active: HDR output is live\n"
+		" available: HDR can be turned on with \\r_hdrDisplay\n"
+		" nofbo: HDR needs \\r_fbo 1\n"
+		" ossetting: the display can show HDR but its HDR switch is off in the system display settings\n"
+		" unsupported: no output being shown can display HDR" );
+
 	r_bloom = ri.Cvar_Get( "r_bloom", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");
@@ -2097,6 +2107,11 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	if ( code != REF_KEEP_CONTEXT ) {
 #ifdef USE_VULKAN
 		vk_shutdown( code );
+		// the next renderer may have no HDR output, and this one recomputes both at startup
+		if ( r_hdrStatus ) {
+			ri.Cvar_Set( "r_hdrActive", "0" );
+			ri.Cvar_Set( "r_hdrStatus", "unsupported" );
+		}
 		if ( code == REF_KEEP_WINDOW ) {
 			glConfig.vidWidth = gls.captureWidth * (r_ext_supersample->integer ? 2 : 1);
 			glConfig.vidHeight = gls.captureHeight * (r_ext_supersample->integer ? 2 : 1);

@@ -1403,6 +1403,7 @@ extern cvar_t	*r_hdrSoftKnee;
 extern cvar_t	*r_hdrPeak;
 extern cvar_t	*r_hdrCalibrate;
 extern cvar_t	*r_hdrActive;
+extern cvar_t	*r_hdrStatus;
 extern cvar_t	*r_bloom;
 extern cvar_t	*r_bloom_threshold;
 extern cvar_t	*r_bloom_intensity;

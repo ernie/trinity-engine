@@ -19,6 +19,7 @@ qboolean VK_XR_Haptic( int hand, float amplitude, int durationMs );
 const char *VK_XR_LastError( void );
 void VK_XR_Info( void );
 qboolean VK_XR_Enabled( void );
+qboolean VK_XR_HDRCapable( void );
 qboolean VK_OSHDROn( void );
 uint32_t VK_XR_ApiVersion( uint32_t version );
 VkResult VK_XR_CreateInstance( PFN_vkCreateInstance normal, const VkInstanceCreateInfo *info,

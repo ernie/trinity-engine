@@ -75,6 +75,21 @@ float Sys_MacOS_ConfigureHDRLayer( int enable )
 	return (float)screen.maximumPotentialExtendedDynamicRangeColorComponentValue;
 }
 
+// Potential EDR headroom of the render window's screen, read without touching the layer: >1 when it can show HDR.
+float Sys_MacOS_PotentialEDRHeadroom( void )
+{
+	NSWindow *win = nil;
+	NSScreen *screen;
+
+	if ( !FindRenderLayer( &win ) || !win )
+		return 1.0f;
+
+	screen = [win screen];
+	if ( !screen )
+		return 1.0f;
+	return (float)screen.maximumPotentialExtendedDynamicRangeColorComponentValue;
+}
+
 // Current (live) EDR headroom of the render window's screen: 1.0 = SDR white,
 // higher once macOS grants EDR budget. Drives the HDR highlight ceiling.
 float Sys_MacOS_CurrentEDRHeadroom( void )

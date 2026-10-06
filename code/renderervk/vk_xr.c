@@ -140,6 +140,10 @@ qboolean VK_XR_PrepareInit( qboolean enabled ) {
 qboolean VK_XR_Enabled( void ) {
 	return requested && live.instance != XR_NULL_HANDLE;
 }
+/* OpenXR offers no swapchain format or color space that carries HDR luminance. */
+qboolean VK_XR_HDRCapable( void ) {
+	return qfalse;
+}
 qboolean VK_XR_Drawing( void ) {
 	return active && xr.renderable && !failed;
 }

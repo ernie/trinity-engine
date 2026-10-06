@@ -75,6 +75,7 @@ static void vk_gpu_time_stamp( VkCommandBuffer command, unsigned query );
 
 #ifdef __APPLE__
 extern float Sys_MacOS_CurrentEDRHeadroom( void ); // sdl_macos_hdr.m
+extern float Sys_MacOS_PotentialEDRHeadroom( void ); // sdl_macos_hdr.m
 #endif
 
 #if defined (_DEBUG)
@@ -2370,6 +2371,35 @@ qboolean VK_OSHDROn( void )
 }
 
 
+// in VR the desktop window is shown only as the mirror; with the mirror off it stays hidden
+static qboolean vk_desktop_presented( void )
+{
+	return !VK_XR_Enabled() || vr_mirrorEnabled->integer != 0;
+}
+
+
+static void vk_update_hdr_status( void )
+{
+	const qboolean xrCapable = VK_XR_Enabled() && VK_XR_HDRCapable();
+	const qboolean desktopCapable = vk.hdrDesktopCapable && vk_desktop_presented();
+	const char *status;
+
+	if ( vk.hdrActive ) {
+		status = "active";
+	} else if ( !xrCapable && !desktopCapable ) {
+		status = "unsupported";
+	} else if ( !r_fbo->integer ) {
+		status = "nofbo";
+	} else if ( !xrCapable && vk.hdrOsState == OSHDR_OFF ) {
+		status = "ossetting";
+	} else {
+		status = "available";
+	}
+
+	ri.Cvar_Set( "r_hdrStatus", status );
+}
+
+
 static qboolean vk_select_surface_format( VkPhysicalDevice physical_device, VkSurfaceKHR surface )
 {
 	VkFormat base_bgr, base_rgb;
@@ -2432,29 +2462,35 @@ static qboolean vk_select_surface_format( VkPhysicalDevice physical_device, VkSu
 	}
 
 	vk.hdrActive = qfalse;
+	vk.hdrDesktopCapable = qfalse;
 	vk.hdrOsState = OSHDR_UNKNOWN;
 
-	if ( r_hdrDisplay->integer && r_fbo->integer && vk.hdrColorspaceExt ) {
+	// capability is probed whatever r_hdrDisplay says, so the menus can offer HDR before it is requested
+	if ( vk.hdrColorspaceExt ) {
+		const qboolean commit = r_hdrDisplay->integer && r_fbo->integer && vk_desktop_presented();
 		uint32_t h;
 		for ( h = 0; h < format_count; h++ ) {
 			if ( candidates[h].format == VK_FORMAT_R16G16B16A16_SFLOAT &&
 				candidates[h].colorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT ) {
 #ifdef __APPLE__
-				// macOS reports HDR via the layer's EDR headroom, not DisplayConfig:
-				// enable extended-dynamic-range on the presentation layer and commit
-				// only if the display actually has headroom (else scRGB > 1 clamps).
-				if ( ri.VK_ConfigureHDR( qtrue ) > 1.0f ) {
-					vk.present_format = candidates[h];
-					vk.hdrActive = qtrue;
-				} else {
-					ri.VK_ConfigureHDR( qfalse );
+				// macOS reports HDR as the screen's potential EDR headroom, not through DisplayConfig
+				vk.hdrDesktopCapable = Sys_MacOS_PotentialEDRHeadroom() > 1.0f;
+				if ( commit && vk.hdrDesktopCapable ) {
+					if ( ri.VK_ConfigureHDR( qtrue ) > 1.0f ) {
+						vk.present_format = candidates[h];
+						vk.hdrActive = qtrue;
+					} else {
+						ri.VK_ConfigureHDR( qfalse );
+						vk.hdrDesktopCapable = qfalse;
+					}
 				}
 #else
 				// the scRGB colorspace is advertised even when the OS HDR switch is
 				// off, which only makes the image look oversaturated; commit to HDR
 				// output unless we positively detect HDR as off.
 				vk.hdrOsState = vk_query_os_hdr_state();
-				if ( vk.hdrOsState != OSHDR_OFF && vk.hdrOsState != OSHDR_UNSUPPORTED ) {
+				vk.hdrDesktopCapable = vk.hdrOsState != OSHDR_UNSUPPORTED;
+				if ( commit && vk.hdrDesktopCapable && vk.hdrOsState != OSHDR_OFF ) {
 					vk.present_format = candidates[h];
 					vk.hdrActive = qtrue;
 				}
@@ -2465,6 +2501,7 @@ static qboolean vk_select_surface_format( VkPhysicalDevice physical_device, VkSu
 	}
 
 	ri.Cvar_Set( "r_hdrActive", vk.hdrActive ? "1" : "0" );
+	vk_update_hdr_status();
 
 	if ( !r_fbo->integer ) {
 		vk.present_format = vk.base_format;
@@ -2492,7 +2529,9 @@ static void setup_surface_formats( VkPhysicalDevice physical_device )
 #endif
 		}
 	} else if ( r_hdrDisplay->integer ) {
-		if ( vk.hdrOsState == OSHDR_OFF ) {
+		if ( !vk_desktop_presented() ) {
+			ri.Printf( PRINT_ALL, "...HDR requested but the headset output is SDR and the desktop mirror is off; using SDR\n" );
+		} else if ( vk.hdrOsState == OSHDR_OFF ) {
 #ifdef _WIN32
 			ri.Printf( PRINT_ALL, "...HDR requested but the Windows HDR switch is off; using SDR. Enable HDR in Windows display settings and run \\vid_restart\n" );
 #else
@@ -6205,6 +6244,9 @@ void vk_initialize( void )
 	uint32_t maxSize;
 	uint32_t i;
 
+	// a kept window skips the client's registration, so this applies a pending latch before the surface probe reads it
+	vr_mirrorEnabled = ri.Cvar_Get( "vr_mirrorEnabled", VR_MIRROR_DEFAULT, VR_MODE_CVAR_FLAGS );
+
 	init_vulkan_library();
 
 	qvkGetDeviceQueue( vk.device, vk.queue_family_index, 0, &vk.queue );
@@ -6229,7 +6271,6 @@ void vk_initialize( void )
 
 	vk_set_render_scale();
 
-	vr_mirrorEnabled = ri.Cvar_Get( "vr_mirrorEnabled", VR_MIRROR_DEFAULT, VR_MODE_CVAR_FLAGS );
 	vr_desktopContentType = ri.Cvar_Get( "vr_desktopContentType", "0", 0 );
 	vr_desktopContentFit = ri.Cvar_Get( "vr_desktopContentFit", "1", 0 );
 	vr_desktopMenuStyle = ri.Cvar_Get( "vr_desktopMenuStyle", "0", 0 );
@@ -6611,6 +6652,8 @@ void vk_initialize( void )
 	vk_create_swapchain( vk.physical_device, vk.device, vk_surface, vk.present_format, &vk.swapchain, qtrue );
 	VK_XR_Bind( vk_instance, vk.physical_device, vk.device, vk.queue_family_index,
 				vk.xrDirect && vk_fdm_offsets_supported() ? VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_QCOM : 0 );
+	// the session's swapchains exist only from here
+	vk_update_hdr_status();
 	vk.sceneWidth = glConfig.vidWidth;
 	vk.sceneHeight = glConfig.vidHeight;
 	VK_XR_TargetSize( &vk.sceneWidth, &vk.sceneHeight );
