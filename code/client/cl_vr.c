@@ -166,8 +166,15 @@ static void CL_VR_ReportCap( void ) {
 		CL_VR_ErrorPopup( "VR stopped after repeated errors" );
 }
 static void CL_VR_Lost( const char *reason ) {
-	vrAction_t action = CL_VR_Step( VREV_LOST, 0 );
+	vrAction_t action;
 
+	/* SteamVR's Exit game and SteamVR quitting end the session this way, and expect the app to exit. */
+	if ( re.XRStatus && re.XRStatus() == -2 ) {
+		Com_Printf( "The VR runtime ended the session; quitting\n" );
+		Cmd_Clear();
+		Com_Quit_f();
+	}
+	action = CL_VR_Step( VREV_LOST, 0 );
 	if ( action == VRACT_NONE )
 		return;
 	Q_strncpyz( lastFailure, reason, sizeof( lastFailure ) );

@@ -54,7 +54,7 @@ typedef struct {
 	XrGraphicsRequirementsVulkan2KHR requirements;
 	XrSessionState state;
 	XrEnvironmentBlendMode blend;
-	int running, lost, frameBegun, renderable;
+	int running, lost, frameBegun, renderable; /* lost: 0 or a VK_XRVK_LOST_ value */
 	int profileChanged;
 	int modelsChanged; /* the set of controller models changed during the last action sync */
 	int formatList;
@@ -88,8 +88,11 @@ XrResult VK_XRVK_Bind( vkXRVk_t *ctx, const XrGraphicsBindingVulkan2KHR *binding
 int VK_XRVK_TargetsBusy( const vkXRVk_t *ctx );
 XrResult VK_XRVK_CreateTarget( vkXRVk_t *ctx, vkXRVkTarget_t *target );
 XrResult VK_XRVK_DestroyTarget( vkXRVk_t *ctx, vkXRVkTarget_t *target );
+/* A lost session the host may rebuild, or the runtime ending the app's VR (exit requested or runtime going away). */
+#define VK_XRVK_LOST_SESSION 1
+#define VK_XRVK_LOST_RUNTIME 2
 /* Poll only outside a frame. It consumes at most 64 events. READY starts; STOPPING ends;
- * EXITING/LOSS_PENDING and instance loss mark lost for host flat recovery. */
+ * EXITING/LOSS_PENDING and instance loss mark the runtime's ending. */
 XrResult VK_XRVK_Poll( vkXRVk_t *ctx );
 int VK_XRVK_ConsumeSpaceChange( vkXRVk_t *ctx );
 /* Begin returns XR_SESSION_NOT_FOCUSED when not running; a wait failure requires teardown, since an image

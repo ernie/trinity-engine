@@ -142,7 +142,7 @@ typedef struct {
 	// loading frame: Due says one may go out; RedrawEnvironment redraws the last captured screen for the current pose and submits
 	qboolean (*XRLoadingFrameDue)( void );
 	qboolean (*XRRedrawEnvironment)( void );
-	int (*XRStatus)( void ); // 0 absent, 1 initialized, 2 active, -1 lost
+	int (*XRStatus)( void ); // 0 absent, 1 initialized, 2 active, -1 lost, -2 the runtime ended VR (exit asked or runtime leaving)
 	const char *(*XRLastError)( void );
 	qboolean (*XRHaptic)( int hand, float amplitude, int durationMs );
 	void (*XRSetVirtualScreen)( qboolean enabled, qboolean menuYawLocked, refXRFrame_t *frame );

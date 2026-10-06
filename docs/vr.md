@@ -55,7 +55,10 @@ when VR cannot start. `vr_status` names the state:
 | `WAITING_HEADSET` | VR is wanted but no headset or runtime is available. The desktop shows the tracking prompt and VR starts when the headset returns. |
 | `VR_UNSUPPORTED` | The current server's or mod's game modules cannot run in VR. |
 
-The client leaves VR in four cases:
+When the runtime ends the session itself, by Exit game in its dashboard, by
+quitting SteamVR, or by announcing that it is going away, the game quits.
+
+Otherwise the client leaves VR in four cases:
 
 - The server's or mod's game modules are proven VR-incompatible: a pure server
   whose cgame or UI QVM has no VR support, a mod other than baseq3 or
@@ -65,8 +68,8 @@ The client leaves VR in four cases:
   either way: over the match once play starts, or in the main menu's error
   message when it happens at the menu. VR returns when you disconnect, connect to a server, or change mods,
   including from the Mods menu.
-- The headset or runtime goes away, or a probe fails. The client waits in
-  `WAITING_HEADSET` and returns to VR when it is back.
+- The headset or runtime is unavailable, the session fails, or a probe fails.
+  The client waits in `WAITING_HEADSET` and returns to VR when it is back.
 - The machine cannot run VR: no OpenXR loader, no Vulkan binding in the
   runtime, or a runtime without `XR_KHR_vulkan_enable2`. The game continues in
   flatscreen with no polling, and the next launch or `vid_restart` tries again.

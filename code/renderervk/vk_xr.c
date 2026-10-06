@@ -817,6 +817,8 @@ void VK_XR_ShutdownInstance( void ) {
 	requested = qfalse;
 }
 int VK_XR_Status( void ) {
+	if ( xr.lost == VK_XRVK_LOST_RUNTIME )
+		return -2;
 	return failed || xr.lost ? -1 : active ? 2 : xr.session ? 1 : 0;
 }
 const char *VK_XR_LastError( void ) {

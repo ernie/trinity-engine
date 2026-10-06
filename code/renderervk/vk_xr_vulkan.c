@@ -20,10 +20,18 @@ void VK_XRVK_Sleep( unsigned msec ) {
 }
 
 static XrResult VKXR_Result( vkXRVk_t *ctx, XrResult result ) {
-	if ( result == XR_ERROR_SESSION_LOST || result == XR_SESSION_LOSS_PENDING ||
-		result == XR_ERROR_INSTANCE_LOST )
-		ctx->lost = 1;
+	if ( result == XR_ERROR_INSTANCE_LOST )
+		ctx->lost = VK_XRVK_LOST_RUNTIME;
+	else if ( (result == XR_ERROR_SESSION_LOST || result == XR_SESSION_LOSS_PENDING) && !ctx->lost )
+		ctx->lost = VK_XRVK_LOST_SESSION;
 	return result;
+}
+
+/* Any failure here ends the session; only a lost instance means the runtime itself is gone. */
+static void VKXR_Lose( vkXRVk_t *ctx, XrResult result ) {
+	VKXR_Result( ctx, result );
+	if ( !ctx->lost )
+		ctx->lost = VK_XRVK_LOST_SESSION;
 }
 
 XrResult VK_XRVK_Init( vkXRVk_t *ctx, XrInstance instance, XrSystemId system,
@@ -347,7 +355,7 @@ XrResult VK_XRVK_Poll( vkXRVk_t *ctx ) {
 		if ( XR_FAILED( result ) )
 			return VKXR_Result( ctx, result );
 		if ( event.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING ) {
-			ctx->lost = 1;
+			ctx->lost = VK_XRVK_LOST_RUNTIME;
 			return XR_SESSION_LOSS_PENDING;
 		}
 		if ( event.type == XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING ) {
@@ -384,7 +392,7 @@ XrResult VK_XRVK_Poll( vkXRVk_t *ctx ) {
 					return VKXR_Result( ctx, result );
 			} else if ( state->state == XR_SESSION_STATE_EXITING ||
 					   state->state == XR_SESSION_STATE_LOSS_PENDING ) {
-				ctx->lost = 1;
+				ctx->lost = VK_XRVK_LOST_RUNTIME;
 				return XR_SESSION_LOSS_PENDING;
 			}
 		}
@@ -474,12 +482,12 @@ XrResult VK_XRVK_Begin( vkXRVk_t *ctx ) {
 	imageWait.timeout = 100000000; /* 100 ms; no infinite swapchain wait. */
 	result = ctx->xr.WaitSwapchainImage( ctx->target.handle, &imageWait );
 	if ( result != XR_SUCCESS ) {
-		ctx->lost = 1;
+		VKXR_Lose( ctx, result );
 		return result;
 	}
 	ctx->target.waited = 1;
 	if ( ctx->target.index >= ctx->target.count ) {
-		ctx->lost = 1;
+		VKXR_Lose( ctx, XR_ERROR_RUNTIME_FAILURE );
 		return XR_ERROR_RUNTIME_FAILURE;
 	}
 	ctx->renderable = 1;
@@ -504,7 +512,7 @@ XrResult VK_XRVK_End( vkXRVk_t *ctx, int rendered ) {
 		VKXR_Result( ctx, result );
 		if ( XR_FAILED( result ) ) {
 			first = result;
-			ctx->lost = 1;
+			VKXR_Lose( ctx, result );
 		} else
 			ctx->target.acquired = ctx->target.waited = 0;
 	}
@@ -563,6 +571,9 @@ void VK_XRVK_Shutdown( vkXRVk_t *ctx ) {
 			VK_XRVK_Sleep( 1 ); /* leaves the runtime a slice to queue the events the next poll consumes */
 			VK_XRVK_Poll( ctx );
 		}
+		/* The EXITING this request brings is the engine's own, not the runtime ending VR. */
+		if ( ctx->lost == VK_XRVK_LOST_RUNTIME )
+			ctx->lost = VK_XRVK_LOST_SESSION;
 	}
 	if ( ctx->target.handle && ctx->xr.DestroySwapchain )
 		ctx->xr.DestroySwapchain( ctx->target.handle );
