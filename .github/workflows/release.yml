@@ -429,7 +429,7 @@ jobs:
   macos:
     needs: dependency-gate
     name: Release macOS universal2
-    runs-on: macos-14
+    runs-on: macos-latest
     environment: release
 
     steps:

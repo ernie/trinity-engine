@@ -92,7 +92,7 @@ jobs:
     # ad-hoc signature the script applies. The Developer ID signing and
     # notarization steps stay release-only — they need secrets, cost
     # Apple notary submissions, and aren't catchable here anyway.
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
         with:
