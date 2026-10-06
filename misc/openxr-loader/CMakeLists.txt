@@ -50,6 +50,8 @@ add_subdirectory("${TRINITY_OPENXR_SOURCE_DIR}" sdk EXCLUDE_FROM_ALL)
 if(MINGW)
     # Avoid private compiler/JSON DLL dependencies in the game distribution.
     target_link_options(openxr_loader PRIVATE -static)
+    # MinGW's winapifamily.h has no WINAPI_PARTITION_SYSTEM, which the loader's -Werror=undef rejects.
+    target_compile_options(openxr_loader PRIVATE -Wno-error=undef)
 endif()
 if(WIN32)
     set_target_properties(openxr_loader PROPERTIES PREFIX "")
