@@ -487,7 +487,8 @@ static qboolean CL_VR_UseVirtualScreen( void ) {
 	vr.follow_mode = VR_FollowModeFor( Cvar_VariableIntegerValue( "cg_followMode" ), tvPlay.active );
 	vr.first_person_following = ((cl.snap.ps.pm_flags & PMF_FOLLOW) || clc.demoplaying) &&
 								vr.follow_mode == VRFM_FIRSTPERSON;
-	if ( menu && !(intermission && CL_VR_Gametype() == GT_SINGLE_PLAYER) )
+	/* The SP postgame UI draws on the podium HUD; the console reads on the virtual screen everywhere. */
+	if ( (Key_GetCatcher() & KEYCATCH_CONSOLE) || (menu && !vr.sp_intermission_active) )
 		return qtrue;
 	if ( intermission && cls.state == CA_ACTIVE )
 		return qfalse;
