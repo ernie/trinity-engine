@@ -6,3 +6,5 @@ code/renderervk/shaders/shaders.list text eol=lf
 
 code/win32/msvc2017/*.vcxproj -text
 code/win32/msvc2017/*.sln -text
+
+.github/workflows/*.yml text eol=lf
