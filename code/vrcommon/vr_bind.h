@@ -64,7 +64,7 @@ typedef struct {
 	int gestureFirst;				  /* the gesture's first key, -1 while none is pressed */
 } vrHolds_t;
 
-/* Controller families share button labels and default layouts. */
+/* Controller families share their buttons and default layouts. */
 enum { VRF_TOUCH = 1, VRF_INDEX = 2, VRF_FRAME = 4, VRF_SIMPLE = 8, VRF_PLAY = VRF_TOUCH | VRF_INDEX | VRF_FRAME };
 
 int VR_ProfileFamily( int profile );
@@ -100,7 +100,8 @@ int VR_CaptureKey( vrHolds_t *h, const unsigned char now[VRK_COUNT] );
 
 /* Whether a controller of the profile's family has the input behind key. */
 int VR_KeyPresent( int profile, vrKey_t key );
-const char *VR_KeyDisplayName( vrKey_t key, int profile, int rightHanded, int switchSticks, char *buf, int size );
+/* The glyph the mod draws for key, hand included: trigger_l, stick_up_r, a, menu, dpad_left (code/game/vr_glyph.c). */
+const char *VR_KeyGlyph( vrKey_t key, int rightHanded, int switchSticks, char *buf, int size );
 /* Every default of the profile's family, the plain set then the Alt set. */
 void VR_ForEachDefault( int profile,
 						void ( *fn )( vrContext_t context, int alt, vrKey_t key, const char *binding, void *user ),
@@ -109,6 +110,9 @@ void VR_ForEachDefault( int profile,
 int VR_DefaultKey( int profile, vrContext_t context, int alt, const char *command, int index );
 /* The default Menu key when no present key is bound to "+key ESCAPE" in global; -1 otherwise. */
 int VR_EscapeFallback( int profile, vrLookup_t lookup, void *user );
+/* The present key that runs command in context's stack, an Alt combo before a plain button as the router ranks them,
+   or -1; *altKey is the combo's Alt button, else -1. */
+int VR_CommandKey( vrContext_t context, const char *command, int profile, vrLookup_t lookup, void *user, int *altKey );
 const char *VR_ContextName( vrContext_t context );
 /* "<layer>" or "<layer>+alt", case-free; a NULL alt refuses the suffix. -1 when unknown. */
 int VR_ContextFromName( const char *name, int *alt );

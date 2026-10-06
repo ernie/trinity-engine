@@ -396,22 +396,20 @@ int VR_CaptureKey( vrHolds_t *h, const unsigned char now[VRK_COUNT] ) {
 	return key;
 }
 
-/* Console-pad style, one letter per word with the hand first (LT, RGC, LTR); directions use the character sheet's arrows. */
-const char *VR_KeyDisplayName( vrKey_t key, int profile, int rightHanded, int switchSticks, char *buf, int size ) {
-	static const char *roleLabels[] = {"T", "G", "GC", "TR", "B", "TP"};
-	static const char *dirLabels[] = {"\x87", "\x86", "\x88", "\x8d"};
-	static const char *oneHand[] = {"A", "B", "X", "Y", "Menu", "View", "\x87", "\x86", "\x88", "\x8d"};
-	const int hand = VR_KeyHand( key, rightHanded, switchSticks );
-	const char side = hand == 1 ? 'R' : 'L';
-	(void)profile;
+/* Names match the mod's glyph atlas; two-hand controls end in the hand the key reads. */
+const char *VR_KeyGlyph( vrKey_t key, int rightHanded, int switchSticks, char *buf, int size ) {
+	static const char *roles[] = {"trigger", "grip", "gripclick", "thumbrest", "bumper", "trackpad"};
+	static const char *dirs[] = {"up", "down", "left", "right"};
+	static const char *oneHand[] = {"a", "b", "x", "y", "menu", "view", "dpad_up", "dpad_down", "dpad_left", "dpad_right"};
+	const char hand = VR_KeyHand( key, rightHanded, switchSticks ) == 1 ? 'r' : 'l';
 	if ( key <= VRK_OFF_TRACKPAD )
-		snprintf( buf, size, "%c%s", side, roleLabels[key / 2] );
+		snprintf( buf, size, "%s_%c", roles[key / 2], hand );
 	else if ( key <= VRK_OFF_B )
-		snprintf( buf, size, "%c%s", side, key == VRK_WPN_A || key == VRK_OFF_A ? "A" : "B" );
+		snprintf( buf, size, "%c_%c", key == VRK_WPN_A || key == VRK_OFF_A ? 'a' : 'b', hand );
 	else if ( key == VRK_MOVESTICK || key == VRK_TURNSTICK )
-		snprintf( buf, size, "%cS", side );
+		snprintf( buf, size, "stickclick_%c", hand );
 	else if ( key <= VRK_TURNSTICK_RIGHT )
-		snprintf( buf, size, "%cS%s", side, dirLabels[(key - VRK_MOVESTICK_UP) % 4] );
+		snprintf( buf, size, "stick_%s_%c", dirs[(key - VRK_MOVESTICK_UP) % 4], hand );
 	else if ( key < VRK_COUNT )
 		snprintf( buf, size, "%s", oneHand[key - VRK_A] );
 	else
@@ -559,6 +557,35 @@ int VR_EscapeFallback( int profile, vrLookup_t lookup, void *user ) {
 			return -1;
 	}
 	return VR_DefaultKey( profile, VRC_GLOBAL, 0, "+key ESCAPE", 0 );
+}
+
+int VR_CommandKey( vrContext_t context, const char *command, int profile, vrLookup_t lookup, void *user, int *altKey ) {
+	vrStack_t stack;
+	const char *binding;
+	int altSet, alt = -1, k;
+	stack.count = 0;
+	stack.base = VRB_PLAYING;
+	stack.layers[stack.count++] = VRC_GLOBAL;
+	if ( context != VRC_GLOBAL && context != VRC_GAMEPLAY )
+		stack.layers[stack.count++] = context;
+	stack.layers[stack.count++] = VRC_GAMEPLAY;
+	*altKey = -1;
+	for ( k = 0; k < VRK_COUNT && alt < 0; k++ )
+		if ( VR_KeyPresent( profile, (vrKey_t)k ) &&
+			 VR_ResolveKey( &stack, 0, (vrKey_t)k, lookup, user, &binding, NULL ) >= 0 && VRB_Runs( binding, "+alt" ) )
+			alt = k;
+	for ( k = 0; k < VRK_COUNT && alt >= 0; k++ )
+		if ( k != alt && VR_KeyPresent( profile, (vrKey_t)k ) &&
+			 VR_ResolveKey( &stack, 1, (vrKey_t)k, lookup, user, &binding, &altSet ) >= 0 && altSet &&
+			 VRB_SameCommand( binding, command ) ) {
+			*altKey = alt;
+			return k;
+		}
+	for ( k = 0; k < VRK_COUNT; k++ )
+		if ( VR_KeyPresent( profile, (vrKey_t)k ) &&
+			 VR_ResolveKey( &stack, 0, (vrKey_t)k, lookup, user, &binding, NULL ) >= 0 && VRB_SameCommand( binding, command ) )
+			return k;
+	return -1;
 }
 
 int VR_FollowModeFor( int followMode, int tvPlayback ) {

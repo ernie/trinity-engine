@@ -743,9 +743,6 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	}
 	{
 		const int mapping = vr.right_handed | (vr_switchThumbsticks->integer != 0) << 1;
-		/* Role keys change names with handedness, so an open vote prompt must rename them. */
-		if ( holds.mapping >= 0 && holds.mapping != mapping )
-			CL_ResolveVoteKeys();
 		VRInput_RunEvents( events, VR_HoldsSetMapping( &holds, mapping, events, ARRAY_LEN( events ) ), qfalse );
 	}
 	if ( !VRInput_Capture() )

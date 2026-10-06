@@ -46,8 +46,6 @@ static void VRBind_Set( vrContext_t context, int alt, vrKey_t key, const char *b
 	cvar_modifiedFlags |= CVAR_ARCHIVE;
 	if ( context == VRC_GLOBAL && !alt )
 		VRBind_UpdateFallback();
-	if ( context == VRC_VOTE && !alt )
-		CL_ResolveVoteKeys();
 }
 
 /* A set's console name: "follow", "follow+alt". */
@@ -122,19 +120,19 @@ int CL_VRBind_Profile( void ) {
 	return activeProfile;
 }
 
-qboolean CL_VRBind_NameFor( const char *context, const char *command, char *buf, int size ) {
-	int alt = 0, c = VR_ContextFromName( context, &alt ), k;
+/* The keys the router would run command with in context, as engine key codes: "<key>" or "<alt>+<key>". */
+static qboolean VRBind_KeysFor( const char *context, const char *command, char *buf, int size ) {
+	int suffix, c = VR_ContextFromName( context, &suffix ), alt, k;
 	if ( c < 0 || !buf || size <= 0 )
 		return qfalse;
-	for ( k = 0; k < VRK_COUNT; k++ ) {
-		const char *b = CL_VRBind_Lookup( (vrContext_t)c, alt, (vrKey_t)k, NULL );
-		if ( b && !Q_stricmp( b, command ) ) {
-			VR_KeyDisplayName( (vrKey_t)k, activeProfile, vr_righthanded ? vr_righthanded->integer : 1,
-							   vr_switchThumbsticks ? vr_switchThumbsticks->integer : 0, buf, size );
-			return qtrue;
-		}
-	}
-	return qfalse;
+	k = VR_CommandKey( (vrContext_t)c, command, activeProfile, CL_VRBind_Lookup, NULL, &alt );
+	if ( k < 0 )
+		return qfalse;
+	if ( alt < 0 )
+		Com_sprintf( buf, size, "%i", K_VR_WPN_TRIGGER + k );
+	else
+		Com_sprintf( buf, size, "%i+%i", K_VR_WPN_TRIGGER + alt, K_VR_WPN_TRIGGER + k );
+	return qtrue;
 }
 
 static void VRBind_PrintUnknownContext( const char *name ) {
@@ -252,10 +250,6 @@ void CL_VRBind_InitCommands( void ) {
 qboolean CL_VRBind_GetValue( const char *key, char *value, int size ) {
 	char context[32];
 	const char *command;
-	if ( !Q_stricmp( key, "vr_menu_skip_button" ) )
-		return CL_VRBind_NameFor( "menu", "+key SPACE", value, size );
-	if ( !Q_stricmp( key, "vr_menu_cancel_button" ) )
-		return CL_VRBind_NameFor( "global", "+key ESCAPE", value, size );
 	/* "recW recH maxW maxH": what supersampling scales and the most the headset allows. */
 	if ( !Q_stricmp( key, "vr_eyesize" ) ) {
 		int recW, recH, maxW, maxH;
@@ -269,12 +263,12 @@ qboolean CL_VRBind_GetValue( const char *key, char *value, int size ) {
 		Com_sprintf( value, size, "%i", K_VR_WPN_TRIGGER );
 		return qtrue;
 	}
-	if ( !Q_stricmpn( key, "vr_keyname ", 11 ) ) {
-		const int k = atoi( key + 11 ) - K_VR_WPN_TRIGGER;
+	if ( !Q_stricmpn( key, "vr_keyglyph ", 12 ) ) {
+		const int k = atoi( key + 12 ) - K_VR_WPN_TRIGGER;
 		if ( k < 0 || k >= VRK_COUNT )
 			return qfalse;
-		VR_KeyDisplayName( (vrKey_t)k, activeProfile, vr_righthanded ? vr_righthanded->integer : 1,
-						   vr_switchThumbsticks ? vr_switchThumbsticks->integer : 0, value, size );
+		VR_KeyGlyph( (vrKey_t)k, vr_righthanded ? vr_righthanded->integer : 1,
+					 vr_switchThumbsticks ? vr_switchThumbsticks->integer : 0, value, size );
 		return qtrue;
 	}
 	if ( !Q_stricmpn( key, "vr_keydefault ", 14 ) ) {
@@ -304,12 +298,12 @@ qboolean CL_VRBind_GetValue( const char *key, char *value, int size ) {
 		Q_strncpyz( value, b ? b : "", size );
 		return qtrue;
 	}
-	if ( Q_stricmpn( key, "vr_bindname ", 12 ) )
+	if ( Q_stricmpn( key, "vr_bindkeys ", 12 ) )
 		return qfalse;
 	key += 12;
 	command = strchr( key, ' ' );
 	if ( !command || command - key >= (int)sizeof( context ) )
 		return qfalse;
 	Q_strncpyz( context, key, command - key + 1 );
-	return CL_VRBind_NameFor( context, command + 1, value, size );
+	return VRBind_KeysFor( context, command + 1, value, size );
 }
