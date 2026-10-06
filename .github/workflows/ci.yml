@@ -13,6 +13,10 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
+      # MSYS2's git checks the mod checkout for local changes and doesn't share Windows Git's autocrlf
+      - run: git config --global core.autocrlf false
+        shell: pwsh
+
       - uses: actions/checkout@v6
         with:
           submodules: recursive
