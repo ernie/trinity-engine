@@ -49,7 +49,7 @@ jobs:
           cmake --build build/release-native --config Release --target trinity-native --parallel 2
           cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
           cmake -S misc/openxr-loader -B build/release-loader -G "MSYS Makefiles" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION="$loader"
-          cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+          cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
           cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
 
   build-linux:
@@ -86,7 +86,7 @@ jobs:
           cmake --build build/release-native --config Release --target trinity-native --parallel 2
           cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
           cmake -S misc/openxr-loader -B build/release-loader -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION="$loader"
-          cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+          cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
           cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
 
   build-macos:
@@ -162,6 +162,14 @@ jobs:
             msbuild "code/win32/msvc2017/$project.vcxproj" /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:PlatformToolset=v143 /p:UseWasapi=USE_WASAPI=0
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+      - name: Build the OpenXR loader as the release does
+        shell: pwsh
+        run: |
+          $loader = (Get-Content misc/release-dependencies.json | ConvertFrom-Json).openxr_revision
+          cmake -S misc/openxr-loader -B build/release-loader -G "Visual Studio 17 2022" -A ${{ matrix.platform }} -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION="$loader"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   build-server-only:
     runs-on: ubuntu-24.04

@@ -13,7 +13,7 @@ From the platform development environment:
 
 ```sh
 cmake -S misc/openxr-loader -B build/loader -DCMAKE_BUILD_TYPE=Release
-cmake --build build/loader --target openxr_loader --parallel
+cmake --build build/loader --target trinity-openxr-loader --parallel
 cmake --install build/loader --component TrinityOpenXRLoader --prefix /path/to/client
 ```
 

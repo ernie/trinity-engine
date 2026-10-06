@@ -96,7 +96,7 @@ jobs:
         cmake --build build/release-native --config Release --target trinity-native --parallel 2
         cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
         cmake -S misc/openxr-loader -B build/release-loader -G "MSYS Makefiles" "-DCMAKE_C_FLAGS=-m$bits" "-DCMAKE_CXX_FLAGS=-m$bits" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
-        cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+        cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
         cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
         cp misc/release-dependencies.json bin/
 
@@ -165,7 +165,7 @@ jobs:
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         cmake -S misc/openxr-loader -B build/release-loader -G "MinGW Makefiles" -DCMAKE_SH=CMAKE_SH-NOTFOUND "-DCMAKE_C_FLAGS=-m$bits" "-DCMAKE_CXX_FLAGS=-m$bits" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+        cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -226,7 +226,7 @@ jobs:
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         cmake -S misc/openxr-loader -B build/release-loader -G "Visual Studio 17 2022" -A ARM64 -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+        cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -288,7 +288,7 @@ jobs:
         cmake --build build/release-native --config Release --target trinity-native --parallel 2
         cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
         cmake -S misc/openxr-loader -B build/release-loader "-DCMAKE_C_FLAGS=-m$bits" "-DCMAKE_CXX_FLAGS=-m$bits" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
-        cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+        cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
         cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
         cp misc/release-dependencies.json bin/
 
@@ -327,7 +327,7 @@ jobs:
         cmake --build build/release-native --config Release --target trinity-native --parallel 2
         cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
         cmake -S misc/openxr-loader -B build/release-loader -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
-        cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+        cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
         cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
         cp misc/release-dependencies.json bin/
 
@@ -372,7 +372,7 @@ jobs:
         cmake --build build/release-native --config Release --target trinity-native --parallel 2
         cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
         cmake -S misc/openxr-loader -B build/release-loader -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
-        cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+        cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
         cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
         cp misc/release-dependencies.json bin/
 
@@ -415,7 +415,7 @@ jobs:
           cmake --build build/release-native --config Release --target trinity-native --parallel 2
           cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
           cmake -S misc/openxr-loader -B build/release-loader -DCMAKE_TOOLCHAIN_FILE="$PWD/misc/trinity-native/linux-armv7.cmake" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
-          cmake --build build/release-loader --config Release --target openxr_loader --parallel 2
+          cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
           cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
           cp misc/release-dependencies.json bin/
 

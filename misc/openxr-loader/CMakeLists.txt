@@ -45,8 +45,10 @@ set(BUILD_WITH_XCB_HEADERS OFF CACHE BOOL "" FORCE)
 # The engine loads this exact basename in every configuration. The SDK's
 # Windows default adds "d" in Debug, which makes that build undiscoverable.
 set(OPENXR_DEBUG_POSTFIX "" CACHE STRING "Engine runtime loader basename" FORCE)
-# added here so --target openxr_loader resolves under every generator; EXCLUDE_FROM_ALL keeps the SDK out of the install prefix
+# EXCLUDE_FROM_ALL keeps the SDK out of the install prefix, and also out of a Visual Studio solution's
+# top level, so builds name trinity-openxr-loader, which every generator resolves
 add_subdirectory("${TRINITY_OPENXR_SOURCE_DIR}" sdk EXCLUDE_FROM_ALL)
+add_custom_target(trinity-openxr-loader DEPENDS openxr_loader)
 if(MINGW)
     # Avoid private compiler/JSON DLL dependencies in the game distribution.
     target_link_options(openxr_loader PRIVATE -static)
