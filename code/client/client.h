@@ -574,10 +574,10 @@ extern	cvar_t	*cl_mapAutoDownload;
 extern	cvar_t	*cl_dlDirectory;
 extern	cvar_t	*cl_tvDownload;
 extern	cvar_t	*cl_tvdOffer;
+#endif
 extern	cvar_t	*cl_voteYesKey;
 extern	cvar_t	*cl_voteNoKey;
 void CL_ResolveVoteKeys( void );
-#endif
 #ifdef __EMSCRIPTEN__
 extern	cvar_t	*cl_demoPlayer;
 #endif

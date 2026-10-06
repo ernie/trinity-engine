@@ -48,6 +48,11 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 #endif
 
+/* Emscripten's AL headers have no calling-convention macro */
+#ifndef ALC_APIENTRY
+#define ALC_APIENTRY
+#endif
+
 /* Hack to enable compiling both on OpenAL SDK and OpenAL-soft. */
 #ifndef ALC_ENUMERATE_ALL_EXT
 #  define ALC_ENUMERATE_ALL_EXT 1
