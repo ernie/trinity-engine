@@ -40,6 +40,8 @@ set(DYNAMIC_LOADER ON CACHE BOOL "" FORCE)
 set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(BUILD_API_LAYERS OFF CACHE BOOL "" FORCE)
 set(BUILD_WITH_SYSTEM_JSONCPP OFF CACHE BOOL "" FORCE)
+# The engine drives OpenXR through Vulkan only; XCB support would need xcb/glx.h whenever any xcb.pc is installed.
+set(BUILD_WITH_XCB_HEADERS OFF CACHE BOOL "" FORCE)
 # The engine loads this exact basename in every configuration. The SDK's
 # Windows default adds "d" in Debug, which makes that build undiscoverable.
 set(OPENXR_DEBUG_POSTFIX "" CACHE STRING "Engine runtime loader basename" FORCE)
