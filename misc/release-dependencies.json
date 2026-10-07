@@ -1,11 +1,11 @@
 {
   "openxr_revision": "f2448a8797c85814aa892efc1ab8707900fbcc78",
-  "trinity_revision": "",
-  "trinity_release": "",
+  "trinity_revision": "ffb16668cfc45bbb224147d072601149e421feec",
+  "trinity_release": "v1.0.0",
   "assets": {
-    "pak8t.pk3": "",
-    "pak3t.pk3": "",
-    "zzz-trinity-announcer.pk3": ""
+    "pak8t.pk3": "aa13f9cdd8ae58aedb9b11d1a6be0a8c17c5311f41cd8717edf9b2ef169a55ee",
+    "pak3t.pk3": "e7adb3181a60609512ff17f05cad8aae5b4e4c69877626861ec5d4c9af58511c",
+    "zzz-trinity-announcer.pk3": "dbbe32c1ee81f0c94d0be6dc59688a380f9e17cf8ac0755f6c4ba0505873f3fd"
   },
   "msys32_revision": "c5cff5704bbc35706dfa81cbdc4e842d92339d34"
 }
