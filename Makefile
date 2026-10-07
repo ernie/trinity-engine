@@ -1819,6 +1819,14 @@ $(B)/ded/%.o: $(W32DIR)/%.c
 $(B)/ded/%.o: $(W32DIR)/%.rc
 	$(DO_WINDRES)
 
+# Rewritten only when the version changes, so the objects that embed it rebuild then
+$(B)/version.txt: FORCE
+	@echo '$(TRINITY_ENGINE_VERSION)' | cmp -s - $@ || echo '$(TRINITY_ENGINE_VERSION)' > $@
+
+$(B)/client/common.o $(B)/ded/common.o $(B)/client/unix_main.o $(B)/ded/unix_main.o: $(B)/version.txt
+
+FORCE:
+
 #############################################################################
 # WEB / EMSCRIPTEN BUILDS
 #############################################################################

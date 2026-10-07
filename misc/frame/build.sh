@@ -30,14 +30,16 @@ TRINITY_OPENXR_TOOLCHAIN_FILE=$DST/trinity-engine/misc/trinity-native/linux-arm6
 EOF
 
 cd "$DST/trinity-engine"
+# the Windows checkout's CRLF files would all read as modified to git in WSL
+version=$(git -c core.autocrlf=true -c core.fileMode=false describe --tags --always --dirty 2>/dev/null || echo unknown)
 status=0
 PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
 	make -j"$(nproc)" release ARCH=aarch64 CC=aarch64-linux-gnu-gcc HOST_CC=cc \
-	STRIP=aarch64-linux-gnu-strip "$@" > "$LOG" 2>&1 || status=$?
+	STRIP=aarch64-linux-gnu-strip TRINITY_ENGINE_VERSION="$version" "$@" > "$LOG" 2>&1 || status=$?
 # make can exit 0 after a compile error in this build
 if [ "$status" -ne 0 ] || grep -qE 'error:|\*\*\*' "$LOG"; then
 	grep -E 'error:|\*\*\*' "$LOG" || tail -20 "$LOG"
 	echo "build failed; full log in $LOG"
 	exit 1
 fi
-echo "built $DST/trinity-engine/build/release-linux-aarch64"
+echo "built $version in $DST/trinity-engine/build/release-linux-aarch64"
