@@ -89,6 +89,44 @@ jobs:
           cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
           cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
 
+  build-frame:
+    # Mirrors the release workflow's steam-frame job; TRINITY_FRAME code builds nowhere else
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install build tools
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -y install make gcc g++ cmake jq libcurl4-openssl-dev mesa-common-dev libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev libsdl2-dev
+
+      - name: Build
+        run: make install -j$(nproc) ARCH=aarch64 CC=gcc TRINITY_FRAME=1 DESTDIR=bin
+
+      - name: Select native-module source
+        id: dependencies
+        run: |
+          revision=$(jq -r '.trinity_revision // empty' misc/release-dependencies.json)
+          echo "ref=${revision:-main}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          repository: ernie/trinity
+          ref: ${{ steps.dependencies.outputs.ref }}
+          path: build/trinity
+      - name: Build native modules and OpenXR loader
+        run: |
+          set -euo pipefail
+          revision=$(git -C build/trinity rev-parse HEAD)
+          loader=$(jq -r .openxr_revision misc/release-dependencies.json)
+          cmake -S misc/trinity-native -B build/release-native -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_SOURCE_DIR="$PWD/build/trinity" -DTRINITY_SOURCE_REVISION="$revision"
+          cmake --build build/release-native --config Release --target trinity-native --parallel 2
+          cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
+          cmake -S misc/openxr-loader -B build/release-loader -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION="$loader"
+          cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
+          cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
+
   build-macos:
     # Mirrors the pre-signing steps of the release workflow's macos job so
     # PRs catch anything that would break a tag-triggered release: per-arch
