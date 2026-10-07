@@ -856,7 +856,6 @@ void Sys_ApplyPendingUpdate( void )
 	FILE *f;
 	qboolean exeSwapped = qfalse;
 	int applied = 0;
-	char *sep;
 
 	#define MAX_UPDATE_FILES 256
 	static char movedDst[MAX_UPDATE_FILES][MAX_OSPATH];
@@ -936,23 +935,8 @@ void Sys_ApplyPendingUpdate( void )
 		Com_sprintf( dstPath, sizeof( dstPath ), "%s\\%s", pwd, line );
 		Com_sprintf( bakPath, sizeof( bakPath ), "%s\\%s", previousDir, line );
 
-		// ensure destination directory exists
-		sep = strrchr( dstPath, '\\' );
-		if ( sep ) {
-			char dir[MAX_OSPATH];
-			int dirLen = (int)( sep - dstPath );
-			Q_strncpyz( dir, dstPath, dirLen + 1 );
-			CreateDirectory( dir, NULL );
-		}
-
-		// ensure backup directory exists
-		sep = strrchr( bakPath, '\\' );
-		if ( sep ) {
-			char dir[MAX_OSPATH];
-			int dirLen = (int)( sep - bakPath );
-			Q_strncpyz( dir, bakPath, dirLen + 1 );
-			CreateDirectory( dir, NULL );
-		}
+		FS_CreatePath( dstPath );
+		FS_CreatePath( bakPath );
 
 		// backup current file to .updates/previous/
 		MoveFile( dstPath, bakPath );

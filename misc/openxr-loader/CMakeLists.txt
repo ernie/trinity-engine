@@ -76,7 +76,8 @@ else()
         RUNTIME DESTINATION "${TRINITY_OPENXR_INSTALL_DIR}" COMPONENT TrinityOpenXRLoader
         LIBRARY DESTINATION "${TRINITY_OPENXR_INSTALL_DIR}" COMPONENT TrinityOpenXRLoader)
 endif()
+# One level deep: installed clients' updaters create only the file's parent directory
 install(FILES "${TRINITY_OPENXR_SOURCE_DIR}/LICENSE"
-    DESTINATION licenses/openxr COMPONENT TrinityOpenXRLoader)
+    DESTINATION licenses RENAME openxr-LICENSE COMPONENT TrinityOpenXRLoader)
 install(FILES "${TRINITY_OPENXR_SOURCE_DIR}/src/external/jsoncpp/LICENSE"
-    DESTINATION licenses/openxr RENAME JSONCPP-LICENSE COMPONENT TrinityOpenXRLoader)
+    DESTINATION licenses RENAME openxr-JSONCPP-LICENSE COMPONENT TrinityOpenXRLoader)

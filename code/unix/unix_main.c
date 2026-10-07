@@ -1251,7 +1251,7 @@ void Sys_ApplyPendingUpdate( void )
 	version[0] = '\0';
 
 	while ( fgets( line, sizeof( line ), f ) ) {
-		char *nl, *pipe, *sep;
+		char *nl, *pipe;
 
 		nl = strchr( line, '\n' );
 		if ( nl ) *nl = '\0';
@@ -1282,23 +1282,8 @@ void Sys_ApplyPendingUpdate( void )
 		Com_sprintf( dstPath, sizeof( dstPath ), "%s/%s", pwd, line );
 		Com_sprintf( bakPath, sizeof( bakPath ), "%s/%s", previousDir, line );
 
-		// ensure destination directory exists
-		sep = strrchr( dstPath, '/' );
-		if ( sep ) {
-			char dir[MAX_OSPATH];
-			int dirLen = (int)( sep - dstPath );
-			Q_strncpyz( dir, dstPath, dirLen + 1 );
-			Sys_Mkdir( dir );
-		}
-
-		// ensure backup directory exists
-		sep = strrchr( bakPath, '/' );
-		if ( sep ) {
-			char dir[MAX_OSPATH];
-			int dirLen = (int)( sep - bakPath );
-			Q_strncpyz( dir, bakPath, dirLen + 1 );
-			Sys_Mkdir( dir );
-		}
+		FS_CreatePath( dstPath );
+		FS_CreatePath( bakPath );
 
 		// backup current file to .updates/previous/
 		rename( dstPath, bakPath );
