@@ -1061,39 +1061,6 @@ static void Emscripten_MainLoopStep( void )
 
 /*
 ==================
-Sys_RestartProcess
-
-Relaunch the engine process.
-==================
-*/
-void NORETURN Sys_RestartProcess( void )
-{
-	char exePath[MAX_OSPATH];
-
-	exePath[0] = '\0';
-#ifdef __linux__
-	{
-		ssize_t len = readlink( "/proc/self/exe", exePath, sizeof( exePath ) - 1 );
-		if ( len > 0 )
-			exePath[len] = '\0';
-	}
-#elif defined(__APPLE__)
-	{
-		uint32_t bufSize = sizeof( exePath );
-		_NSGetExecutablePath( exePath, &bufSize );
-	}
-#endif
-
-	if ( exePath[0] ) {
-		char *args[] = { exePath, NULL };
-		execv( exePath, args );
-	}
-	_exit( 0 );
-}
-
-
-/*
-==================
 Sys_RemoveDirectoryRecursive
 
 Recursively delete a directory and all its contents (Unix).

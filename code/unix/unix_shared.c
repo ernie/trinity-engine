@@ -38,6 +38,14 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include <dlfcn.h>
 #endif
 #include <libgen.h>
+#include <fcntl.h>
+#ifdef __linux__
+#include <sys/auxv.h> // getauxval
+#endif
+#ifdef __APPLE__
+#include <mach-o/dyld.h> // _NSGetExecutablePath
+#include <crt_externs.h> // _NSGetArgv
+#endif
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qcommon.h"
@@ -388,6 +396,104 @@ const char *Sys_Pwd( void )
 	}
 
 	return pwd;
+}
+
+
+#ifdef __linux__
+/*
+==================
+Sys_LaunchArgs
+
+The NULL-terminated launch arguments, read back from /proc/self/cmdline.
+==================
+*/
+static char **Sys_LaunchArgs( void )
+{
+	char *buf = NULL, *grown, **args;
+	size_t len = 0, cap = 0, i;
+	ssize_t n;
+	int fd, count = 0;
+
+	fd = open( "/proc/self/cmdline", O_RDONLY );
+	if ( fd < 0 )
+		return NULL;
+
+	do {
+		if ( len == cap ) {
+			cap = cap ? cap * 2 : 4096;
+			grown = realloc( buf, cap + 1 );
+			if ( !grown ) {
+				free( buf );
+				close( fd );
+				return NULL;
+			}
+			buf = grown;
+		}
+		n = read( fd, buf + len, cap - len );
+		if ( n > 0 )
+			len += n;
+	} while ( n > 0 );
+	close( fd );
+
+	if ( len == 0 ) {
+		free( buf );
+		return NULL;
+	}
+	if ( buf[len - 1] != '\0' )
+		buf[len++] = '\0';
+
+	for ( i = 0; i < len; i++ ) {
+		if ( buf[i] == '\0' )
+			count++;
+	}
+
+	args = malloc( ( count + 1 ) * sizeof( *args ) );
+	if ( !args ) {
+		free( buf );
+		return NULL;
+	}
+	args[0] = buf;
+	for ( i = 0, count = 1; i < len - 1; i++ ) {
+		if ( buf[i] == '\0' )
+			args[count++] = &buf[i + 1];
+	}
+	args[count] = NULL;
+
+	return args;
+}
+#endif
+
+
+/*
+==================
+Sys_RestartProcess
+
+Relaunch the engine process with its launch arguments.
+==================
+*/
+void NORETURN Sys_RestartProcess( void )
+{
+	const char *exePath = NULL;
+	char **args = NULL;
+
+#ifdef __linux__
+	// the path we were exec'd with; /proc/self/exe follows a binary an update moved aside
+	exePath = (const char *)getauxval( AT_EXECFN );
+	args = Sys_LaunchArgs();
+#elif defined(__APPLE__)
+	char path[MAX_OSPATH];
+	uint32_t bufSize = sizeof( path );
+
+	if ( _NSGetExecutablePath( path, &bufSize ) == 0 )
+		exePath = path;
+	args = *_NSGetArgv();
+#endif
+
+	if ( exePath ) {
+		char *noArgs[] = { (char *)exePath, NULL };
+		execv( exePath, args ? args : noArgs );
+	}
+	_exit( 0 );
 }
 
 
