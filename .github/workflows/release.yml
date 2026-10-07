@@ -9,7 +9,6 @@ jobs:
   dependency-gate:
     runs-on: ubuntu-latest
     outputs:
-      msys32_revision: ${{ steps.pins.outputs.msys32_revision }}
       trinity_revision: ${{ steps.pins.outputs.trinity_revision }}
       openxr_revision: ${{ steps.pins.outputs.openxr_revision }}
     steps:
@@ -22,7 +21,7 @@ jobs:
           set -euo pipefail
           manifest=misc/release-dependencies.json
           jq -e '
-            ([.openxr_revision, .trinity_revision, .msys32_revision] |
+            ([.openxr_revision, .trinity_revision] |
               all(.[]; test("^[0-9a-fA-F]{40}$"))) and
             (.trinity_release | test("^v[0-9A-Za-z._-]+$")) and
             ([.assets["pak8t.pk3"], .assets["pak3t.pk3"], .assets["zzz-trinity-announcer.pk3"]] |
@@ -99,77 +98,6 @@ jobs:
         cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
         cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
         cp misc/release-dependencies.json bin/
-
-    - uses: actions/upload-artifact@v7
-      with:
-        name: windows-${{ matrix.cc }}-${{ matrix.arch }}
-        path: bin
-        if-no-files-found: error
-        retention-days: 5
-
-  windows-msys32:
-    needs: dependency-gate
-    name: Release Windows-msys32 ${{ matrix.arch }}
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86, x86_64]
-
-    steps:
-    - name: Checkout current repo
-      uses: actions/checkout@v6
-
-    - name: Checkout msys32 tools from sibling repo
-      uses: actions/checkout@v6
-      with:
-        repository: ec-/msys32
-        ref: ${{ needs.dependency-gate.outputs.msys32_revision }}
-        path: msys
-
-    - name: Extract msys32.7z
-      run: |
-        7z x %GITHUB_WORKSPACE%/msys/msys32.7z -o%GITHUB_WORKSPACE%/msys
-      shell: cmd
-
-    - name: Add the msys32 toolchain ahead of the runner tools
-      shell: pwsh
-      run: |
-        @("$env:GITHUB_WORKSPACE/msys/mingw/bin",
-          "$env:GITHUB_WORKSPACE/msys/bin",
-          "$env:GITHUB_WORKSPACE/msys") | Add-Content -LiteralPath $env:GITHUB_PATH
-
-    - name: Verify release dependency tools
-      shell: pwsh
-      run: |
-        Get-Command cmake -ErrorAction Stop
-        Get-Command mingw32-make -ErrorAction Stop
-        Get-Command gcc -ErrorAction Stop
-        Get-Command g++ -ErrorAction Stop
-        Get-Command git -ErrorAction Stop
-
-    - name: Build
-      shell: cmd
-      run: |
-        make install ARCH=${{ matrix.arch }} DESTDIR=bin
-
-    - name: Build pinned runtime dependencies
-      shell: pwsh
-      run: |
-        $bits = if ("${{ matrix.arch }}" -eq "x86") { 32 } else { 64 }
-        cmake -S misc/trinity-native -B build/release-native -G "MinGW Makefiles" -DCMAKE_SH=CMAKE_SH-NOTFOUND "-DCMAKE_C_FLAGS=-m$bits" "-DCMAKE_CXX_FLAGS=-m$bits" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_SOURCE_REVISION=${{ needs.dependency-gate.outputs.trinity_revision }}
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        cmake --build build/release-native --config Release --target trinity-native --parallel 2
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        cmake --install build/release-native --config Release --component TrinityNative --prefix "$PWD/bin"
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        cmake -S misc/openxr-loader -B build/release-loader -G "MinGW Makefiles" -DCMAKE_SH=CMAKE_SH-NOTFOUND "-DCMAKE_C_FLAGS=-m$bits" "-DCMAKE_CXX_FLAGS=-m$bits" -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION=${{ needs.dependency-gate.outputs.openxr_revision }}
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        Copy-Item misc/release-dependencies.json bin/
 
     - uses: actions/upload-artifact@v7
       with:
@@ -554,7 +482,7 @@ jobs:
         retention-days: 5
 
   release:
-    needs: [windows-msys, windows-msys32, windows-msvc, ubuntu-x86, ubuntu-arm64, steam-frame, build-armv7, macos, web]
+    needs: [windows-msys, windows-msvc, ubuntu-x86, ubuntu-arm64, steam-frame, build-armv7, macos, web]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

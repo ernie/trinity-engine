@@ -62,9 +62,8 @@ verified assets between packaging jobs. Windows/Linux jobs configure, build and
 install the native modules and OpenXR loader through their CMake entry points.
 
 Pin the published Trinity commit, matching release tag, and asset hashes before
-release packaging. The msys32 compiler repository also requires an immutable
-revision. Missing pins fail the release gate; developer and dedicated builds
-remain available.
+release packaging. Missing pins fail the release gate; developer and dedicated
+builds remain available.
 
 `TRINITY_RELEASE_BUILD=ON` in CMake verifies the source checkout is clean and
 matches the full pin, and checks VR state declarations against the engine. The
