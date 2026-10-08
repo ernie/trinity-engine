@@ -47,16 +47,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86, x86_64]
+        arch: [x86_64]
         cc: [gcc]
         include:
-          - arch: x86
-            msystem: MINGW32
-            prefix: mingw-w64-i686
-
           - arch: x86_64
-            msystem: MINGW64
-            prefix: mingw-w64-x86_64
+            msystem: UCRT64
+            prefix: mingw-w64-ucrt-x86_64
 
     defaults:
       run:
@@ -510,7 +506,6 @@ jobs:
             linux-arm64
             linux-armv7
             frame-arm64
-            windows-mingw-x86
             windows-mingw-x86_64
             windows-msvc-arm64
           )
@@ -546,7 +541,6 @@ jobs:
           zip -r -y trinity-linux-arm64.zip          ./linux-arm64/
           zip -r -y trinity-linux-armv7.zip          ./linux-armv7/
           zip -r -y trinity-frame-arm64.zip          ./frame-arm64/
-          7z a -r trinity-windows-mingw-x86.zip    ./windows-mingw-x86/*
           7z a -r trinity-windows-mingw-x86_64.zip ./windows-mingw-x86_64/*
           7z a -r trinity-windows-msvc-arm64.zip   ./windows-msvc-arm64/*
           7z a -r trinity-web-engine.zip           ./web-engine/*

@@ -10,8 +10,9 @@ make distclean
 make -j32 CFLAGS='-O2 -march=i586 -mtune=i686'
 make install
 
+# lib64 is built in the UCRT64 shell; -fpermissive keeps GCC 14+ from failing the configure probes
 make distclean
-./configure --prefix=/q3e-lib64 --host=x86_64-w64-mingw32 ${OPTIONS}
+./configure --prefix=/q3e-lib64 --host=x86_64-w64-mingw32 --without-zstd ${OPTIONS} CFLAGS='-O2 -fpermissive'
 make -j32
 make install
 

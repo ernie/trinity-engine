@@ -19,9 +19,9 @@ Install the build dependencies:
 `MSYS2 MSYS`
 
 * pacman -Syu
-* pacman -S make mingw-w64-x86_64-gcc mingw-w64-i686-gcc
+* pacman -S make mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-i686-gcc
 
-Use `MSYS2 MINGW32` or `MSYS2 MINGW64` depending on your target system, then copy resulting binaries from created `build` directory or use command:
+Use `MSYS2 UCRT64` for 64-bit or `MSYS2 MINGW32` for 32-bit, then copy resulting binaries from created `build` directory or use command:
 
 `make install DESTDIR=<path_to_game_files>`
 

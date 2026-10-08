@@ -195,13 +195,13 @@ static void Update_BuildAssetName( char *buf, int bufSize )
     #if defined(_M_ARM64)
 	Com_sprintf( buf, bufSize, "%s-windows-msvc-arm64.zip", UPDATE_ASSET_PREFIX );
     #else
-	Com_sprintf( buf, bufSize, "%s-windows-msvc-x86_64.zip", UPDATE_ASSET_PREFIX );
+	buf[0] = '\0';
     #endif
   #else
     #if defined(__x86_64__) || defined(_M_X64)
 	Com_sprintf( buf, bufSize, "%s-windows-mingw-x86_64.zip", UPDATE_ASSET_PREFIX );
     #else
-	Com_sprintf( buf, bufSize, "%s-windows-mingw-x86.zip", UPDATE_ASSET_PREFIX );
+	buf[0] = '\0';
     #endif
   #endif
 #elif defined(__APPLE__)
