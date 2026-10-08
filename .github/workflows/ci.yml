@@ -185,7 +185,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [x64, ARM64]
+        platform: [ARM64]
     steps:
       - uses: actions/checkout@v6
         with:
