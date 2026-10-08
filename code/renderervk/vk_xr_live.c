@@ -94,7 +94,7 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 	}
 	memset( &ci, 0, sizeof( ci ) );
 	ci.type = XR_TYPE_INSTANCE_CREATE_INFO;
-	strcpy( ci.applicationInfo.applicationName, "Trinity Engine" );
+	strcpy( ci.applicationInfo.applicationName, "Trinity" );
 	strcpy( ci.applicationInfo.engineName, "Trinity Engine" );
 	ci.enabledExtensionCount = 1;
 	if ( ctx->picoInteraction )

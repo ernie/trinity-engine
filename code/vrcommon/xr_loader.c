@@ -209,7 +209,7 @@ static xrLoaderStatus_t XRLoader_Open( xrLoaderState_t *st, xrLoaderInfo_t *info
 	}
 	memset( &ci, 0, sizeof( ci ) );
 	ci.type = XR_TYPE_INSTANCE_CREATE_INFO;
-	strcpy( ci.applicationInfo.applicationName, "Trinity Engine" );
+	strcpy( ci.applicationInfo.applicationName, "Trinity" );
 	strcpy( ci.applicationInfo.engineName, "Trinity Engine" );
 	/* 1.1 first; retry 1.0 unless the failure was one 1.0 would share */
 	ci.applicationInfo.apiVersion = XR_MAKE_VERSION( 1, 1, 0 );

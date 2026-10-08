@@ -2099,9 +2099,9 @@ static void create_instance( void )
 
 	appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	appInfo.pNext = NULL;
-	appInfo.pApplicationName = NULL; // Q3_VERSION;
+	appInfo.pApplicationName = "Trinity";
 	appInfo.applicationVersion = 0x0;
-	appInfo.pEngineName = NULL;
+	appInfo.pEngineName = "Trinity Engine";
 	appInfo.engineVersion = 0x0;
 #ifdef _DEBUG
 	appInfo.apiVersion = VK_API_VERSION_1_1;

@@ -143,7 +143,10 @@ fi
 
 AVAILABLE_ARCHS=""
 
-TRINITY_VERSION="1.32e"
+# Bundle versions must be numeric X.Y.Z: the CI tag, else the latest reachable one
+TRINITY_VERSION=$( { echo "${GITHUB_REF_NAME}"; git describe --tags --abbrev=0 2>/dev/null; } | \
+	sed -n 's/^v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1 )
+TRINITY_VERSION="${TRINITY_VERSION:-0.0.0}"
 TRINITY_CLIENT_ARCHS=""
 TRINITY_SERVER_ARCHS=""
 

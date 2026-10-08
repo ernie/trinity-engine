@@ -310,14 +310,6 @@ OPUS_FLAGS = -I$(OPUSDIR)/include -I$(OPUSDIR)/celt -I$(OPUSDIR)/silk -I$(OPUSDI
 OPUS_CFLAGS = -DOPUS_BUILD -DHAVE_LRINTF -DFLOATING_POINT -DFLOAT_APPROX -DUSE_ALLOCA
 OPUS_ARCH_FLAGS =
 
-# extract version info
-ifneq ($(COMPILE_PLATFORM),darwin)
-VERSION=$(shell grep ".\+define[ \t]\+Q3_VERSION[ \t]\+\+" $(CMDIR)/q_shared.h | \
-  sed -e 's/.*".* \([^ ]*\)"/\1/')
-else
-VERSION=1.32e
-endif
-
 # common qvm definition
 ifeq ($(ARCH),x86_64)
   HAVE_VM_COMPILED = true
@@ -935,7 +927,7 @@ targets: makedirs tools
 	@echo ""
 	@echo "Building quake3 in $(B):"
 	@echo ""
-	@echo "  VERSION: $(VERSION)"
+	@echo "  VERSION: $(TRINITY_ENGINE_VERSION)"
 	@echo "  PLATFORM: $(PLATFORM)"
 	@echo "  ARCH: $(ARCH)"
 	@echo "  COMPILE_PLATFORM: $(COMPILE_PLATFORM)"
@@ -1823,7 +1815,8 @@ $(B)/ded/%.o: $(W32DIR)/%.rc
 $(B)/version.txt: FORCE
 	@echo '$(TRINITY_ENGINE_VERSION)' | cmp -s - $@ || echo '$(TRINITY_ENGINE_VERSION)' > $@
 
-$(B)/client/common.o $(B)/ded/common.o $(B)/client/unix_main.o $(B)/ded/unix_main.o: $(B)/version.txt
+$(B)/client/common.o $(B)/ded/common.o $(B)/client/unix_main.o $(B)/ded/unix_main.o \
+	$(B)/client/cl_main.o $(B)/client/cl_console.o $(B)/client/cl_curl.o: $(B)/version.txt
 
 FORCE:
 
