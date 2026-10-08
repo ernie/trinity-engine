@@ -132,11 +132,35 @@ static VkFormat VKXR_UnormTwin( VkFormat format ) {
 	}
 }
 
+/* The extra create flags are optional; a runtime that refuses them gets the plain request. */
+static XrResult VKXR_CreateSwapchain( vkXRVk_t *ctx, XrSwapchainCreateInfo *ci, vkXRVkTarget_t *target ) {
+	XrVulkanSwapchainCreateInfoMETA meta;
+	XrResult result;
+	if ( ctx->createInfoMeta && ctx->targetCreateFlags ) {
+		memset( &meta, 0, sizeof( meta ) );
+		meta.type = XR_TYPE_VULKAN_SWAPCHAIN_CREATE_INFO_META;
+		meta.next = ci->next;
+		meta.additionalCreateFlags = ctx->targetCreateFlags;
+		ci->next = &meta;
+		result = ctx->xr.CreateSwapchain( ctx->session, ci, &target->handle );
+		ci->next = meta.next;
+		if ( result == XR_SUCCESS ) {
+			target->createFlags = ctx->targetCreateFlags;
+			return result;
+		}
+		target->handle = XR_NULL_HANDLE;
+	}
+	result = ctx->xr.CreateSwapchain( ctx->session, ci, &target->handle );
+	if ( result != XR_SUCCESS )
+		target->handle = XR_NULL_HANDLE;
+	return result;
+}
+
 XrResult VK_XRVK_CreateTarget( vkXRVk_t *ctx, vkXRVkTarget_t *target ) {
 	XrViewConfigurationView views[2];
 	XrSwapchainCreateInfo ci;
 	XrVulkanSwapchainFormatListCreateInfoKHR formats;
-	XrVulkanSwapchainCreateInfoMETA meta;
+	XrSwapchainCreateInfoFoveationFB foveation;
 	VkFormat viewFormats[2];
 	uint32_t i, count, width[2], height[2];
 	XrResult result;
@@ -206,21 +230,18 @@ XrResult VK_XRVK_CreateTarget( vkXRVk_t *ctx, vkXRVkTarget_t *target ) {
 		formats.viewFormats = viewFormats;
 		ci.next = &formats;
 	}
-	if ( ctx->createInfoMeta && ctx->targetCreateFlags ) {
-		memset( &meta, 0, sizeof( meta ) );
-		meta.type = XR_TYPE_VULKAN_SWAPCHAIN_CREATE_INFO_META;
-		meta.next = ci.next;
-		meta.additionalCreateFlags = ctx->targetCreateFlags;
-		ci.next = &meta;
-		if ( ctx->xr.CreateSwapchain( ctx->session, &ci, &target->handle ) == XR_SUCCESS )
-			target->createFlags = ctx->targetCreateFlags;
-		else {
-			target->handle = XR_NULL_HANDLE;
-			ci.next = meta.next; // the flags are optional; retry without them
-		}
+	// the foveation chain is optional; retry without it
+	if ( ctx->foveation ) {
+		memset( &foveation, 0, sizeof( foveation ) );
+		foveation.type = XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB;
+		foveation.next = (void *)ci.next;
+		foveation.flags = XR_SWAPCHAIN_CREATE_FOVEATION_FRAGMENT_DENSITY_MAP_BIT_FB;
+		ci.next = &foveation;
+		target->foveation = VKXR_CreateSwapchain( ctx, &ci, target ) == XR_SUCCESS;
+		ci.next = foveation.next;
 	}
 	if ( !target->handle )
-		CHECK( ctx->xr.CreateSwapchain( ctx->session, &ci, &target->handle ) );
+		CHECK( VKXR_CreateSwapchain( ctx, &ci, target ) );
 	CHECK( ctx->xr.EnumerateSwapchainImages( target->handle, 0, &target->count, NULL ) );
 	if ( !target->count || target->count > VK_XRVK_MAX_IMAGES ) {
 		result = XR_ERROR_LIMIT_REACHED;

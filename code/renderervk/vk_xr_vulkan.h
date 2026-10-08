@@ -36,6 +36,7 @@ typedef struct {
 	XrSwapchain handle;
 	uint32_t width, height, count, index;
 	int acquired, waited;
+	int foveation; /* created for XR_FB_foveation profiles */
 	VkImageCreateFlags createFlags; /* extra flags the runtime accepted */
 	XrSwapchainImageVulkan2KHR images[VK_XRVK_MAX_IMAGES];
 } vkXRVkTarget_t;
@@ -59,6 +60,7 @@ typedef struct {
 	int modelsChanged; /* the set of controller models changed during the last action sync */
 	int formatList;
 	int createInfoMeta;					   /* XR_META_vulkan_swapchain_create_info enabled */
+	int foveation;						   /* ask for swapchains that take XR_FB_foveation profiles; set before Bind */
 	VkImageCreateFlags targetCreateFlags; /* extra flags to request; set before Bind */
 	XrTime displayTime;
 	XrDuration displayPeriod; /* the runtime's predicted frame interval, i.e. the display rate it runs the app at */

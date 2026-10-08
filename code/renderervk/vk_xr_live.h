@@ -11,9 +11,10 @@ typedef struct {
 	PFN_xrGetInstanceProcAddr getproc;
 	PFN_xrDestroyInstance destroy;
 	int picoInteraction, displayRefresh, eyeGaze, formatList, frameInteraction, createInfoMeta;
+	int foveationCenter; /* XR_META_foveation_eye_tracked and the XR_FB foveation extensions it builds on */
 	int models; /* XR_EXT_render_model and XR_EXT_interaction_render_model are both enabled */
 	XrResult modelsRefused; /* why the runtime turned down an instance with them, when it lists them */
-	const char *enabled[10];
+	const char *enabled[15];
 	unsigned enabledCount;
 	char runtimeName[XR_MAX_RUNTIME_NAME_SIZE];
 } vkXRLive_t;

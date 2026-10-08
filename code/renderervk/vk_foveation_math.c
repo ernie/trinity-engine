@@ -1,10 +1,10 @@
 #include "vk_foveation_math.h"
 #include "../vrcommon/vr_float.h"
 #define FOV_PI 3.14159265358979323846f
-int VK_FovMode( int requested, int attachment, int gaze ) {
+int VK_FovMode( int requested, int attachment, int eyesFollowed ) {
 	if ( !attachment || requested <= 0 )
 		return 0;
-	return requested >= 2 && gaze ? 2 : 1;
+	return requested >= 2 && eyesFollowed ? 2 : 1;
 }
 uint8_t VK_FovLegalRate( const vkFovRate_t *rates, uint32_t count, uint32_t width, uint32_t height,
 						 uint32_t samples ) {
@@ -76,7 +76,8 @@ static void quantize( float center[2][2] ) {
 			center[i][j] = roundf( center[i][j] * 1024.0f ) / 1024.0f;
 }
 void VK_FovCenters( vkFovCenters_t *s, const float head[4], const float eye[2][4], const float fov[2][4],
-					int mode, int screen, int scoped, const float gaze[3], int gazeValid, int64_t time ) {
+					int mode, int screen, int scoped, const float gaze[3], int gazeValid,
+					const float runtime[2][2], int runtimeValid, int64_t time ) {
 	unsigned i, j;
 	float fixed[3], centers[2][2], mid;
 	s->valid = 0;
@@ -89,6 +90,16 @@ void VK_FovCenters( vkFovCenters_t *s, const float head[4], const float eye[2][4
 	if ( scoped ) {
 		memset( s->center, 0, sizeof( s->center ) );
 		s->eyeTracked = 0;
+		s->valid = 1;
+		return;
+	}
+	/* The runtime's center leads the raw gaze pose, which trails the eyes as they counter-rotate in head turns. */
+	if ( mode == 2 && !screen && runtimeValid && VR_FloatsFinite( runtime[0], 2 ) &&
+		 VR_FloatsFinite( runtime[1], 2 ) ) {
+		memcpy( s->center, runtime, sizeof( s->center ) );
+		quantize( s->center );
+		s->eyeTracked = 1;
+		s->heldTime = time;
 		s->valid = 1;
 		return;
 	}

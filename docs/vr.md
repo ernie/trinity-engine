@@ -147,6 +147,15 @@ Supersampling, refresh rate, HUD, comfort, and foveation settings remain in the
 Trinity mod's VR menus. Available refresh rates and eye-tracked foveation depend on
 the runtime and device; a requested value alone does not prove it was applied.
 
+Eye-tracked foveation centers its sharp region where the runtime's own foveation
+puts it (`XR_META_foveation_eye_tracked`) when the runtime offers that. For now only
+standalone headset runtimes do, such as SteamVR on the Steam Frame; SteamVR on
+Windows does not, so PCVR follows the eye gaze pose (`XR_EXT_eye_gaze_interaction`)
+instead. The engine carries that pose through the head's turn since the eye was
+sampled, which keeps the sharp region on a point the eyes hold in the world; with
+the eyes riding along with the head, as when reading the HUD mid-turn, it lands a
+little behind the gaze. `xr_info` reports which source is in use.
+
 ## Moving from Trinity VR
 
 Keep the existing installation and configuration as a backup. Install the unified

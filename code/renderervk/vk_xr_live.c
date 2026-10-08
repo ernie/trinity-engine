@@ -21,12 +21,16 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 	XrInstanceProperties ip;
 	PFN_xrEnumerateInstanceExtensionProperties enumerate;
 	XrExtensionProperties extensions[256];
-	const char *enabled[10] = {"XR_KHR_vulkan_enable2"};
+	static const char *const foveationExtensions[] = {"XR_FB_swapchain_update_state", "XR_FB_foveation",
+													  "XR_FB_foveation_configuration", "XR_FB_foveation_vulkan",
+													  "XR_META_foveation_eye_tracked"};
+#define FOVEATION_EXTENSIONS (sizeof( foveationExtensions ) / sizeof( foveationExtensions[0] ))
+	const char *enabled[15] = {"XR_KHR_vulkan_enable2"};
 	XrInstanceCreateInfo ci;
 	XrSystemGetInfo si;
 	XrResult result;
-	uint32_t count, i, without;
-	int vulkan2 = 0, uuid = 0, renderModel = 0, interactionModel = 0, wantModels;
+	uint32_t count, i, j, without;
+	int vulkan2 = 0, uuid = 0, renderModel = 0, interactionModel = 0, wantModels, foveationFound = 0;
 	if ( !ctx )
 		return XR_ERROR_VALIDATION_FAILURE;
 	memset( ctx, 0, sizeof( *ctx ) );
@@ -86,8 +90,12 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 			renderModel = 1;
 		if ( !strcmp( extensions[i].extensionName, XR_EXT_INTERACTION_RENDER_MODEL_EXTENSION_NAME ) )
 			interactionModel = 1;
+		for ( j = 0; j < FOVEATION_EXTENSIONS; j++ )
+			if ( !strcmp( extensions[i].extensionName, foveationExtensions[j] ) )
+				foveationFound |= 1 << j;
 	}
 	wantModels = renderModel && interactionModel;
+	ctx->foveationCenter = foveationFound == (1 << (int)FOVEATION_EXTENSIONS) - 1;
 	if ( !vulkan2 ) {
 		result = XR_ERROR_EXTENSION_NOT_PRESENT;
 		goto fail;
@@ -109,6 +117,9 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 		enabled[ci.enabledExtensionCount++] = "XR_VALVE_frame_controller_interaction";
 	if ( ctx->createInfoMeta )
 		enabled[ci.enabledExtensionCount++] = "XR_META_vulkan_swapchain_create_info";
+	if ( ctx->foveationCenter )
+		for ( j = 0; j < FOVEATION_EXTENSIONS; j++ )
+			enabled[ci.enabledExtensionCount++] = foveationExtensions[j];
 	ci.enabledExtensionNames = enabled;
 	without = ci.enabledExtensionCount;
 	/* OpenXR 1.1, or 1.0 from a runtime that turns 1.1 down, whatever code it uses to say so */
@@ -166,4 +177,5 @@ fail:
 	VK_XRLive_Close( ctx );
 	return result;
 #undef LIVE_PROC
+#undef FOVEATION_EXTENSIONS
 }

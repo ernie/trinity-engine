@@ -24,13 +24,14 @@ typedef struct {
 	int strength, eyeTracked;
 	uint32_t samples;
 } vkFovMap_t;
-int VK_FovMode( int requested, int attachmentSupported, int gazeSupported );
+int VK_FovMode( int requested, int attachmentSupported, int eyesFollowed );
 uint8_t VK_FovLegalRate( const vkFovRate_t *, uint32_t count, uint32_t width, uint32_t height,
 						 uint32_t samples );
-/* Runtime x/y/z/w quaternions in one reference space; gaze is head local, time is predicted display time in ns. */
+/* Runtime x/y/z/w quaternions in one reference space; gaze is head local, time is predicted display time in ns.
+ * runtime is the runtime's own per-eye center in NDC (+Y down), preferred over the gaze pose when valid. */
 void VK_FovCenters( vkFovCenters_t *, const float head[4], const float eye[2][4], const float fov[2][4],
 					int mode, int virtualScreen, int scoped, const float gaze[3], int gazeValid,
-					int64_t time );
+					const float runtime[2][2], int runtimeValid, int64_t time );
 /* dst holds two contiguous layers, each ceil(eye extent / texel extent); partial or outside tiles stay full-rate. */
 int VK_FovWrite( uint8_t *dst, size_t capacity, const vkFovMap_t *, const vkFovRate_t *, uint32_t count );
 /* Fragment density maps: two R8G8 layers, one per eye, over the per-eye scene extent. */

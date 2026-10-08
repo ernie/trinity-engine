@@ -18,12 +18,15 @@ static vkXRLive_t live;
 static vkXRVk_t xr;
 static vkXRInput_t input;
 static vkXRGaze_t gaze;
+static vkXRFovCenter_t runtimeFoveation;
 static vkXRModels_t models;
 static cvar_t *controllerModels;
 static vkXRPointer_t pointers[2];
 static qboolean inputFocused; /* this frame's controller input was sampled */
 static float gazeDirection[3];
 static int gazeValid;
+static float runtimeCenter[2][2];
+static int runtimeCenterValid;
 static vkFovCenters_t foveationCenters;
 static VkDevice xrDevice;
 static VkPhysicalDevice xrPhysical;
@@ -373,13 +376,22 @@ void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device
 	xr.maxEyeHeight = MIN( properties.limits.maxFramebufferHeight, properties.limits.maxImageDimension2D );
 	xr.renderScale = atof( ri.Cvar_VariableString( "vr_superSampling" ) );
 	xr.targetCreateFlags = targetFlags;
+	{
+		XrResult result = VK_XRFovCenter_Init( &runtimeFoveation, live.instance, live.system, live.getproc,
+											   live.foveationCenter );
+		if ( XR_FAILED( result ) ) {
+			ri.Printf( PRINT_WARNING, "OpenXR runtime foveation center unavailable (%d)\n", (int)result );
+		}
+		xr.foveation = runtimeFoveation.supported;
+	}
 	if ( !VKXR_Check( VK_XRVK_Bind( &xr, &binding, formats, ARRAY_LEN( formats ) ), "OpenXR session/swapchains" ) ) {
 		ri.Error( ERR_DROP, "%s", failure );
 		return;
 	}
-	ri.Printf( PRINT_ALL, "OpenXR swapchain %ux%u, 2 layers, %u images, format list %s, create flags 0x%x of 0x%x\n",
+	ri.Printf( PRINT_ALL, "OpenXR swapchain %ux%u, 2 layers, %u images, format list %s, create flags 0x%x of 0x%x%s\n",
 			   xr.target.width, xr.target.height, xr.target.count, xr.formatList ? "enabled" : "unavailable",
-			   (unsigned)xr.target.createFlags, (unsigned)targetFlags );
+			   (unsigned)xr.target.createFlags, (unsigned)targetFlags,
+			   xr.target.foveation ? ", runtime foveation center" : "" );
 	xrDevice = device;
 	xrPhysical = physical;
 	{
@@ -749,8 +761,16 @@ int VK_XR_BeginFrame( refXRFrame_t *frame ) {
 			Com_Memset( &screenAnchor, 0, sizeof( screenAnchor ) );
 		}
 	}
-	gazeValid = VK_XRGaze_Sample( &gaze, xr.space, frame->head.orientation, xr.displayTime,
+	gazeValid = VK_XRGaze_Sample( &gaze, xr.space, xr.viewSpace, frame->head.orientation, xr.displayTime,
 								  frame->renderable && frame->focused, gazeDirection );
+	runtimeCenterValid = 0;
+	if ( frame->renderable && frame->focused && foveation && foveation->integer >= 2 && xr.target.foveation ) {
+		runtimeCenterValid = VK_XRFovCenter_Sample( &runtimeFoveation, xr.session, xr.target.handle, runtimeCenter );
+		if ( runtimeCenterValid < 0 ) {
+			ri.Printf( PRINT_WARNING, "OpenXR runtime refused its foveation center; following the gaze pose\n" );
+			runtimeCenterValid = 0;
+		}
+	}
 	for ( eye = 0; eye < 2; eye++ ) {
 		const XrView *view = &xr.views[eye];
 		Com_Memcpy( frame->eyes[eye].position, &view->pose.position, sizeof( frame->eyes[eye].position ) );
@@ -799,6 +819,7 @@ void VK_XR_ShutdownSession( void ) {
 	VK_XRInput_Shutdown( &input );
 	if ( xr.frameBegun )
 		VK_XRVK_End( &xr, 0 );
+	VK_XRFovCenter_Shutdown( &runtimeFoveation );
 	VK_XRVK_Shutdown( &xr );
 	Com_Memset( &refresh, 0, sizeof( refresh ) );
 	refreshRequested = -1;
@@ -807,7 +828,7 @@ void VK_XR_ShutdownSession( void ) {
 	active = copied = submitted = qfalse;
 	refreshRate = virtualScreenMode = worldscale = worldscaleScaler = foveation = foveationStrength = NULL;
 	zoomLevel = 1;
-	gazeValid = 0;
+	gazeValid = runtimeCenterValid = 0;
 	Com_Memset( &foveationCenters, 0, sizeof( foveationCenters ) );
 	ri.Cvar_Set( "vr_foveationCaps", "none" );
 	Com_Memset( &screenAnchor, 0, sizeof( screenAnchor ) );
@@ -849,6 +870,10 @@ void VK_XR_Info( void ) {
 	for ( i = 0; i < live.enabledCount; i++ )
 		ri.Printf( PRINT_ALL, "  %s\n", live.enabled[i] );
 	ri.Printf( PRINT_ALL, "Eye gaze: %s\n", live.eyeGaze ? "extension enabled" : "not offered" );
+	ri.Printf( PRINT_ALL, "Eye-tracked foveation center: %s\n",
+			   xr.target.foveation && !runtimeFoveation.failed ? "the runtime's"
+			   : gaze.supported								  ? "the gaze pose"
+															  : "none" );
 	if ( live.models ) {
 		int loaded = 0, drawn = 0, triangles = 0;
 		for ( hand = 0; hand < VK_XR_MODELS_MAX; hand++ )
@@ -1097,15 +1122,20 @@ void VK_XR_SetupView( refdef_t *view, viewParms_t *parms ) {
 	}
 }
 
+/* Either source can steer eye-tracked foveation: the runtime's own center, or the gaze pose. */
+static qboolean VKXR_EyesFollowed( void ) {
+	return gaze.supported || xr.target.foveation;
+}
+
 void VK_XR_FoveationCaps( qboolean supported ) {
-	ri.Cvar_Set( "vr_foveationCaps", supported ? (gaze.supported ? "eyetracked" : "fixed") : "none" );
+	ri.Cvar_Set( "vr_foveationCaps", supported ? (VKXR_EyesFollowed() ? "eyetracked" : "fixed") : "none" );
 }
 
 void VK_XR_FoveationMap( vkFovMap_t *map ) {
 	float eyes[2][4], fov[2][4];
 	XrPosef center = VKXR_CenterPose();
 	int e, j;
-	int mode = VK_FovMode( foveation ? foveation->integer : 0, 1, gaze.supported );
+	int mode = VK_FovMode( foveation ? foveation->integer : 0, 1, VKXR_EyesFollowed() );
 	for ( e = 0; e < 2; e++ ) {
 		map->eye[e].x = 0;
 		map->eye[e].width = map->width;
@@ -1130,7 +1160,8 @@ void VK_XR_FoveationMap( vkFovMap_t *map ) {
 		}
 	}
 	VK_FovCenters( &foveationCenters, (float *)&center.orientation, eyes, fov, mode, screenGeometry.visible,
-				   xr.scope, gazeDirection, gazeValid, xr.displayTime );
+				   xr.scope, gazeDirection, gazeValid, (const float (*)[2])runtimeCenter, runtimeCenterValid,
+				   xr.displayTime );
 	Com_Memcpy( map->center, foveationCenters.center, sizeof( map->center ) );
 	Com_Memcpy( map->tangent, foveationCenters.tangent, sizeof( map->tangent ) );
 	map->eyeTracked = foveationCenters.eyeTracked;
