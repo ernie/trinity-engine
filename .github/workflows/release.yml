@@ -13,7 +13,7 @@ jobs:
       openxr_revision: ${{ steps.pins.outputs.openxr_revision }}
     steps:
       - uses: actions/checkout@v6
-      - name: Validate pins and download matching mod assets
+      - name: Resolve the pinned mod release and download its assets
         id: pins
         env:
           GH_TOKEN: ${{ github.token }}
@@ -21,22 +21,18 @@ jobs:
           set -euo pipefail
           manifest=misc/release-dependencies.json
           jq -e '
-            ([.openxr_revision, .trinity_revision] |
-              all(.[]; test("^[0-9a-fA-F]{40}$"))) and
-            (.trinity_release | test("^v[0-9A-Za-z._-]+$")) and
-            ([.assets["pak8t.pk3"], .assets["pak3t.pk3"], .assets["zzz-trinity-announcer.pk3"]] |
-              all(.[]; test("^[0-9a-fA-F]{64}$")))
+            (.openxr_revision | test("^[0-9a-fA-F]{40}$")) and
+            (.trinity_release | test("^v[0-9A-Za-z._-]+$"))
           ' "$manifest"
-          jq -r 'to_entries[] | select(.key | endswith("_revision")) | "\(.key)=\(.value)"' "$manifest" >> "$GITHUB_OUTPUT"
           tag=$(jq -r .trinity_release "$manifest")
-          revision=$(jq -r .trinity_revision "$manifest")
-          test "$(gh api "repos/ernie/trinity/commits/$tag" --jq .sha)" = "$revision"
+          # Every job in this run builds the commit the tag names now; a re-tagged mod is picked up by a re-run
+          revision=$(gh api "repos/ernie/trinity/commits/$tag" --jq .sha)
+          echo "openxr_revision=$(jq -r .openxr_revision "$manifest")" >> "$GITHUB_OUTPUT"
+          echo "trinity_revision=$revision" >> "$GITHUB_OUTPUT"
           mkdir -p trinity-assets
-          for asset in pak8t.pk3 pak3t.pk3 zzz-trinity-announcer.pk3; do
-            gh release download "$tag" --repo ernie/trinity --pattern "$asset" --dir trinity-assets
-            hash=$(jq -r --arg asset "$asset" '.assets[$asset]' "$manifest")
-            echo "$hash  trinity-assets/$asset" | sha256sum --check --strict
-          done
+          gh release download "$tag" --repo ernie/trinity --dir trinity-assets \
+            --pattern pak8t.pk3 --pattern pak3t.pk3 --pattern zzz-trinity-announcer.pk3 --pattern sha256sums.txt
+          (cd trinity-assets && sha256sum --check --strict sha256sums.txt && rm sha256sums.txt)
       - uses: actions/upload-artifact@v7
         with:
           name: trinity-assets

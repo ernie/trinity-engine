@@ -33,8 +33,8 @@ jobs:
       - name: Select native-module source
         id: dependencies
         run: |
-          revision=$(jq -r '.trinity_revision // empty' misc/release-dependencies.json)
-          echo "ref=${revision:-main}" >> "$GITHUB_OUTPUT"
+          release=$(jq -r '.trinity_release // empty' misc/release-dependencies.json)
+          echo "ref=${release:-main}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v6
         with:
           repository: ernie/trinity
@@ -70,8 +70,8 @@ jobs:
       - name: Select native-module source
         id: dependencies
         run: |
-          revision=$(jq -r '.trinity_revision // empty' misc/release-dependencies.json)
-          echo "ref=${revision:-main}" >> "$GITHUB_OUTPUT"
+          release=$(jq -r '.trinity_release // empty' misc/release-dependencies.json)
+          echo "ref=${release:-main}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v6
         with:
           repository: ernie/trinity
@@ -108,8 +108,8 @@ jobs:
       - name: Select native-module source
         id: dependencies
         run: |
-          revision=$(jq -r '.trinity_revision // empty' misc/release-dependencies.json)
-          echo "ref=${revision:-main}" >> "$GITHUB_OUTPUT"
+          release=$(jq -r '.trinity_release // empty' misc/release-dependencies.json)
+          echo "ref=${release:-main}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v6
         with:
           repository: ernie/trinity

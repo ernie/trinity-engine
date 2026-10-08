@@ -56,23 +56,25 @@ does not change that policy.
 
 ## Reproducible Windows/Linux releases
 
-`misc/release-dependencies.json` pins the release inputs. GitHub Actions validates
-those pins, checks the mod release's commit and asset hashes, and shares the
-verified assets between packaging jobs. Windows/Linux jobs configure, build and
-install the native modules and OpenXR loader through their CMake entry points.
+`misc/release-dependencies.json` pins the release inputs: the Trinity release
+tag and the OpenXR loader commit. The release gate resolves the tag to the commit
+it names at run time, downloads that release's paks, checks them against the
+release's own `sha256sums.txt`, and shares them between packaging jobs, so every
+job in a run builds the same mod commit. A re-tagged mod release is picked up by
+re-running the engine release. Windows/Linux jobs configure, build and install
+the native modules and OpenXR loader through their CMake entry points.
 
-Pin the published Trinity commit, matching release tag, and asset hashes before
-release packaging. Missing pins fail the release gate; developer and dedicated
+A missing or malformed pin fails the release gate; developer and dedicated
 builds remain available.
 
 `TRINITY_RELEASE_BUILD=ON` in CMake verifies the source checkout is clean and
-matches the full pin, and checks VR state declarations against the engine. The
-release version string is the pinned commit, independent of locally available
-tags. Visual Studio uses the static CRT; ARM64 packaging uses `-A ARM64` for both
+matches the full resolved commit, and checks VR state declarations against the
+engine. The release version string is that commit, independent of locally
+available tags. Visual Studio uses the static CRT; ARM64 packaging uses `-A ARM64` for both
 native modules and the loader. Linux armv7 uses the checked-in cross toolchain.
 
 macOS VR is not enabled by this release packaging policy.
 
-CI builds the pinned mod when a revision is declared. With an empty pin it
-builds the mod's `main` branch. Release packaging still requires published,
-immutable pins and never uses that fallback.
+CI builds the pinned mod release when a tag is declared. With an empty pin it
+builds the mod's `main` branch. Release packaging requires the pin and never
+uses that fallback.
