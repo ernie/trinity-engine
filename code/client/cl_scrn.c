@@ -819,6 +819,9 @@ void CL_LoadingPump( qboolean redraw ) {
 	int start;
 	if ( scr_recursive || CL_VR_FrameOpen() || !VR_IsActiveMode() || cls.state < CA_CONNECTING || cls.state > CA_PRIMED )
 		return;
+	// a redraw would re-enter the module and clobber its syscall arguments
+	if ( VM_InCall( cgvm ) || VM_InCall( uivm ) )
+		redraw = qfalse;
 	if ( redraw && ( cls.state == CA_LOADING || cls.state == CA_PRIMED ) && Sys_Milliseconds() - scr_lastUpdate >= SCR_LOADING_PUMP_MS ) {
 		SCR_UpdateScreen();
 		return;

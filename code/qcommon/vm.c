@@ -2052,6 +2052,18 @@ intptr_t QDECL VM_Call( vm_t *vm, int nargs, int callnum, ... )
 }
 
 
+/*
+==============
+VM_InCall
+
+Also true inside the module's own syscalls.
+==============
+*/
+qboolean VM_InCall( const vm_t *vm ) {
+	return vm && vm->callLevel > 0;
+}
+
+
 //=================================================================
 
 static int QDECL VM_ProfileSort( const void *a, const void *b ) {
