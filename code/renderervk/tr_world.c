@@ -645,6 +645,16 @@ static void R_RecursiveWorldNode( mnode_t *node, unsigned int planeBits, unsigne
 				}
 			}
 
+			if ( planeBits & 16 ) {
+				r = BoxOnPlaneSide(node->mins, node->maxs, &tr.viewParms.portalPlane);
+				if (r == 2) {
+					return;						// culled
+				}
+				if ( r == 1 ) {
+					planeBits &= ~16;			// all descendants will also be in front
+				}
+			}
+
 		}
 
 		if ( node->contents != CONTENTS_NODE ) {
@@ -943,7 +953,7 @@ void R_AddWorldSurfaces( void ) {
 		tr.refdef.num_dlights = MAX_DLIGHTS;
 	}
 
-	R_RecursiveWorldNode( tr.world->nodes, 15, ( 1ULL << tr.refdef.num_dlights ) - 1 );
+	R_RecursiveWorldNode( tr.world->nodes, tr.viewParms.portalView != PV_NONE ? 31 : 15, ( 1ULL << tr.refdef.num_dlights ) - 1 );
 
 #ifdef USE_PMLIGHT
 #ifdef USE_LEGACY_DLIGHTS

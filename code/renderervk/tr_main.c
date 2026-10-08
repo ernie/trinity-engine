@@ -105,6 +105,12 @@ refimport_t	ri;
 // point at this for their sorting surface
 static surfaceType_t entitySurface = SF_ENTITY;
 
+// portal views also cull to the portal plane, their oblique near plane
+static const cplane_t *R_CullPlane( int i ) {
+	return i < 4 ? &tr.viewParms.frustum[i] : &tr.viewParms.portalPlane;
+}
+
+
 /*
 =================
 R_CullLocalBox
@@ -117,9 +123,10 @@ int R_CullLocalBox( const vec3_t bounds[2] ) {
 	vec3_t	transformed[8];
 	float	dists[8];
 	vec3_t	v;
-	cplane_t	*frust;
+	const cplane_t	*frust;
 	int			anyBack;
 	int			front, back;
+	const int	numPlanes = tr.viewParms.portalView != PV_NONE ? 5 : 4;
 
 	if ( r_nocull->integer ) {
 		return CULL_CLIP;
@@ -139,8 +146,8 @@ int R_CullLocalBox( const vec3_t bounds[2] ) {
 
 	// check against frustum planes
 	anyBack = 0;
-	for (i = 0 ; i < 4 ; i++) {
-		frust = &tr.viewParms.frustum[i];
+	for (i = 0 ; i < numPlanes ; i++) {
+		frust = R_CullPlane( i );
 
 		front = back = 0;
 		for (j = 0 ; j < 8 ; j++) {
@@ -207,15 +214,16 @@ int R_CullPointAndRadius( const vec3_t pt, float radius )
 	float	dist;
 	const cplane_t	*frust;
 	qboolean mightBeClipped = qfalse;
+	const int	numPlanes = tr.viewParms.portalView != PV_NONE ? 5 : 4;
 
 	if ( r_nocull->integer ) {
 		return CULL_CLIP;
 	}
 
 	// check against frustum planes
-	for (i = 0 ; i < 4 ; i++) 
+	for (i = 0 ; i < numPlanes ; i++)
 	{
-		frust = &tr.viewParms.frustum[i];
+		frust = R_CullPlane( i );
 
 		dist = DotProduct( pt, frust->normal) - frust->dist;
 		if ( dist < -radius )
@@ -1464,6 +1472,8 @@ static qboolean R_MirrorViewBySurface( const drawSurf_t *drawSurf, int entityNum
 
 	VectorSubtract( vec3_origin, camera.axis[0], newParms.portalPlane.normal );
 	newParms.portalPlane.dist = DotProduct( camera.origin, newParms.portalPlane.normal );
+	newParms.portalPlane.type = PLANE_NON_AXIAL;
+	SetPlaneSignbits( &newParms.portalPlane );
 
 	R_MirrorVector (oldParms.or.axis[0], &surface, &camera, newParms.or.axis[0]);
 	R_MirrorVector (oldParms.or.axis[1], &surface, &camera, newParms.or.axis[1]);
