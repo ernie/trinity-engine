@@ -49,6 +49,7 @@ static int VK_GPUTimePercentile( int count, int percent ) {
 #include "vk_xr.h"
 #include "vk.h"
 #include "vk_foveation.h"
+#include "vk_pipeline_cache.h"
 
 static PFN_vkCreateQueryPool qvkCreateQueryPool;
 static PFN_vkDestroyQueryPool qvkDestroyQueryPool;
@@ -156,6 +157,7 @@ static PFN_vkCreateImage								qvkCreateImage;
 static PFN_vkCreateImageView							qvkCreateImageView;
 static PFN_vkCreatePipelineLayout						qvkCreatePipelineLayout;
 static PFN_vkCreatePipelineCache						qvkCreatePipelineCache;
+static PFN_vkGetPipelineCacheData						qvkGetPipelineCacheData;
 static PFN_vkCreateRenderPass							qvkCreateRenderPass;
 static PFN_vkCreateSampler								qvkCreateSampler;
 static PFN_vkCreateSemaphore							qvkCreateSemaphore;
@@ -3121,6 +3123,7 @@ static void init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkCreateImage)
 	INIT_DEVICE_FUNCTION(vkCreateImageView)
 	INIT_DEVICE_FUNCTION(vkCreatePipelineCache)
+	INIT_DEVICE_FUNCTION(vkGetPipelineCacheData)
 	INIT_DEVICE_FUNCTION(vkCreatePipelineLayout)
 	INIT_DEVICE_FUNCTION(vkCreateRenderPass)
 	INIT_DEVICE_FUNCTION(vkCreateSampler)
@@ -3253,6 +3256,7 @@ static void deinit_device_functions( void )
 	qvkCreateImage								= NULL;
 	qvkCreateImageView							= NULL;
 	qvkCreatePipelineCache						= NULL;
+	qvkGetPipelineCacheData						= NULL;
 	qvkCreatePipelineLayout						= NULL;
 	qvkCreateRenderPass							= NULL;
 	qvkCreateSampler							= NULL;
@@ -6243,6 +6247,55 @@ static void vk_xr_output_init( void ) {
 			   vk.xr_output.plain ? ", world frames only" : "" );
 }
 
+/* Drivers without a disk cache of their own (Adreno) otherwise recompile every pipeline on every launch. */
+#define VK_PIPELINE_CACHE_FILE "vkpipelines.dat"
+static size_t vk_pipeline_cache_saved;	// the data size last loaded or written
+
+static void vk_create_pipeline_cache( void )
+{
+	VkPipelineCacheCreateInfo ci;
+	VkPhysicalDeviceProperties props;
+	void *file = NULL;
+	const uint8_t *data = NULL;
+	size_t dataSize = 0;
+	int fileSize;
+
+	qvkGetPhysicalDeviceProperties( vk.physical_device, &props );
+	fileSize = ri.FS_ReadFile( VK_PIPELINE_CACHE_FILE, &file );
+	if ( file && fileSize > 0 )
+		data = VK_PipelineCacheUnwrap( file, fileSize, TRINITY_ENGINE_VERSION, props.vendorID, props.deviceID,
+									   props.pipelineCacheUUID, &dataSize );
+
+	Com_Memset( &ci, 0, sizeof( ci ) );
+	ci.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+	ci.initialDataSize = dataSize;
+	ci.pInitialData = data;
+	VK_CHECK( qvkCreatePipelineCache( vk.device, &ci, NULL, &vk.pipelineCache ) );
+	vk_pipeline_cache_saved = dataSize;
+	if ( data )
+		ri.Printf( PRINT_ALL, "...pipeline cache: %d KB from " VK_PIPELINE_CACHE_FILE "\n", (int)( dataSize / 1024 ) );
+	if ( file )
+		ri.FS_FreeFile( file );
+}
+
+void vk_save_pipeline_cache( void )
+{
+	size_t size = 0;
+	byte *buffer;
+
+	if ( vk.pipelineCache == VK_NULL_HANDLE || qvkGetPipelineCacheData( vk.device, vk.pipelineCache, &size, NULL ) != VK_SUCCESS ||
+		 !VK_PipelineCacheWorthSaving( size, vk_pipeline_cache_saved ) )
+		return;
+	buffer = ri.Malloc( (int)( sizeof( vkPipelineCacheFile_t ) + size ) );
+	if ( qvkGetPipelineCacheData( vk.device, vk.pipelineCache, &size, buffer + sizeof( vkPipelineCacheFile_t ) ) == VK_SUCCESS ) {
+		VK_PipelineCacheWrap( (vkPipelineCacheFile_t *)buffer, TRINITY_ENGINE_VERSION, buffer + sizeof( vkPipelineCacheFile_t ),
+							  (uint32_t)size );
+		ri.FS_WriteFile( VK_PIPELINE_CACHE_FILE, buffer, (int)( sizeof( vkPipelineCacheFile_t ) + size ) );
+		vk_pipeline_cache_saved = size;
+	}
+	ri.Free( buffer );
+}
+
 void vk_initialize( void )
 {
 	char buf[64], driver_version[64];
@@ -6647,12 +6700,7 @@ void vk_initialize( void )
 
 	vk_create_shader_modules();
 
-	{
-		VkPipelineCacheCreateInfo ci;
-		Com_Memset( &ci, 0, sizeof( ci ) );
-		ci.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-		VK_CHECK( qvkCreatePipelineCache( vk.device, &ci, NULL, &vk.pipelineCache ) );
-	}
+	vk_create_pipeline_cache();
 
 	vk.renderPassIndex = RENDER_PASS_MAIN; // default render pass
 
@@ -6977,6 +7025,7 @@ void vk_shutdown( refShutdownCode_t code )
 	vk_destroy_swapchain();
 
 	if ( vk.pipelineCache != VK_NULL_HANDLE ) {
+		vk_save_pipeline_cache();
 		qvkDestroyPipelineCache( vk.device, vk.pipelineCache, NULL );
 		vk.pipelineCache = VK_NULL_HANDLE;
 	}

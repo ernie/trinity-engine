@@ -2156,6 +2156,8 @@ Touch all images to make sure they are resident
 static void RE_EndRegistration( void ) {
 #ifdef USE_VULKAN
 	vk_wait_idle();
+	// a map's new pipelines are saved now: a headset app is often killed rather than quit
+	vk_save_pipeline_cache();
 	// command buffer is not in recording state at this stage
 	// so we can't issue RB_ShowImages() there
 #else
