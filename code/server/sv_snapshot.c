@@ -776,10 +776,8 @@ void SV_SendClientMessages( void )
 		//if ( !c->gamestateAcked )
 		//	continue;		// waiting usercmd/downloading
 
-		// 1. Local clients get snapshots every server frame
-		// 2. Remote clients get snapshots depending from rate and requested number of updates
-
-		if ( svs.time - c->lastSnapshotTime < c->snapshotMsec * com_timescale->value )
+		// every client gets a snapshot each server frame, unless rate holds it back
+		if ( svs.time - c->lastSnapshotTime < ( 1000 / sv_fps->integer ) * com_timescale->value )
 			continue;		// It's not time yet
 
 		if ( c->netchan.unsentFragments || c->netchan_start_queue )

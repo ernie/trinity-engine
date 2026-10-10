@@ -212,12 +212,11 @@ typedef struct client_s {
 	int				lastConnectTime;	// svs.time when connection started
 	int				lastDisconnectTime;
 	int				lastSnapshotTime;	// svs.time of last sent snapshot
-	qboolean		rateDelayed;		// true if nextSnapshotTime was set based on rate instead of snapshotMsec
+	qboolean		rateDelayed;		// true if rate held back a snapshot that was due
 	int				timeoutCount;		// must timeout a few frames in a row so debugging doesn't break
 	clientSnapshot_t	frames[PACKET_BACKUP];	// updates can be delta'd from here
 	int				ping;
 	int				rate;				// bytes / second, 0 - unlimited
-	int				snapshotMsec;		// requests a snapshot every snapshotMsec unless rate choked
 	qboolean		pureAuthentic;
 	qboolean		gotCP;				// TTimo - additional flag to distinguish between a bad pure checksum, and no cp command at all
 	netchan_t		netchan;
