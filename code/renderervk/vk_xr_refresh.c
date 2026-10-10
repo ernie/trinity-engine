@@ -1,4 +1,5 @@
 #include "../vrcommon/vr_float.h"
+#include "../vrcommon/vr_rate_list.h"
 #include "vk_xr_refresh.h"
 #include <string.h>
 #include <math.h>
@@ -34,6 +35,7 @@ XrResult VK_XRRefresh_Init( vkXRRefresh_t *ctx, XrInstance instance, XrSession s
 	for ( i = 0; i < ctx->count; i++ )
 		if ( !VR_FloatFinite( ctx->rates[i] ) || ctx->rates[i] <= 0 )
 			return XR_ERROR_RUNTIME_FAILURE;
+	VR_RateSort( ctx->rates, ctx->count );
 	result = ctx->get( session, &ctx->current );
 	if ( XR_FAILED( result ) )
 		return result;

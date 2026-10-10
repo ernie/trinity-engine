@@ -6,12 +6,24 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Appends the rate, written whole, unless an entry lies within half a hertz of it; 1 when the list changed. */
+/* Sorts the runtime's rates lowest first, so the menus list them in order. */
+static inline void VR_RateSort( float *rates, unsigned count ) {
+	unsigned i, j;
+	for ( i = 1; i < count; i++ ) {
+		const float rate = rates[i];
+		for ( j = i; j > 0 && rates[j - 1] > rate; j-- )
+			rates[j] = rates[j - 1];
+		rates[j] = rate;
+	}
+}
+
+/* Inserts the rate, rounded to whole hertz, in ascending order unless one within half a hertz is already listed. Returns 1 when the list changed. */
 static inline int VR_RateListOffer( char *list, size_t size, double measured ) {
 	const char *p = list;
+	const char *at = NULL;
 	char *end;
-	size_t used;
-	int n;
+	char entry[16];
+	size_t used, n;
 	for ( ;; ) {
 		double rate;
 		while ( *p == ' ' )
@@ -26,13 +38,24 @@ static inline int VR_RateListOffer( char *list, size_t size, double measured ) {
 		}
 		if ( fabs( rate - measured ) <= 0.5 )
 			return 0;
+		if ( !at && rate > measured )
+			at = p;
 		p = end;
 	}
 	used = strlen( list );
-	n = snprintf( list + used, size - used, "%s%.0f", used ? " " : "", measured );
-	if ( n < 0 || (size_t)n >= size - used ) {
-		list[used] = 0;
+	snprintf( entry, sizeof( entry ), "%.0f", measured );
+	n = strlen( entry ) + ( used ? 1 : 0 );
+	if ( used + n >= size )
 		return 0;
+	if ( at ) {
+		const size_t offset = (size_t)( at - list );
+		memmove( list + offset + n, list + offset, used - offset + 1 );
+		memcpy( list + offset, entry, n - 1 );
+		list[offset + n - 1] = ' ';
+	} else {
+		if ( used )
+			list[used++] = ' ';
+		strcpy( list + used, entry );
 	}
 	return 1;
 }
