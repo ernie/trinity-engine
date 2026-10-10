@@ -347,6 +347,12 @@ foreach(VARIANT baseq3 missionpack)
             PREFIX "" OUTPUT_NAME "${MODULE}${NATIVE_ARCH}"
             RUNTIME_OUTPUT_DIRECTORY "${TRINITY_NATIVE_OUTPUT_DIR}/${VARIANT}"
             LIBRARY_OUTPUT_DIRECTORY "${TRINITY_NATIVE_OUTPUT_DIR}/${VARIANT}")
+        if(ANDROID)
+            # an APK's native libraries share one flat lib*.so directory
+            set_target_properties(${TARGET} PROPERTIES
+                PREFIX "lib" OUTPUT_NAME "${MODULE}${NATIVE_ARCH}_${VARIANT}"
+                LIBRARY_OUTPUT_DIRECTORY "${TRINITY_NATIVE_OUTPUT_DIR}")
+        endif()
         install(TARGETS ${TARGET}
             RUNTIME DESTINATION "${TRINITY_NATIVE_INSTALL_DIR}/${VARIANT}" COMPONENT TrinityNative
             LIBRARY DESTINATION "${TRINITY_NATIVE_INSTALL_DIR}/${VARIANT}" COMPONENT TrinityNative)

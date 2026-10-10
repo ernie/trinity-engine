@@ -2,6 +2,33 @@
 #include "../vrcommon/vr_float.h"
 #include <string.h>
 #include <math.h>
+#ifdef __ANDROID__
+#include "../qcommon/q_shared.h"
+#include "../qcommon/qcommon.h"
+/* MainActivity's external haptics services (the bHaptics player) map the game's own events. */
+int CL_BHaptics_Open( clBHaptics_t *ctx ) {
+	if ( !ctx )
+		return 0;
+	memset( ctx, 0, sizeof( *ctx ) );
+	ctx->initialized = 1;
+	return 1;
+}
+void CL_BHaptics_Stop( clBHaptics_t *ctx ) {
+	(void)ctx;
+}
+void CL_BHaptics_Close( clBHaptics_t *ctx ) {
+	if ( ctx )
+		memset( ctx, 0, sizeof( *ctx ) );
+}
+void CL_BHaptics_Event( clBHaptics_t *ctx, const char *event, int position, int flags, int intensity, float yaw,
+						float height, float scale, int right, int menuLeft ) {
+	(void)right;
+	(void)menuLeft;
+	if ( !ctx || !ctx->initialized || !event || !VR_FloatFinite( scale ) )
+		return;
+	Sys_HapticEvent( event, position, flags, (int)(intensity * scale), yaw, height );
+}
+#else
 typedef void (*clBHProc_t)(void);
 #if defined(_WIN32)
 #include <windows.h>
@@ -108,11 +135,12 @@ static void impact( clBHaptics_t *ctx, const char *key, int visor, float yaw, fl
 	ctx->submit( key, visor ? 4 : (yaw > 90 && yaw < 270 ? 202 : 201), p, 5, duration );
 	ctx->playing = 1;
 }
-void CL_BHaptics_Event( clBHaptics_t *ctx, const char *event, int position, int intensity, float yaw,
+void CL_BHaptics_Event( clBHaptics_t *ctx, const char *event, int position, int flags, int intensity, float yaw,
 						float height, float scale, int right, int menuLeft ) {
 	const char *separator;
 	float scaled;
 	int value;
+	(void)flags;
 	if ( !ctx || !ctx->initialized || !event || !VR_FloatFinite( yaw ) || !VR_FloatFinite( height ) ||
 		!VR_FloatFinite( scale ) || scale <= 0 )
 		return;
@@ -170,3 +198,4 @@ void CL_BHaptics_Event( clBHaptics_t *ctx, const char *event, int position, int 
 	}
 	impact( ctx, "bhaptics_generic", 0, yaw, height, value, 120 );
 }
+#endif

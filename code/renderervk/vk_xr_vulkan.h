@@ -9,6 +9,10 @@
 #ifndef XR_USE_GRAPHICS_API_VULKAN
 #define XR_USE_GRAPHICS_API_VULKAN
 #endif
+#if defined(__ANDROID__) && !defined(XR_USE_PLATFORM_ANDROID)
+#include <jni.h>
+#define XR_USE_PLATFORM_ANDROID
+#endif
 #include "../thirdparty/openxr/openxr_platform.h"
 
 #define VK_XRVK_MAX_IMAGES 32

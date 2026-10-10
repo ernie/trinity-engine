@@ -37,6 +37,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define DEFAULT_CURL_LIB "libcurl-3.dll"
 #elif defined(__APPLE__)
 #define DEFAULT_CURL_LIB "libcurl.dylib"
+#elif defined(__ANDROID__)
+#define DEFAULT_CURL_LIB "libcurl.so"
 #else
 #define DEFAULT_CURL_LIB "libcurl.so.4"
 #define ALTERNATE_CURL_LIB "libcurl.so.3"
@@ -104,6 +106,8 @@ void CL_cURL_Shutdown( void );
 void CL_cURL_BeginDownload( const char *localName, const char *remoteURL );
 void CL_cURL_PerformDownload( void );
 void CL_cURL_Cleanup( void );
+/* The CA bundle a platform without a system certificate store keeps beside its game files, or NULL. */
+const char *Com_DL_CABundle( void );
 
 typedef struct download_s {
 	char		URL[MAX_OSPATH];

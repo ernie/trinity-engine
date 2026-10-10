@@ -2333,7 +2333,7 @@ static cvar_t *s_alCapture;
 #define ALDRIVER_DEFAULT "OpenAL32.dll"
 #elif defined(__APPLE__)
 #define ALDRIVER_DEFAULT "libopenal.1.dylib"
-#elif defined(__OpenBSD__)
+#elif defined(__OpenBSD__) || defined(__ANDROID__)
 #define ALDRIVER_DEFAULT "libopenal.so"
 #else
 #define ALDRIVER_DEFAULT "libopenal.so.1"

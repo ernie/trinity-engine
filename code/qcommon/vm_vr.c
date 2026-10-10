@@ -22,6 +22,13 @@ static qboolean VM_VRNativeIndex( vmIndex_t index ) {
 	return index == VM_CGAME || index == VM_UI;
 }
 
+#ifdef __ANDROID__
+// a bare soname resolves only inside the APK's own native library directory
+static qboolean VM_VRNativePath( char *path, int size, vmIndex_t index, qboolean missionpack ) {
+	return Com_sprintf( path, size, "lib%s" ARCH_STRING "_%s" DLL_EXT,
+		index == VM_CGAME ? "cgame" : "ui", missionpack ? "missionpack" : "baseq3" ) < size;
+}
+#else
 // a fixed child of the executable's directory, never fs_game, downloads, homepath or cwd, so the module stays a bundled binary
 static qboolean VM_VRNativePath( char *path, int size, vmIndex_t index, qboolean missionpack ) {
 	char directory[MAX_OSPATH];
@@ -50,6 +57,7 @@ static qboolean VM_VRNativePath( char *path, int size, vmIndex_t index, qboolean
 	return Com_sprintf( path, size, "%s/%s/%s" ARCH_STRING DLL_EXT,
 		directory, missionpack ? "missionpack" : "baseq3", index == VM_CGAME ? "cgame" : "ui" ) < size;
 }
+#endif
 
 void VM_VRCancelNativeFallback( vmIndex_t index ) {
 	if ( !VM_VRNativeIndex( index ) ) return;

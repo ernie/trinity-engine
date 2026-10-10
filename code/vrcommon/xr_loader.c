@@ -6,7 +6,66 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__ANDROID__)
+#include <dlfcn.h>
+#include <jni.h>
+#define XR_USE_PLATFORM_ANDROID
+#include "../thirdparty/openxr/openxr_platform.h"
+static XrInstanceCreateInfoAndroidKHR androidInstance;
+
+void XRLoader_SetAndroidContext( void *vm, void *activity ) {
+	memset( &androidInstance, 0, sizeof( androidInstance ) );
+	androidInstance.type = XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR;
+	androidInstance.applicationVM = vm;
+	androidInstance.applicationActivity = activity;
+}
+const void *XRLoader_InstanceNext( void ) {
+	return &androidInstance;
+}
+const char *XRLoader_PlatformExtension( void ) {
+	return XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME;
+}
+/* The loader enumerates no runtime extensions until it knows the application's VM and context. */
+void *XRLoader_LoadLibrary( void ) {
+	void *lib = dlopen( "libopenxr_loader.so", RTLD_NOW | RTLD_LOCAL );
+	PFN_xrGetInstanceProcAddr getproc;
+	PFN_xrInitializeLoaderKHR initialize = NULL;
+	XrLoaderInitInfoAndroidKHR init;
+	if ( !lib )
+		return NULL;
+	getproc = (PFN_xrGetInstanceProcAddr)dlsym( lib, "xrGetInstanceProcAddr" );
+	if ( !getproc || XR_FAILED( getproc( XR_NULL_HANDLE, "xrInitializeLoaderKHR", (PFN_xrVoidFunction *)&initialize ) ) ||
+		 !initialize ) {
+		dlclose( lib );
+		return NULL;
+	}
+	memset( &init, 0, sizeof( init ) );
+	init.type = XR_TYPE_LOADER_INIT_INFO_ANDROID_KHR;
+	init.applicationVM = androidInstance.applicationVM;
+	init.applicationContext = androidInstance.applicationActivity;
+	if ( XR_FAILED( initialize( (const XrLoaderInitInfoBaseHeaderKHR *)&init ) ) ) {
+		dlclose( lib );
+		return NULL;
+	}
+	return lib;
+}
+xrLoaderProc_t XRLoader_LibrarySymbol( void *lib, const char *name ) {
+	return (xrLoaderProc_t)dlsym( lib, name );
+}
+void XRLoader_UnloadLibrary( void *lib ) {
+	dlclose( lib );
+}
+#else
+const void *XRLoader_InstanceNext( void ) {
+	return NULL;
+}
+const char *XRLoader_PlatformExtension( void ) {
+	return NULL;
+}
+#endif
+
+#if defined(__ANDROID__)
+#elif defined(__EMSCRIPTEN__)
 void *XRLoader_LoadLibrary( void ) {
 	return NULL;
 }
@@ -138,6 +197,7 @@ static xrLoaderStatus_t XRLoader_Open( xrLoaderState_t *st, xrLoaderInfo_t *info
 	XrExtensionProperties *extensions = NULL;
 	XrInstanceCreateInfo ci;
 	XrInstanceProperties ip;
+	const char *platform;
 	uint32_t count = 0, capacity, i;
 	if ( !info )
 		return XRLOADER_PROBE_FAILED;
@@ -209,6 +269,10 @@ static xrLoaderStatus_t XRLoader_Open( xrLoaderState_t *st, xrLoaderInfo_t *info
 	}
 	memset( &ci, 0, sizeof( ci ) );
 	ci.type = XR_TYPE_INSTANCE_CREATE_INFO;
+	ci.next = XRLoader_InstanceNext();
+	platform = XRLoader_PlatformExtension();
+	ci.enabledExtensionCount = platform ? 1 : 0;
+	ci.enabledExtensionNames = &platform;
 	strcpy( ci.applicationInfo.applicationName, "Trinity" );
 	strcpy( ci.applicationInfo.engineName, "Trinity Engine" );
 	/* 1.1 first; retry 1.0 unless the failure was one 1.0 would share */

@@ -335,6 +335,8 @@ void CL_cURL_BeginDownload( const char *localName, const char *remoteURL )
 	if ( com_developer->integer )
 		qcurl_easy_setopt_warn( clc.downloadCURL, CURLOPT_VERBOSE, 1 );
 	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_URL, clc.downloadURL);
+	if ( Com_DL_CABundle() )
+		qcurl_easy_setopt_warn( clc.downloadCURL, CURLOPT_CAINFO, Com_DL_CABundle() );
 	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_TRANSFERTEXT, 0);
 	qcurl_easy_setopt_warn(clc.downloadCURL, CURLOPT_REFERER, va("ioQ3://%s",
 		NET_AdrToString(&clc.serverAddress)));
@@ -540,6 +542,21 @@ void Com_DL_Done( download_t *dl )
 		Sys_UnloadLibrary( dl->func.lib );
 	dl->func.lib = NULL;
 	memset( &dl->func, 0, sizeof( dl->func ) );
+}
+
+
+const char *Com_DL_CABundle( void )
+{
+#ifdef __ANDROID__
+	static char path[MAX_OSPATH];
+	const char *home = getenv( "TRINITY_HOME" );
+
+	if ( !path[0] && home && *home )
+		Com_sprintf( path, sizeof( path ), "%s/cacert.pem", home );
+	return path[0] ? path : NULL;
+#else
+	return NULL;
+#endif
 }
 
 
@@ -998,6 +1015,8 @@ qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remote
 		dl->func.easy_setopt( dl->cURL, CURLOPT_VERBOSE, 1 );
 
 	dl->func.easy_setopt( dl->cURL, CURLOPT_URL, dl->URL );
+	if ( Com_DL_CABundle() )
+		dl->func.easy_setopt( dl->cURL, CURLOPT_CAINFO, Com_DL_CABundle() );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_TRANSFERTEXT, 0 );
 	//dl->func.easy_setopt( dl->cURL, CURLOPT_REFERER, "q3a://127.0.0.1" );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_REFERER, dl->URL );
@@ -1229,6 +1248,8 @@ qboolean CL_TV_BeginDownload( const char *localName, const char *remoteURL )
 		dl->func.easy_setopt( dl->cURL, CURLOPT_VERBOSE, 1 );
 
 	dl->func.easy_setopt( dl->cURL, CURLOPT_URL, dl->URL );
+	if ( Com_DL_CABundle() )
+		dl->func.easy_setopt( dl->cURL, CURLOPT_CAINFO, Com_DL_CABundle() );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_TRANSFERTEXT, 0 );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_REFERER, dl->URL );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_USERAGENT, Q3_VERSION );

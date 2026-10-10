@@ -1,0 +1,36 @@
+# SDL2 built from source at the revision pinned in misc/release-dependencies.json.
+# A local checkout supports offline builds; release builds require it clean and exact.
+set(TRINITY_SDL_SOURCE_DIR "" CACHE PATH "Local SDL source at the pinned revision")
+file(READ "${CMAKE_CURRENT_LIST_DIR}/../misc/release-dependencies.json" TRINITY_SDL_DEPENDENCIES)
+string(JSON TRINITY_SDL_DEFAULT_REVISION GET "${TRINITY_SDL_DEPENDENCIES}" sdl_revision)
+set(TRINITY_SDL_REVISION "${TRINITY_SDL_DEFAULT_REVISION}" CACHE STRING "Immutable SDL commit")
+string(LENGTH "${TRINITY_SDL_REVISION}" SDL_REVISION_LENGTH)
+if(NOT SDL_REVISION_LENGTH EQUAL 40 OR NOT TRINITY_SDL_REVISION MATCHES "^[0-9a-fA-F]+$")
+    message(FATAL_ERROR "TRINITY_SDL_REVISION must be a full immutable commit")
+endif()
+if(NOT TRINITY_SDL_SOURCE_DIR)
+    include(FetchContent)
+    FetchContent_Declare(trinity_sdl
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG "${TRINITY_SDL_REVISION}")
+    FetchContent_GetProperties(trinity_sdl)
+    if(NOT trinity_sdl_POPULATED)
+        FetchContent_Populate(trinity_sdl)
+    endif()
+    set(TRINITY_SDL_SOURCE_DIR "${trinity_sdl_SOURCE_DIR}")
+endif()
+if(TRINITY_RELEASE_BUILD)
+    execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${TRINITY_SDL_SOURCE_DIR}"
+        OUTPUT_VARIABLE ACTUAL_SDL_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+    execute_process(COMMAND git status --porcelain --untracked-files=no WORKING_DIRECTORY "${TRINITY_SDL_SOURCE_DIR}"
+        OUTPUT_VARIABLE SDL_SOURCE_CHANGES OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+    if(NOT ACTUAL_SDL_REVISION STREQUAL TRINITY_SDL_REVISION OR SDL_SOURCE_CHANGES)
+        message(FATAL_ERROR "Release SDL source must be clean and match TRINITY_SDL_REVISION")
+    endif()
+endif()
+set(SDL_SHARED ON CACHE BOOL "" FORCE)
+set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+set(SDL_TEST OFF CACHE BOOL "" FORCE)
+set(SDL2_DISABLE_SDL2MAIN ON CACHE BOOL "" FORCE)
+set(SDL2_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+add_subdirectory("${TRINITY_SDL_SOURCE_DIR}" sdl EXCLUDE_FROM_ALL)

@@ -16,6 +16,6 @@ typedef struct {
 int CL_BHaptics_Open( clBHaptics_t * );
 void CL_BHaptics_Stop( clBHaptics_t * );
 void CL_BHaptics_Close( clBHaptics_t * );
-void CL_BHaptics_Event( clBHaptics_t *, const char *event, int position, int intensity, float yaw,
+void CL_BHaptics_Event( clBHaptics_t *, const char *event, int position, int flags, int intensity, float yaw,
 						float height, float scale, int rightHanded, int menuLeftHanded );
 #endif

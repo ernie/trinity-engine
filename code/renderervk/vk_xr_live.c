@@ -25,7 +25,7 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 													  "XR_FB_foveation_configuration", "XR_FB_foveation_vulkan",
 													  "XR_META_foveation_eye_tracked"};
 #define FOVEATION_EXTENSIONS (sizeof( foveationExtensions ) / sizeof( foveationExtensions[0] ))
-	const char *enabled[15] = {"XR_KHR_vulkan_enable2"};
+	const char *enabled[17] = {"XR_KHR_vulkan_enable2"};
 	XrInstanceCreateInfo ci;
 	XrSystemGetInfo si;
 	XrResult result;
@@ -84,6 +84,8 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 			ctx->frameInteraction = 1;
 		if ( !strcmp( extensions[i].extensionName, "XR_META_vulkan_swapchain_create_info" ) )
 			ctx->createInfoMeta = 1;
+		if ( !strcmp( extensions[i].extensionName, "XR_KHR_android_thread_settings" ) )
+			ctx->threadSettings = 1;
 		if ( !strcmp( extensions[i].extensionName, XR_EXT_UUID_EXTENSION_NAME ) )
 			uuid = 1;
 		if ( !strcmp( extensions[i].extensionName, XR_EXT_RENDER_MODEL_EXTENSION_NAME ) )
@@ -102,9 +104,14 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 	}
 	memset( &ci, 0, sizeof( ci ) );
 	ci.type = XR_TYPE_INSTANCE_CREATE_INFO;
+	ci.next = XRLoader_InstanceNext();
 	strcpy( ci.applicationInfo.applicationName, "Trinity" );
 	strcpy( ci.applicationInfo.engineName, "Trinity Engine" );
 	ci.enabledExtensionCount = 1;
+	if ( XRLoader_PlatformExtension() )
+		enabled[ci.enabledExtensionCount++] = XRLoader_PlatformExtension();
+	if ( ctx->threadSettings )
+		enabled[ci.enabledExtensionCount++] = "XR_KHR_android_thread_settings";
 	if ( ctx->picoInteraction )
 		enabled[ci.enabledExtensionCount++] = "XR_BD_controller_interaction";
 	if ( ctx->displayRefresh )

@@ -1,0 +1,1 @@
++set fs_game baseq3 +set fs_basegame baseq3

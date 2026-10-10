@@ -441,11 +441,10 @@ void CL_VRInput_HapticEvent( const char *event, int position, int flags, int int
 							float height ) {
 	int channels, duration = 0, hand;
 	float amplitude = 0;
-	(void)flags;
 	if ( !event || !input.valid || !VR_IsActiveMode() || !vr_hapticIntensity )
 		return;
 	if ( vr_bhaptics && vr_bhaptics->integer )
-		CL_BHaptics_Event( &suitHaptics, event, position, intensity, angle, height,
+		CL_BHaptics_Event( &suitHaptics, event, position, flags, intensity, angle, height,
 							VRInput_Cvar( vr_hapticIntensity, .5f ), vr.right_handed, vr.menuLeftHanded );
 	if ( !re.XRHaptic )
 		return;
@@ -679,6 +678,11 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 		else
 			CL_BHaptics_Close( &suitHaptics );
 	}
+#ifdef __ANDROID__
+	// Android's haptics services pace their own effects by this tick
+	if ( suitEnabled )
+		CL_BHaptics_Event( &suitHaptics, "frame_tick", 0, 0, 0, 0, 0, 1, 0, 0 );
+#endif
 	vr.in_menu = (Key_GetCatcher() & (KEYCATCH_UI | KEYCATCH_CONSOLE)) != 0;
 	VRInput_Signals( &signals );
 	VR_ResolveStack( &signals, &stack );

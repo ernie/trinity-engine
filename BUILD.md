@@ -78,6 +78,22 @@ Copy the resulting binaries from created `build` directory
 
 ---
 
+### android (Meta Quest, PICO)
+
+* Android SDK with NDK 27.3.13750724, CMake 3.22.1 and build-tools 36.0.0; JDK 17 or newer
+* sibling checkouts used when present, otherwise CMake fetches the revisions pinned in
+  `misc/release-dependencies.json`: `../trinity` (native fallback modules), `../OpenXR-SDK` (loader),
+  `../SDL` (SDL 2.32.10)
+* put the Trinity release's `pak8t.pk3`, `pak3t.pk3` and `zzz-trinity-announcer.pk3` in
+  `android/app/src/main/assets`; players supply the full game data
+
+Build with: `cd android && ./gradlew assembleDebug` (or `assembleRelease`)
+
+The APK is `android/app/build/outputs/apk/<type>/`. It keeps the application ID `io.ernie.trinity`,
+so it installs over trinity-standalone and keeps its game files in `/sdcard/Trinity`.
+
+---
+
 ### ppc64le / ppc64 (PowerPC 64-bit)
 
 Install the build dependencies (same as generic linux above), then build with:

@@ -127,6 +127,39 @@ jobs:
           cmake --build build/release-loader --config Release --target trinity-openxr-loader --parallel 2
           cmake --install build/release-loader --config Release --component TrinityOpenXRLoader --prefix "$PWD/bin"
 
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install Android SDK packages
+        run: |
+          SDKMANAGER=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager
+          yes | $SDKMANAGER --licenses > /dev/null 2>&1 || true
+          $SDKMANAGER "ndk;27.3.13750724" "cmake;3.22.1" "build-tools;36.0.0" "platforms;android-35"
+
+      - name: Select native-module source
+        id: dependencies
+        run: |
+          release=$(jq -r '.trinity_release // empty' misc/release-dependencies.json)
+          echo "ref=${release:-main}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v6
+        with:
+          repository: ernie/trinity
+          ref: ${{ steps.dependencies.outputs.ref }}
+          path: build/trinity
+
+      - name: Build unsigned APK
+        working-directory: android
+        run: |
+          revision=$(git -C ../build/trinity rev-parse HEAD)
+          ./gradlew :app:assembleRelease -PtrinitySourceDir="$GITHUB_WORKSPACE/build/trinity" -PtrinitySourceRevision="$revision"
+
   build-macos:
     # Mirrors the pre-signing steps of the release workflow's macos job so
     # PRs catch anything that would break a tag-triggered release: per-arch

@@ -58,6 +58,17 @@ IF(EMSCRIPTEN)
 	option(EMSCRIPTEN_PRELOAD_FILE "Preload game files into .data file" OFF)
 ENDIF()
 
+# ===== Android: the headset client is the SDLActivity's native library =====
+IF(ANDROID)
+	SET(USE_RENDERER_DLOPEN OFF)
+	SET(USE_VULKAN ON)
+	SET(USE_SDL ON)
+	SET(BUILD_OPENXR_LOADER ON CACHE BOOL "" FORCE)
+	# curl and OpenAL Soft are the bundled prebuilt libraries, loaded at runtime
+	ADD_COMPILE_DEFINITIONS(USE_CURL USE_CURL_DLOPEN USE_INTERNAL_OPENAL_HEADERS)
+	INCLUDE_DIRECTORIES(code/libcurl/windows/include code/libopenal/include)
+ENDIF()
+
 # Get version from CI tag or git
 if(DEFINED ENV{GITHUB_REF_NAME} AND "$ENV{GITHUB_REF_NAME}" MATCHES "^v[0-9]")
 	set(TRINITY_ENGINE_VERSION "$ENV{GITHUB_REF_NAME}")
@@ -121,6 +132,9 @@ ELSE()
 	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE -DNO_VM_COMPILED)
 	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE -DNO_VM_COMPILED)
 ENDIF()
+IF(ANDROID)
+	SET(BINEXT "")
+ENDIF()
 
 # botlib
 AUX_SOURCE_DIRECTORY(code/botlib BOTLIB_SRCS)
@@ -163,6 +177,8 @@ TARGET_COMPILE_DEFINITIONS(qcommon_ded PUBLIC DEDICATED)
 
 IF(USE_VOIP)
 	TARGET_COMPILE_DEFINITIONS(qcommon PRIVATE USE_VOIP)
+	# autoupdate.c reaches opus.h through client.h
+	TARGET_INCLUDE_DIRECTORIES(qcommon PRIVATE ${OPUS_INCLUDE_DIRS})
 	TARGET_COMPILE_DEFINITIONS(qcommon_ded PRIVATE USE_VOIP)
 ENDIF()
 
@@ -330,6 +346,19 @@ IF(EMSCRIPTEN)
 		code/unix/unix_shared.c)
 
 	AUX_SOURCE_DIRECTORY(code/sdl Q3_UI_SRCS)
+ELSEIF(ANDROID)
+	SET(Q3_SRCS
+		code/unix/unix_main.c
+		code/unix/unix_shared.c
+		code/android/android_main.c)
+	# SDLActivity calls SDL_main, which hands the launch command line to the engine's main
+	SET_SOURCE_FILES_PROPERTIES(code/unix/unix_main.c PROPERTIES COMPILE_DEFINITIONS main=Sys_UnixMain)
+	# no desktop window: android_glimp.c stands in for sdl_glimp.c and sdl_gamma.c
+	SET(Q3_UI_SRCS
+		code/sdl/sdl_input.c
+		code/sdl/sdl_snd.c
+		code/android/android_glimp.c
+		code/unix/unix_discord.c)
 ELSEIF(UNIX)
 	SET (Q3_SRCS
 		code/unix/unix_main.c
@@ -409,6 +438,9 @@ IF(EMSCRIPTEN)
 	TARGET_COMPILE_OPTIONS(q3ui PRIVATE "SHELL:-s USE_SDL=2")
 	TARGET_COMPILE_OPTIONS(client PRIVATE "SHELL:-s USE_SDL=2")
 	TARGET_COMPILE_OPTIONS(${RENDERER_PREFIX}_opengl2 PRIVATE "SHELL:-s USE_SDL=2")
+ELSEIF(ANDROID)
+	INCLUDE(TrinitySDL)
+	TARGET_LINK_LIBRARIES(q3ui SDL2::SDL2)
 ELSE()
 	IF(USE_SDL)
 		find_package(SDL2 REQUIRED)
@@ -438,7 +470,11 @@ IF(USE_VOIP)
 	SET(VOIP_LINK_SRCS ${VOIP_SERVER_SRCS})
 ENDIF()
 
-ADD_EXECUTABLE(${CNAME}${BINEXT} ${EXE_TYPE} ${Q3_SRCS} ${VOIP_LINK_SRCS})
+IF(ANDROID)
+	ADD_LIBRARY(${CNAME}${BINEXT} SHARED ${Q3_SRCS} ${VOIP_LINK_SRCS})
+ELSE()
+	ADD_EXECUTABLE(${CNAME}${BINEXT} ${EXE_TYPE} ${Q3_SRCS} ${VOIP_LINK_SRCS})
+ENDIF()
 option(BUILD_OPENXR_LOADER "Build the optional bundled Khronos OpenXR loader" OFF)
 if(WIN32 AND BUILD_TRINITY_NATIVE_FALLBACK AND CMAKE_VERSION VERSION_LESS 3.21)
 	message(FATAL_ERROR "Windows native fallback installation requires CMake 3.21 for runtime dependency packaging")
@@ -466,7 +502,10 @@ if(APPLE)
 	set(TRINITY_NATIVE_INSTALL_DIR "${CNAME}${BINEXT}.app/Contents/MacOS")
 endif()
 include(TrinityNative)
-if(TARGET trinity-native)
+# the APK packages every shared library target; nothing is installed
+if(TARGET trinity-native AND ANDROID)
+	add_dependencies(${CNAME}${BINEXT} trinity-native)
+elseif(TARGET trinity-native)
 	add_dependencies(${CNAME}${BINEXT} trinity-native)
 	# the trusted module directory and the renderers sit beside the installed executable
 	if(WIN32)
@@ -555,7 +594,7 @@ ENDIF()
 
 # dedicated server executable
 
-IF(NOT EMSCRIPTEN)
+IF(NOT EMSCRIPTEN AND NOT ANDROID)
 	SET(DED_VOIP_SRCS "")
 	IF(USE_VOIP)
 		SET(DED_VOIP_SRCS ${VOIP_SERVER_SRCS})
@@ -567,6 +606,8 @@ ENDIF()
 
 IF(EMSCRIPTEN)
 	# No additional system libraries needed for Emscripten
+ELSEIF(ANDROID)
+	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} SDL2::SDL2 android log mediandk m ${CMAKE_DL_LIBS})
 ELSEIF(WIN32)
 	TARGET_LINK_LIBRARIES(${CNAME}${BINEXT} winmm comctl32 ws2_32 iphlpapi)
 	TARGET_LINK_LIBRARIES(${DNAME}${BINEXT} winmm comctl32 ws2_32 iphlpapi)

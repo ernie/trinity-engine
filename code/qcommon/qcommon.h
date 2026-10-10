@@ -1369,6 +1369,10 @@ qboolean	Sys_IsLANAddress(const netadr_t *adr);
 void		Sys_ShowIP(void);
 
 qboolean	Sys_Mkdir( const char *path );
+#ifdef __ANDROID__
+void	Sys_InstallApk( const char *path );
+void	Sys_HapticEvent( const char *event, int position, int flags, int intensity, float angle, float height );
+#endif
 FILE	*Sys_FOpen( const char *ospath, const char *mode );
 qboolean Sys_ResetReadOnlyAttribute( const char *ospath );
 

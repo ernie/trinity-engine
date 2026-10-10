@@ -42,6 +42,7 @@
 #define UPDATES_DIR				".updates"
 #define PENDING_DIR				UPDATES_DIR "/pending"
 #define MANIFEST_NAME			"update_manifest.dat"
+#define UPDATE_APK_NAME			UPDATE_ASSET_PREFIX "-android-arm64.apk"
 
 // base game paks to exclude from extraction
 static const char *updateExcludeList[] = {
@@ -95,6 +96,10 @@ static const char *Update_StageRoot( void )
 {
 #ifdef __APPLE__
 	return Sys_DefaultHomePath();
+#elif defined(__ANDROID__)
+	// the game folder MainActivity chose; its FileProvider hands .updates/ to the package installer
+	const char *home = getenv( "TRINITY_HOME" );
+	return home ? home : "";
 #else
 	return Sys_DefaultBasePath();
 #endif
@@ -206,6 +211,8 @@ static void Update_BuildAssetName( char *buf, int bufSize )
   #endif
 #elif defined(__APPLE__)
 	Com_sprintf( buf, bufSize, "%s-macos-universal2.dmg", UPDATE_ASSET_PREFIX );
+#elif defined(__ANDROID__)
+	Q_strncpyz( buf, UPDATE_APK_NAME, bufSize );
 #elif defined(TRINITY_FRAME)
 	Com_sprintf( buf, bufSize, "%s-frame-arm64.zip", UPDATE_ASSET_PREFIX );
 #elif defined(__linux__)
@@ -443,6 +450,8 @@ static void Update_BeginCheck( void )
 		dl->func.easy_setopt( dl->cURL, CURLOPT_VERBOSE, 1 );
 
 	dl->func.easy_setopt( dl->cURL, CURLOPT_URL, apiURL );
+	if ( Com_DL_CABundle() )
+		dl->func.easy_setopt( dl->cURL, CURLOPT_CAINFO, Com_DL_CABundle() );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_USERAGENT, va( "%s/%s", UPDATE_GITHUB_REPO, Update_GetCurrentVersion() ) );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_WRITEFUNCTION, Update_APIWriteCallback );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_WRITEDATA, dl );
@@ -601,6 +610,10 @@ static void Update_BeginDownload( void )
 	// write to a temp file in the staging root (raw filesystem, not engine FS)
 #ifdef __APPLE__
 	Com_sprintf( updateDownloadPath, sizeof( updateDownloadPath ), "%s/update_download.dmg.tmp", Update_StageRoot() );
+#elif defined(__ANDROID__)
+	Com_sprintf( updateDownloadPath, sizeof( updateDownloadPath ), "%s/" UPDATES_DIR, Update_StageRoot() );
+	Sys_Mkdir( updateDownloadPath );
+	Com_sprintf( updateDownloadPath, sizeof( updateDownloadPath ), "%s/" UPDATES_DIR "/" UPDATE_APK_NAME, Update_StageRoot() );
 #else
 	Com_sprintf( updateDownloadPath, sizeof( updateDownloadPath ), "%s/update_download.zip.tmp", Update_StageRoot() );
 #endif
@@ -921,6 +934,9 @@ static qboolean Update_ExtractAndStage( void )
 {
 #ifdef __APPLE__
 	return Update_ExtractDMG();
+#elif defined(__ANDROID__)
+	// the downloaded APK is the staged update
+	return qtrue;
 #else
 	unzFile uf;
 	char filename[MAX_OSPATH];
@@ -1098,6 +1114,11 @@ void Update_Init( void )
 	Cmd_AddCommand( "updatecancel", Update_Cancel_f );
 	Cmd_AddCommand( "updaterestart", Update_Restart_f );
 
+#ifdef __ANDROID__
+	// an installed update leaves its APK behind
+	remove( va( "%s/" UPDATES_DIR "/" UPDATE_APK_NAME, Update_StageRoot() ) );
+#endif
+
 	// auto-check on startup if enabled
 	if ( update_check->integer ) {
 		Update_BeginCheck();
@@ -1225,6 +1246,12 @@ Does a clean shutdown then relaunches the process.
 */
 void Update_Restart_f( void )
 {
+#ifdef __ANDROID__
+	// the package installer replaces the running app
+	Com_Printf( "Update: installing %s...\n", updateDownloadPath );
+	Sys_InstallApk( updateDownloadPath );
+	return;
+#endif
 	Com_Printf( "Update: restarting...\n" );
 
 	VM_Forced_Unload_Start();

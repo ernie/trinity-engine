@@ -1,0 +1,7 @@
+.gradle/
+.kotlin/
+.cxx/
+local.properties
+# the Trinity mod release paks are build inputs, not sources
+app/src/main/assets/*.pk3
+*.log

@@ -1,0 +1,94 @@
+plugins {
+	id 'com.android.application'
+}
+
+// The CI tag or git describe, as com_engine reports it
+def describe = System.getenv('GITHUB_REF_NAME')
+if (!describe || !(describe ==~ /v\d.*/)) {
+	try {
+		describe = ['git', 'describe', '--tags', '--always', '--dirty'].execute(null, rootProject.projectDir).text.trim()
+	} catch (Exception ignored) {
+		describe = ''
+	}
+}
+def tag = describe =~ /^v(\d+)\.(\d+)\.(\d+)/
+def trinityVersionName = describe ? describe.replaceFirst(/^v/, '') : 'unknown'
+// MMMmmmppp: from v1.0.0 it exceeds trinity-standalone's MMmmpp codes, so this APK upgrades those installs
+def trinityVersionCode = tag.find() ? (tag.group(1) as int) * 1000000 + (tag.group(2) as int) * 1000 + (tag.group(3) as int) : 1
+
+// Sibling checkouts are optional; CMake fetches the pinned sources without them
+def engineDir = rootProject.projectDir.parentFile
+// A release passes its pinned Trinity commit and builds every dependency from pinned sources only
+def releaseRevision = findProperty('trinitySourceRevision')
+def releaseArguments = releaseRevision ? ['-DTRINITY_RELEASE_BUILD=ON', "-DTRINITY_SOURCE_REVISION=${releaseRevision}"] : []
+def sourceArgument = { String property, String name, String variable ->
+	def dir = findProperty(property) ?: (releaseRevision ? null : new File(engineDir.parentFile, name).path)
+	dir && new File(dir).isDirectory() ? ["-D${variable}=${new File(dir).canonicalPath.replace('\\', '/')}"] : []
+}
+
+android {
+	compileSdk 35
+	buildToolsVersion "36.0.0"
+	ndkVersion "27.3.13750724"
+	namespace 'io.ernie.trinity'
+
+	defaultConfig {
+		applicationId 'io.ernie.trinity'
+		minSdk 25
+		// Legacy external storage keeps the game files in /sdcard/Trinity
+		targetSdk 26
+		versionCode trinityVersionCode
+		versionName trinityVersionName
+		externalNativeBuild {
+			cmake {
+				arguments(*(['-DANDROID_STL=c++_static', '-DBUILD_TRINITY_NATIVE_FALLBACK=ON'] + releaseArguments +
+					sourceArgument('trinitySourceDir', 'trinity', 'TRINITY_SOURCE_DIR') +
+					sourceArgument('openxrSourceDir', 'OpenXR-SDK', 'TRINITY_OPENXR_SOURCE_DIR') +
+					sourceArgument('sdlSourceDir', 'SDL', 'TRINITY_SDL_SOURCE_DIR')))
+				targets 'trinity', 'SDL2', 'openxr_loader',
+					'trinity_native_baseq3_cgame', 'trinity_native_baseq3_ui',
+					'trinity_native_missionpack_cgame', 'trinity_native_missionpack_ui'
+			}
+		}
+		ndk {
+			abiFilters 'arm64-v8a'
+		}
+	}
+	buildTypes {
+		debug {
+			// an unoptimized engine cannot hold the headset's frame rate
+			externalNativeBuild {
+				cmake {
+					arguments '-DCMAKE_BUILD_TYPE=RelWithDebInfo'
+				}
+			}
+		}
+		release {
+			minifyEnabled false
+		}
+	}
+	externalNativeBuild {
+		cmake {
+			path '../../CMakeLists.txt'
+			version '3.22.1'
+		}
+	}
+	sourceSets {
+		main {
+			jniLibs.srcDirs '../../code/libcurl/android', '../../code/libopenal/android', '../../code/libvulkan/android'
+		}
+	}
+	compileOptions {
+		sourceCompatibility JavaVersion.VERSION_17
+		targetCompatibility JavaVersion.VERSION_17
+	}
+	lint {
+		// Headset apps are sideloaded or store-distributed, not on Google Play
+		disable 'ExpiredTargetSdkVersion'
+	}
+}
+
+dependencies {
+	implementation fileTree(dir: 'libs', include: ['*.jar', '*.aar'])
+	implementation 'androidx.core:core:1.13.1'
+}

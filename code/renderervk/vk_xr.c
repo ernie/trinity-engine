@@ -28,6 +28,20 @@ static int gazeValid;
 static float runtimeCenter[2][2];
 static int runtimeCenterValid;
 static vkFovCenters_t foveationCenters;
+
+#ifdef __ANDROID__
+#include <unistd.h>
+/* The game thread also records every frame, so register it as both main and render thread. */
+static void VKXR_AndroidThreads( void ) {
+	PFN_xrSetAndroidApplicationThreadKHR setThread = NULL;
+	if ( !live.threadSettings ||
+		 XR_FAILED( live.getproc( live.instance, "xrSetAndroidApplicationThreadKHR", (PFN_xrVoidFunction *)&setThread ) ) ||
+		 !setThread )
+		return;
+	setThread( xr.session, XR_ANDROID_THREAD_TYPE_APPLICATION_MAIN_KHR, (uint32_t)gettid() );
+	setThread( xr.session, XR_ANDROID_THREAD_TYPE_RENDERER_MAIN_KHR, (uint32_t)gettid() );
+}
+#endif
 static VkDevice xrDevice;
 static VkPhysicalDevice xrPhysical;
 static PFN_vkGetInstanceProcAddr getVkProc;
@@ -396,6 +410,9 @@ void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device
 			   xr.target.foveation ? ", runtime foveation center" : "" );
 	xrDevice = device;
 	xrPhysical = physical;
+#ifdef __ANDROID__
+	VKXR_AndroidThreads();
+#endif
 	{
 		char rates[512];
 		XrResult result =

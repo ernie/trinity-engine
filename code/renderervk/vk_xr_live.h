@@ -10,11 +10,11 @@ typedef struct {
 	XrVersion apiVersion; /* what the instance was created for: 1.1, or 1.0 on a runtime without it */
 	PFN_xrGetInstanceProcAddr getproc;
 	PFN_xrDestroyInstance destroy;
-	int picoInteraction, displayRefresh, eyeGaze, formatList, frameInteraction, createInfoMeta;
+	int picoInteraction, displayRefresh, eyeGaze, formatList, frameInteraction, createInfoMeta, threadSettings;
 	int foveationCenter; /* XR_META_foveation_eye_tracked and the XR_FB foveation extensions it builds on */
 	int models; /* XR_EXT_render_model and XR_EXT_interaction_render_model are both enabled */
 	XrResult modelsRefused; /* why the runtime turned down an instance with them, when it lists them */
-	const char *enabled[15];
+	const char *enabled[17];
 	unsigned enabledCount;
 	char runtimeName[XR_MAX_RUNTIME_NAME_SIZE];
 } vkXRLive_t;

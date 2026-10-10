@@ -24,6 +24,13 @@ typedef struct {
 } xrLoaderInfo_t;
 
 typedef void (*xrLoaderProc_t)(void);
+#ifdef __ANDROID__
+/* The JavaVM and activity that the Android loader and every instance need; set before any OpenXR call. */
+void XRLoader_SetAndroidContext( void *vm, void *activity );
+#endif
+/* What every XrInstanceCreateInfo carries for this platform: a next chain and one required extension, or NULL. */
+const void *XRLoader_InstanceNext( void );
+const char *XRLoader_PlatformExtension( void );
 void *XRLoader_LoadLibrary( void );
 xrLoaderProc_t XRLoader_LibrarySymbol( void *library, const char *name );
 void XRLoader_UnloadLibrary( void *library );

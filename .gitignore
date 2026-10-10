@@ -13,3 +13,6 @@ cmake-*
 # misc/macos/build-sdl.sh stages it from the pinned SDL revision
 code/libsdl/macosx/libSDL2-2.0.0.dylib
 
+# Android release signing: the keystore and its password stay local
+trinity.keystore
+.env
