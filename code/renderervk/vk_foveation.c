@@ -210,28 +210,27 @@ VkResult VK_FovQuery( vkFovCaps_t *caps, VkInstance instance, VkPhysicalDevice p
 	}
 	free( ext );
 	result = VK_SUCCESS;
+	/* Tilers shade whole bins at the density map's rate, so prefer it whenever offered. */
+	caps->fdmReason = densityMap( caps, physical, &p, api );
+	if ( !caps->fdmReason ) {
+		caps->supported = 1;
+		caps->reason = "fragment density map supported";
+		return VK_SUCCESS;
+	}
+	/* Clear what the failed density map probe filled in, so the shading rate path doesn't enable it. */
+	memset( &caps->fdmFeature, 0, sizeof( caps->fdmFeature ) );
 	rateReason = shadingRate( caps, physical, &p, api, &result );
 	if ( !rateReason ) {
 		caps->supported = 1;
 		caps->reason = "attachment shading rate supported";
 		return VK_SUCCESS;
 	}
-	if ( result < 0 ) {
-		caps->reason = rateReason;
+	caps->reason = rateReason;
+	if ( result < 0 )
 		return result;
-	}
-	/* A partial shading-rate probe leaves nothing the density map path may enable. */
 	memset( &caps->feature, 0, sizeof( caps->feature ) );
 	caps->rateCount = caps->extensionCount = 0;
 	caps->texelWidth = caps->texelHeight = 0;
-	caps->fdmReason = densityMap( caps, physical, &p, api );
-	if ( caps->fdmReason ) {
-		caps->reason = rateReason;
-		caps->extensionCount = 0;
-		return VK_SUCCESS;
-	}
-	caps->supported = 1;
-	caps->reason = "fragment density map supported";
 	return VK_SUCCESS;
 #undef UNAVAILABLE
 }
