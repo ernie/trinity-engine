@@ -27,7 +27,7 @@ FRAME_PASS=...
 | Script | Does |
 |---|---|
 | `build.sh` | Copies the engine and mod working trees (uncommitted changes included) into `~/src`, checks out the pinned OpenXR-SDK, and builds `build/release-linux-aarch64` with the native fallback modules and the loader. Extra arguments go to `make`. |
-| `deploy.sh` | Copies the client, renderers, loader and native modules into the title, plus `pak8t.pk3`/`pak3t.pk3` from `../trinity/dist` when they differ. `-n` is a dry run. Refuses while Trinity runs. |
+| `deploy.sh` | Copies the client, Vulkan renderer, loader and native modules into the title, plus `pak8t.pk3`/`pak3t.pk3` from `../trinity/dist` when they differ. `-n` is a dry run. Refuses while Trinity runs. |
 | `ssh.sh` | Runs a command on the Frame. |
 | `sync-addon-paks.sh` | Sends a PC install's addon paks into the Frame's `~/.trinity`, skipping what is already there. |
 

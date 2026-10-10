@@ -19,7 +19,7 @@ fi
 
 cd "$B"
 sshpass -e rsync -aLi --chmod=F755 ${DRY:+-n} -e "ssh -o StrictHostKeyChecking=accept-new" \
-	trinity trinity.ded trinity_vulkan_aarch64.so trinity_opengl_aarch64.so trinity_opengl2_aarch64.so \
+	trinity trinity.ded trinity_vulkan_aarch64.so \
 	libopenxr_loader.so.1 baseq3 missionpack "${FRAME_USER:-steamos}@${FRAME_HOST:-frame}:$TITLE/"
 
 for pak in baseq3/pak8t.pk3 missionpack/pak3t.pk3; do

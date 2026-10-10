@@ -80,6 +80,12 @@ endif
 #############################################################################
 -include Makefile.local
 
+# The Frame plays in VR only, which renders through Vulkan
+ifeq ($(TRINITY_FRAME),1)
+  USE_OPENGL = 0
+  USE_OPENGL2 = 0
+endif
+
 ifeq ($(COMPILE_PLATFORM),darwin)
   USE_SDL=1
   USE_LOCAL_HEADERS=1

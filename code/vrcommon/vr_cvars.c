@@ -54,7 +54,7 @@ void VR_InitMirrorCvars( void ) {
 	vr_mirrorFullscreen = Cvar_Get( "vr_mirrorFullscreen", "0", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NORESTART );
 	vr_mirrorWidth = Cvar_Get( "vr_mirrorWidth", "1280", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NORESTART );
 	vr_mirrorHeight = Cvar_Get( "vr_mirrorHeight", "720", CVAR_ARCHIVE | CVAR_LATCH | CVAR_NORESTART );
-	Cvar_CheckRange( vr_mirrorEnabled, "0", "1", CV_INTEGER );
+	Cvar_CheckRange( vr_mirrorEnabled, "0", VR_MIRROR_MAX, CV_INTEGER );
 	Cvar_CheckRange( vr_mirrorFullscreen, "0", "1", CV_INTEGER );
 	Cvar_CheckRange( vr_mirrorWidth, "320", "16384", CV_INTEGER );
 	Cvar_CheckRange( vr_mirrorHeight, "240", "16384", CV_INTEGER );

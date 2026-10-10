@@ -74,19 +74,18 @@ vrModuleVerdict_t VRState_ModuleVerdict( const vrModuleCheck_t *check, const cha
 	if ( check->provisional )
 		return VRMOD_WAIT;
 	if ( check->pure ) {
-		*reason = "the pure server's QVM has no VR support";
+		*reason = "This pure server allows only its own game code.";
 		return VRMOD_UNSUPPORTED;
 	}
-	if ( !check->baseGame ) {
-		*reason = "this mod has no VR-compatible module";
+	// the caller's message already names the mod's pak
+	if ( !check->baseGame )
 		return VRMOD_UNSUPPORTED;
-	}
 	if ( check->fallbackRunning ) {
-		*reason = "the bundled VR module did not register";
+		*reason = "Trinity's bundled VR module did not start.";
 		return VRMOD_UNSUPPORTED;
 	}
 	if ( !check->fallbackAvailable ) {
-		*reason = "the bundled VR module is unavailable";
+		*reason = "Trinity's bundled VR module is missing.";
 		return VRMOD_UNSUPPORTED;
 	}
 	return VRMOD_FALLBACK;

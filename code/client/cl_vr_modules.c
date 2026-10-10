@@ -3,6 +3,7 @@
 #include "cl_vr_modules.h"
 #include "../qcommon/vm_vr.h"
 #include "../qcommon/vm_vr_fallback.h"
+#include "../vrcommon/vr_defaults.h"
 
 /* The fallback choice of the connection that made it; CL_VRModulesPreflight applies it to each load. */
 static qboolean contextNativeCG, contextNativeUI;
@@ -24,8 +25,10 @@ void CL_VRModulesReset( void ) {
 	contextNativeCG = contextNativeUI = qfalse;
 }
 
-static qboolean CL_VRModulesBaseGame( const char *gameDir ) {
-	return !gameDir[0] || !Q_stricmp( gameDir, "baseq3" ) || !Q_stricmp( gameDir, "missionpack" );
+// A VR-only build also replaces any mod's UI, which can't show flatscreen there; a mod's cgame is its gameplay.
+static qboolean CL_VRModulesFallbackGame( const char *gameDir, vmIndex_t index ) {
+	return !gameDir[0] || !Q_stricmp( gameDir, "baseq3" ) || !Q_stricmp( gameDir, "missionpack" ) ||
+		( VR_ONLY && index == VM_UI );
 }
 
 // A saved fallback choice holds only for the connection and game directory that made it.
@@ -164,7 +167,7 @@ void CL_VRModulesPreflight( vmIndex_t index ) {
 		VM_VRSetNativeFallback( index, qtrue );
 		return;
 	}
-	native = !cl_connectedToPureServer && CL_VRModulesBaseGame( gameDir ) && !VM_VRQVMAccepted( index ) &&
+	native = !cl_connectedToPureServer && CL_VRModulesFallbackGame( gameDir, index ) && !VM_VRQVMAccepted( index ) &&
 		VM_VRPrepareNativeFallback( index, qfalse, !Q_stricmp( gameDir, "missionpack" ) );
 	VM_VRSetNativeFallback( index, native );
 	if ( native ) {
@@ -201,7 +204,7 @@ vrModuleVerdict_t CL_VRModulesCheck( const char **reason, const char **source ) 
 		check.registered = VM_VRRegistered( vms[i] ) && !(cl_connectedToPureServer && vms[i]->entryPoint);
 		check.provisional = cls.state > CA_DISCONNECTED && cls.state < CA_LOADING;
 		check.pure = cl_connectedToPureServer != 0;
-		check.baseGame = CL_VRModulesBaseGame( gameDir );
+		check.baseGame = CL_VRModulesFallbackGame( gameDir, vms[i]->index );
 		check.fallbackRunning = VM_VRNativeFallback( vms[i] );
 		check.fallbackAvailable = !check.registered && !check.provisional && !check.pure && check.baseGame &&
 			!check.fallbackRunning && VM_VRPrepareNativeFallback( vms[i]->index, qfalse, missionpack );
@@ -210,7 +213,7 @@ vrModuleVerdict_t CL_VRModulesCheck( const char **reason, const char **source ) 
 		if ( verdict > worst ) {
 			worst = verdict;
 			worstIndex = vms[i]->index;
-			Com_sprintf( text, sizeof( text ), "%s: %s", vms[i]->name, why );
+			Q_strncpyz( text, why, sizeof( text ) );
 			*reason = text;
 		}
 	}

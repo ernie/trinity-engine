@@ -135,7 +135,14 @@ static void CL_VR_Incapable( void ) {
 }
 /* qtrue for Retry. Asked before the game window opens, so Quit exits without one and Flatscreen lasts this session. */
 static qboolean CL_VR_LaunchDialog( void ) {
+#if VR_ONLY
+	/* No one in the headset sees a desktop dialog, and there is no flatscreen to offer. */
+	const int choice = 2;
+
+	Com_Printf( S_COLOR_RED "VR startup failed: %s\n", lastFailure[0] ? lastFailure : "VR could not start." );
+#else
 	int choice = Sys_VRFailureDialog( lastFailure );
+#endif
 
 	if ( choice == 1 )
 		return qtrue;
@@ -158,6 +165,9 @@ static void CL_VR_Wait( const char *failure ) {
 	Com_Printf( "VR requested; waiting for a headset. Apply flatscreen mode to cancel.\n" );
 }
 static void CL_VR_ReportCap( void ) {
+#if VR_ONLY
+	Com_Error( ERR_FATAL, "VR stopped after repeated errors: %s", lastFailure );
+#endif
 	Q_strncpyz( lastFailure, "repeated errors while in VR", sizeof( lastFailure ) );
 	Com_Printf( "Repeated errors while in VR. Continuing in flatscreen.\n" );
 	if ( CL_VR_Connected() )
@@ -188,16 +198,21 @@ static void CL_VR_Lost( const char *reason ) {
 }
 /* Flat until the next connect, disconnect or game restart; vr_enabled keeps the player's choice. */
 static void CL_VR_Unsupported( const char *reason, const char *source ) {
-	char detail[MAX_QPATH + 32];
+	char detail[MAX_QPATH + 32], message[MAX_STRING_CHARS];
 
-	Q_strncpyz( lastFailure, reason, sizeof( lastFailure ) );
 	Com_sprintf( detail, sizeof( detail ), "%s QVMs are VR-incompatible", *source ? source : FS_GetCurrentGameDir() );
-	Com_Printf( "Game modules are not VR-compatible (%s). Continuing in flatscreen.\n", lastFailure );
+	Com_sprintf( message, sizeof( message ), "VR unavailable - %s.%s%s", detail, *reason ? " " : "", reason );
+	Q_strncpyz( lastFailure, *reason ? reason : detail, sizeof( lastFailure ) );
+#if VR_ONLY
+	/* There is no flatscreen to continue in: leave the server for the menu, or quit if the menu itself can't run. */
+	Com_Error( CL_VR_Connected() ? ERR_DROP : ERR_FATAL, "%s", message );
+#endif
+	Com_Printf( "%s Continuing in flatscreen.\n", message );
 	// The menu has no match to draw over, so it gets the UI's error popup.
 	if ( CL_VR_Connected() )
 		CL_VRModulesNoticeShow( "VR unavailable", detail );
 	else
-		CL_VR_ErrorPopup( va( "VR unavailable - %s", detail ) );
+		CL_VR_ErrorPopup( message );
 	CL_VR_Step( VREV_UNSUPPORTED, 0 );
 }
 void CL_VR_ConnectionEnded( void ) {
@@ -219,14 +234,16 @@ static void CL_VR_Info_f( void ) {
 }
 void CL_VR_Init( void ) {
 	/* Supported modes, not current headset availability. Never archived. */
-#if defined(USE_VULKAN_API) && !defined(__EMSCRIPTEN__)
+#if VR_ONLY
+	Cvar_Get( "vr_availableModes", "vr", CVAR_ROM | CVAR_PROTECTED );
+#elif defined(USE_VULKAN_API) && !defined(__EMSCRIPTEN__)
 	Cvar_Get( "vr_availableModes", "flat vr", CVAR_ROM | CVAR_PROTECTED );
 #else
 	Cvar_Get( "vr_availableModes", "flat", CVAR_ROM | CVAR_PROTECTED );
 #endif
 	/* Mod changes reset cvars; preserve the selected mode across that reset. */
 	vr_enabled = Cvar_Get( "vr_enabled", VR_ENABLED_DEFAULT, VR_MODE_CVAR_FLAGS );
-	Cvar_CheckRange( vr_enabled, "0", "1", CV_INTEGER );
+	Cvar_CheckRange( vr_enabled, VR_ENABLED_MIN, "1", CV_INTEGER );
 
 	nextTargetCheck = cls.realtime + 1000;
 	frame.open = frame.stereo = qfalse;
@@ -258,8 +275,8 @@ void CL_VR_RestartBegin( void ) {
 	trackingRequested = action == VRACT_PROBE;
 	XRLoader_WatchEnd();
 	if ( action == VRACT_PROBE ) {
-#ifdef TRINITY_FRAME
-		/* SteamVR always runs on the Frame, so the renderer's own instance answers the probe and the app connects once. */
+#if defined(TRINITY_FRAME) || defined(__ANDROID__)
+		/* The runtime is always running on these devices, so skip the probe and let the renderer's instance be the only connection. */
 		vrProbe_t probe = VRPROBE_READY;
 #else
 		/* A lost session still holds its instance and the loader allows one per process, so the rebuild replaces it instead of probing. */
@@ -313,7 +330,8 @@ qboolean CL_VR_RestartComplete( void ) {
 	if ( machine.xrRenderer ) {
 		const char *reason, *source;
 		verdict = CL_VRModulesCheck( &reason, &source );
-		if ( verdict == VRMOD_UNSUPPORTED ) {
+		// a VR-only build stays in VR and leaves the server from the next frame's check, outside the restart
+		if ( verdict == VRMOD_UNSUPPORTED && !VR_ONLY ) {
 			CL_VR_Unsupported( reason, source );
 			return qfalse;
 		}
@@ -422,6 +440,8 @@ static void CL_VR_FrameChecks( void ) {
 		return;
 	verdict = CL_VRModulesCheck( &reason, &source );
 	if ( verdict == VRMOD_UNSUPPORTED ) {
+		if ( VR_ONLY )
+			CL_VR_Unsupported( reason, source );
 		if ( re.XRSetActive )
 			re.XRSetActive( qfalse );
 		CL_VRInput_Reset();

@@ -2470,7 +2470,8 @@ static qboolean vk_select_surface_format( VkPhysicalDevice physical_device, VkSu
 	vk.hdrOsState = OSHDR_UNKNOWN;
 
 	// capability is probed whatever r_hdrDisplay says, so the menus can offer HDR before it is requested
-	if ( vk.hdrColorspaceExt ) {
+	// a VR-only build's mirror never shows HDR
+	if ( vk.hdrColorspaceExt && !VR_ONLY ) {
 		const qboolean commit = r_hdrDisplay->integer && r_fbo->integer && vk_desktop_presented();
 		uint32_t h;
 		for ( h = 0; h < format_count; h++ ) {

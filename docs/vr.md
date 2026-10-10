@@ -3,7 +3,8 @@
 Trinity Engine runs flatscreen and VR through the same client. VR uses the
 Vulkan renderer and an OpenXR runtime with `XR_KHR_vulkan_enable2`. The GPU
 must support Vulkan multiview with at least two views. OpenGL remains available
-for flatscreen play.
+for flatscreen play. The Steam Frame and Android (Quest, PICO) packages play in
+VR only and carry only the Vulkan renderer.
 
 ## Runtime and launch
 
@@ -22,10 +23,11 @@ choose in the menu or at the console is saved, on every build. A `vr_enabled` or
 switches, but is not saved: the configuration keeps the value it had. If you
 change the setting during that session, your change is saved. `set vr_enabled 1`
 in `baseq3/autoexec.cfg` (or the selected game directory's `autoexec.cfg`) can
-set your preferred startup mode. The Steam Frame package launches in VR with the
-desktop mirror off by default, so a `+set vr_enabled 0` on the launch line plays
-flat for one session. Its `vrpreferences.json` carries the SteamVR per-app
-resolution, refresh rate and motion smoothing settings.
+set your preferred startup mode. The Steam Frame and Android packages hold
+`vr_enabled` at `1` and offer no Display Mode setting. The Frame package starts
+with the desktop mirror off, and Android has none. The Frame's
+`vrpreferences.json` carries the SteamVR per-app resolution, refresh rate and
+motion smoothing settings.
 
 In the System menu, change **Display Mode** and select **Apply**. At the console,
 use `set vr_enabled 1; vid_restart` or `set vr_enabled 0; vid_restart`. Entering
@@ -79,6 +81,11 @@ Otherwise the client leaves VR in four cases:
 - Three errors or headset losses within 30 seconds. The game continues in
   flatscreen, and an on-screen notice in a match, or the main menu's error
   message, says VR stopped; `vid_restart` or the next launch tries VR again.
+
+The Steam Frame and Android packages have no flatscreen to continue in. A server
+or mod whose game modules can't run in VR disconnects you to the main menu with
+the same message, and Trinity's menus stand in for another mod's own. A failed
+VR start, or three errors within 30 seconds, quits with the reason in the log.
 
 While VR is active, game audio continues even if the desktop mirror is unfocused
 or minimized. The focus-mute settings still apply in flatscreen mode. Removing
