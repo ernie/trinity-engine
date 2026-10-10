@@ -13,6 +13,7 @@ typedef struct {
 	int picoInteraction, displayRefresh, eyeGaze, formatList, frameInteraction, createInfoMeta, threadSettings;
 	int foveationCenter; /* XR_META_foveation_eye_tracked and the XR_FB foveation extensions it builds on */
 	int models; /* XR_EXT_render_model and XR_EXT_interaction_render_model are both enabled */
+	int metaModels; /* XR_FB_render_model is enabled in their place */
 	XrResult modelsRefused; /* why the runtime turned down an instance with them, when it lists them */
 	const char *enabled[17];
 	unsigned enabledCount;

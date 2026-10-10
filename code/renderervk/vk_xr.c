@@ -6,6 +6,7 @@
 #include "vk_xr_refresh.h"
 #include "vk_xr_gaze.h"
 #include "vk_xr_models.h"
+#include "vk_xr_meta.h"
 #include "../vrcommon/vr_float.h"
 #include "../vrcommon/vr_rate_list.h"
 #include "../vrcommon/vr_render_extent.h"
@@ -28,6 +29,9 @@ static int gazeValid;
 static float runtimeCenter[2][2];
 static int runtimeCenterValid;
 static vkFovCenters_t foveationCenters;
+#if VR_MODEL_KTX2
+static clXRHandInput_t modelHands[2]; /* the frame's input, which poses Meta's models */
+#endif
 
 #ifdef __ANDROID__
 #include <unistd.h>
@@ -217,6 +221,12 @@ static void VKXR_ModelLog( const char *line ) {
 qboolean VK_XR_UpdateModels( void ) {
 	const qboolean wanted = VK_XR_Screen() && controllerModels && controllerModels->integer;
 	const qboolean refresh = wanted && xr.modelsChanged;
+#if VR_MODEL_KTX2
+	if ( live.metaModels ) {
+		const XrSpace grips[2] = {input.spaces[0][0], input.spaces[1][0]};
+		return VK_XRMeta_Update( xr.space, xr.displayTime, wanted && inputFocused, grips, modelHands );
+	}
+#endif
 	if ( refresh ) {
 		xr.modelsChanged = 0;
 		VK_XRModels_Refresh( &models );
@@ -228,6 +238,10 @@ void *VK_XR_ModelAlloc( size_t size ) {
 	return malloc( size );
 }
 const vkXRModel_t *VK_XR_Model( int index ) {
+#if VR_MODEL_KTX2
+	if ( live.metaModels )
+		return VK_XRMeta_Model( index );
+#endif
 	return index >= 0 && index < VK_XR_MODELS_MAX && models.models[index].handle ? &models.models[index] : NULL;
 }
 void VK_XR_HeadPosition( vec3_t position ) {
@@ -456,6 +470,10 @@ void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device
 			ri.Printf( PRINT_WARNING, "OpenXR controller models: the runtime lists the extensions but refused an instance with them (%d)\n",
 					   (int)live.modelsRefused );
 		}
+#if VR_MODEL_KTX2
+		if ( live.metaModels )
+			VK_XRMeta_Init( live.instance, xr.session, live.getproc, VK_XR_ModelAlloc, free, VKXR_ModelLog );
+#endif
 	}
 	barrier = (PFN_vkCmdPipelineBarrier)getVkProc( instance, "vkCmdPipelineBarrier" );
 	blit = (PFN_vkCmdBlitImage)getVkProc( instance, "vkCmdBlitImage" );
@@ -765,6 +783,9 @@ int VK_XR_BeginFrame( refXRFrame_t *frame ) {
 		return -1;
 	}
 	inputFocused = frame->renderable && frame->input.focused;
+#if VR_MODEL_KTX2
+	Com_Memcpy( modelHands, frame->input.hands, sizeof( modelHands ) );
+#endif
 	{
 		XrPosef center = VKXR_CenterPose();
 		Com_Memcpy( frame->head.position, &center.position, sizeof( frame->head.position ) );
@@ -834,6 +855,9 @@ void VK_XR_ShutdownSession( void ) {
 	}
 	VK_XRGaze_Shutdown( &gaze );
 	VK_XRModels_Shutdown( &models );
+#if VR_MODEL_KTX2
+	VK_XRMeta_Shutdown();
+#endif
 	Com_Memset( pointers, 0, sizeof( pointers ) );
 	VK_XRInput_Shutdown( &input );
 	if ( xr.frameBegun )
@@ -893,14 +917,16 @@ void VK_XR_Info( void ) {
 			   xr.target.foveation && !runtimeFoveation.failed ? "the runtime's"
 			   : gaze.supported								  ? "the gaze pose"
 															  : "none" );
-	if ( live.models ) {
+	if ( live.models || live.metaModels ) {
 		int loaded = 0, drawn = 0, triangles = 0;
-		for ( hand = 0; hand < VK_XR_MODELS_MAX; hand++ )
-			if ( models.models[hand].handle ) {
+		for ( hand = 0; hand < VK_XR_MODELS_MAX; hand++ ) {
+			const vkXRModel_t *model = VK_XR_Model( hand );
+			if ( model ) {
 				loaded++;
-				drawn += models.models[hand].drawable;
-				triangles += models.models[hand].model.triangleCount;
+				drawn += model->drawable;
+				triangles += model->model.triangleCount;
 			}
+		}
 		ri.Printf( PRINT_ALL, "Controller models: %d loaded (%d triangles), %d tracked%s\n", loaded, triangles, drawn,
 				   controllerModels && controllerModels->integer ? "" : "; turned off" );
 	} else if ( live.modelsRefused )

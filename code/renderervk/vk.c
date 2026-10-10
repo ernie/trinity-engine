@@ -50,6 +50,9 @@ static int VK_GPUTimePercentile( int count, int percent ) {
 #include "vk.h"
 #include "vk_foveation.h"
 #include "vk_pipeline_cache.h"
+#if VR_MODEL_KTX2
+#include "../vrcommon/vr_ktx2.h"
+#endif
 
 static PFN_vkCreateQueryPool qvkCreateQueryPool;
 static PFN_vkDestroyQueryPool qvkDestroyQueryPool;
@@ -11090,6 +11093,10 @@ static image_t *vk_xr_model_image( const vkXRModel_t *model, int asset, int inde
 				ri.CL_DecodeJPG( name, source->data, source->size, &pic, &width, &height );
 			else if ( source->format == VR_MODEL_IMAGE_PNG )
 				R_DecodePNG( name, source->data, source->size, &pic, &width, &height );
+#if VR_MODEL_KTX2
+			else if ( source->format == VR_MODEL_IMAGE_KTX2 )
+				VR_KTX2Decode( source->data, source->size, &pic, &width, &height, ri.Malloc, ri.Free );
+#endif
 		}
 		if ( pic && width > 0 && height > 0 && width <= VK_XR_MODEL_TEXTURE_MAX && height <= VK_XR_MODEL_TEXTURE_MAX ) {
 			count = width * height;
@@ -11330,28 +11337,37 @@ static void vk_draw_screen_models( const vec3_t eye ) {
 											 ? tr.xrAssets[asset].shaders[index]
 											 : tr.xrAssets[asset].plain;
 				const shaderStage_t *stage = shader->stages[0];
+				/* a skinned part's joints move it piecewise: its positions are posed into the ring too, under the identity */
+				const qboolean skinned = m->nodes[n].skin >= 0 && primitive->joints != NULL;
 				const uint32_t colors = PAD( vk.cmd->vertex_buffer_offset, 32 ), size = primitive->vertexCount * 4;
+				const uint32_t positions = PAD( colors + size, 32 );
+				const uint32_t end = skinned ? positions + primitive->vertexCount * 16 : colors + size;
 				const VkDeviceSize start = tr.xrAssets[asset].offsets[p];
 				VkBuffer buffers[3];
 				VkDeviceSize offsets[3];
 				/* a primitive without a triangle has no indices to bind */
 				if ( primitive->indexCount < 3 )
 					continue;
-				if ( colors + size > vk.geometry_buffer_size ) {
+				if ( end > vk.geometry_buffer_size ) {
 					// schedule geometry buffer resize
-					vk.geometry_buffer_size_new = log2pad( colors + size, 1 );
+					vk.geometry_buffer_size_new = log2pad( end, 1 );
 					return;
 				}
-				VR_ModelShade( m, p, world + n * 16, eye, vk.cmd->vertex_buffer_ptr + colors );
-				vk.cmd->vertex_buffer_offset = (VkDeviceSize)colors + size;
-				buffers[0] = buffers[2] = tr.xrAssets[asset].buffer;
+				if ( skinned )
+					VR_ModelSkinShade( m, p, m->nodes[n].skin, world, eye, (float *)( vk.cmd->vertex_buffer_ptr + positions ),
+									   vk.cmd->vertex_buffer_ptr + colors );
+				else
+					VR_ModelShade( m, p, world + n * 16, eye, vk.cmd->vertex_buffer_ptr + colors );
+				vk.cmd->vertex_buffer_offset = end;
+				buffers[0] = skinned ? vk.cmd->vertex_buffer : tr.xrAssets[asset].buffer;
 				buffers[1] = vk.cmd->vertex_buffer;
-				offsets[0] = start;
+				buffers[2] = tr.xrAssets[asset].buffer;
+				offsets[0] = skinned ? positions : start;
 				offsets[1] = colors;
 				offsets[2] = start + VR_MODEL_PACK_ST( primitive->vertexCount );
 				GL_SelectTexture( 0 );
 				GL_Bind( stage->bundle[0].image[0] );
-				vk_update_mvp( world + n * 16 );
+				vk_update_mvp( skinned ? identity : world + n * 16 );
 				vk.cmd->emissive_factor = 0.0f;
 				vk_bind_pipeline( stage->vk_pipeline[0] );
 				qvkCmdBindVertexBuffers( vk.cmd->command_buffer, 0, 3, buffers, offsets );

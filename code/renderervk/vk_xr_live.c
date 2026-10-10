@@ -1,5 +1,8 @@
 #include "vk_xr_live.h"
 #include <string.h>
+#ifndef VR_MODEL_KTX2
+#define VR_MODEL_KTX2 0
+#endif
 void VK_XRLive_Close( vkXRLive_t *ctx ) {
 	if ( !ctx )
 		return;
@@ -30,7 +33,7 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 	XrSystemGetInfo si;
 	XrResult result;
 	uint32_t count, i, j, without;
-	int vulkan2 = 0, uuid = 0, renderModel = 0, interactionModel = 0, wantModels, foveationFound = 0;
+	int vulkan2 = 0, uuid = 0, renderModel = 0, interactionModel = 0, wantModels, metaModels = 0, foveationFound = 0;
 	if ( !ctx )
 		return XR_ERROR_VALIDATION_FAILURE;
 	memset( ctx, 0, sizeof( *ctx ) );
@@ -92,11 +95,15 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 			renderModel = 1;
 		if ( !strcmp( extensions[i].extensionName, XR_EXT_INTERACTION_RENDER_MODEL_EXTENSION_NAME ) )
 			interactionModel = 1;
+		if ( !strcmp( extensions[i].extensionName, XR_FB_RENDER_MODEL_EXTENSION_NAME ) )
+			metaModels = 1;
 		for ( j = 0; j < FOVEATION_EXTENSIONS; j++ )
 			if ( !strcmp( extensions[i].extensionName, foveationExtensions[j] ) )
 				foveationFound |= 1 << j;
 	}
 	wantModels = renderModel && interactionModel;
+	/* Meta's own models stand in for a runtime without the EXT pair; their textures are KTX2 */
+	ctx->metaModels = !wantModels && metaModels && VR_MODEL_KTX2;
 	ctx->foveationCenter = foveationFound == (1 << (int)FOVEATION_EXTENSIONS) - 1;
 	if ( !vulkan2 ) {
 		result = XR_ERROR_EXTENSION_NOT_PRESENT;
@@ -112,6 +119,8 @@ XrResult VK_XRLive_Open( vkXRLive_t *ctx ) {
 		enabled[ci.enabledExtensionCount++] = XRLoader_PlatformExtension();
 	if ( ctx->threadSettings )
 		enabled[ci.enabledExtensionCount++] = "XR_KHR_android_thread_settings";
+	if ( ctx->metaModels )
+		enabled[ci.enabledExtensionCount++] = XR_FB_RENDER_MODEL_EXTENSION_NAME;
 	if ( ctx->picoInteraction )
 		enabled[ci.enabledExtensionCount++] = "XR_BD_controller_interaction";
 	if ( ctx->displayRefresh )
