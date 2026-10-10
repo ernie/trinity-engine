@@ -23,7 +23,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "q_shared.h"
 #include "qcommon.h"
-#include "../vrcommon/vr_state.h"
 #include <setjmp.h>
 #ifndef _WIN32
 #include <netinet/in.h>
@@ -4505,8 +4504,10 @@ void Com_Frame( qboolean noDelay ) {
 			minMsec = 0;
 			bias = 0;
 		} else {
-			// The headset paces an active VR session; the mirror window losing focus does not.
-			if ( !gw_active && com_maxfpsUnfocused->integer > 0 && !VR_IsActiveMode() )
+			// The headset paces a running VR session at its own rate, so neither cap applies to it.
+			if ( CL_VR_HeadsetPaced() )
+				minMsec = 1;
+			else if ( !gw_active && com_maxfpsUnfocused->integer > 0 )
 				minMsec = 1000 / com_maxfpsUnfocused->integer;
 			else
 			if ( com_maxfps->integer > 0 )

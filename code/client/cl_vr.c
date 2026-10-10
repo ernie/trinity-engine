@@ -617,6 +617,10 @@ void CL_VR_AbortUnwind( qboolean keepRenderer ) {
 void CL_VR_RestartAborted( void ) {
 	CL_VR_Step( VREV_DISCONNECT_ERROR, 0 );
 }
+/* xrWaitFrame paces every frame at the headset's own rate, but only while the session runs. */
+qboolean CL_VR_HeadsetPaced( void ) {
+	return VR_IsActiveMode() && xrFrame.running;
+}
 qboolean CL_VR_RenderStereo( void ) {
 	return frame.stereo;
 }

@@ -1196,6 +1196,7 @@ void CL_AbortUnwind( errorParm_t code );
 void CL_ResetOldGame( void );
 void CL_Shutdown( const char *finalmsg, qboolean quit );
 void CL_Frame( int msec, int realMsec );
+qboolean CL_VR_HeadsetPaced( void );
 qboolean CL_GameCommand( void );
 void CL_KeyEvent (int key, qboolean down, unsigned time);
 
