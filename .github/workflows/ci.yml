@@ -146,6 +146,7 @@ jobs:
       - name: Build universal2 app bundle
         run: |
           NCPU=$(sysctl -n hw.logicalcpu)
+          ./misc/macos/build-sdl.sh
           make -j$NCPU PLATFORM=darwin ARCH=x86_64  CC=clang USE_RENDERER_DLOPEN=0 STRIP=echo
           make -j$NCPU PLATFORM=darwin ARCH=aarch64 CC=clang USE_RENDERER_DLOPEN=0 STRIP=echo
           chmod +x make-macosx-app.sh

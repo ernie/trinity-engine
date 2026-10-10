@@ -592,6 +592,9 @@ ifeq ($(COMPILE_PLATFORM),darwin)
 
   ifeq ($(USE_LOCAL_HEADERS),1)
     MACLIBSDIR=$(MOUNT_DIR)/libsdl/macosx
+    ifeq ($(wildcard $(MACLIBSDIR)/libSDL2-2.0.0.dylib),)
+      $(error $(MACLIBSDIR)/libSDL2-2.0.0.dylib is missing: run misc/macos/build-sdl.sh)
+    endif
     BASE_CFLAGS += -I$(SDLHDIR)
     CLIENT_LDFLAGS += $(MACLIBSDIR)/libSDL2-2.0.0.dylib
     CLIENT_EXTRA_FILES += $(MACLIBSDIR)/libSDL2-2.0.0.dylib
