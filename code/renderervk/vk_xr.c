@@ -9,7 +9,6 @@
 #include "vk_xr_meta.h"
 #include "../vrcommon/vr_float.h"
 #include "../vrcommon/vr_rate_list.h"
-#include "../vrcommon/vr_render_extent.h"
 
 #if VK_XR_DIRECT_MAX_IMAGES != VK_XRVK_MAX_IMAGES
 #error "vk.xr_direct must hold every XR swapchain image"

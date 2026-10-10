@@ -1,6 +1,5 @@
 #include "../vrcommon/vr_float.h"
 #include "vk_xr_vulkan.h"
-#include "../vrcommon/vr_render_extent.h"
 #include <string.h>
 #ifdef _WIN32
 #include <windows.h>

@@ -20,7 +20,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 #include "tr_local.h"
-#include "vk_hud_coverage.h"
 
 // tr_shader.c -- this file deals with the parsing and definition of shaders
 

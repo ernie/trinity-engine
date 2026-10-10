@@ -22,7 +22,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // cl_scrn.c -- master for refresh, status bar, console, chat, notify, etc
 
 #include "client.h"
-#include "../vrcommon/vr_loading_budget.h"
 #include "cl_vr.h"
 #include "cl_vr_input.h"
 #include "cl_vr_modules.h"
@@ -813,7 +812,24 @@ void SCR_UpdateScreen( void ) {
 
 /* Redraw at most every SCR_LOADING_PUMP_MS; otherwise a tracked frame, never inside an update or an open frame. */
 #define SCR_LOADING_PUMP_MS 100
+/* After a loading frame that blocked on the GPU, wait as long as it took before the next, so loading keeps at least half the time. */
+typedef struct {
+	int lastReturnMs;
+	int lastCostMs;
+} vrLoadingBudget_t;
 static vrLoadingBudget_t scr_loadingBudget;
+
+static void VR_LoadingBudgetSpent( vrLoadingBudget_t *b, int startMs, int returnMs ) {
+	b->lastReturnMs = returnMs;
+	b->lastCostMs = (int)( (unsigned)returnMs - (unsigned)startMs );
+	if ( b->lastCostMs < 0 )
+		b->lastCostMs = 0;
+}
+
+/* Unsigned differences so a wrapped millisecond clock never locks the pump out. */
+static int VR_LoadingBudgetHeld( const vrLoadingBudget_t *b, int nowMs ) {
+	return b->lastCostMs > 0 && (unsigned)nowMs - (unsigned)b->lastReturnMs < (unsigned)b->lastCostMs;
+}
 
 void CL_LoadingPump( qboolean redraw ) {
 	int start;

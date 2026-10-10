@@ -14,6 +14,8 @@
 #define XR_USE_PLATFORM_ANDROID
 #endif
 #include "../thirdparty/openxr/openxr_platform.h"
+#include <math.h>
+#include "../vrcommon/vr_float.h"
 
 #define VK_XRVK_MAX_IMAGES 32
 /* MUTABLE_FORMAT lets direct mode render through a UNORM view of the sRGB image. */
@@ -110,4 +112,29 @@ XrResult VK_XRVK_Begin( vkXRVk_t *ctx );
 XrResult VK_XRVK_End( vkXRVk_t *ctx, int rendered );
 /* Polls up to 100 times so the session reaches STOPPING before it is destroyed. */
 void VK_XRVK_Shutdown( vkXRVk_t *ctx );
+/* Scale both axes together when either runtime or graphics limit is reached. */
+static inline int VR_RenderExtent( uint32_t recommendedWidth, uint32_t recommendedHeight,
+	uint32_t maxWidth, uint32_t maxHeight, float requested, uint32_t *width, uint32_t *height ) {
+	double factor = requested, limit;
+	if ( !recommendedWidth || !recommendedHeight || !maxWidth || !maxHeight ) {
+		return 0;
+	}
+	if ( !VR_FloatFinite( requested ) || factor <= 0 ) {
+		factor = 1;
+	}
+	limit = fmin( (double)maxWidth / recommendedWidth, (double)maxHeight / recommendedHeight );
+	if ( factor > limit ) {
+		factor = limit;
+	}
+	*width = (uint32_t)(recommendedWidth * factor);
+	*height = (uint32_t)(recommendedHeight * factor);
+	if ( !*width ) {
+		*width = 1;
+	}
+	if ( !*height ) {
+		*height = 1;
+	}
+	return 1;
+}
+
 #endif
