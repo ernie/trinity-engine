@@ -63,7 +63,6 @@ void VR_InitMirrorCvars( void ) {
 void VR_InitCvars( void )
 {
 	cvar_t *vr_hudDepth;
-	Cvar_Get( "vr_platform", "pc", CVAR_ROM );	// advertise the VR platform to UI modules
 	vr_worldscale = Cvar_Get( "vr_worldscale", "32.0", CVAR_ARCHIVE );
 	vr_worldscaleScaler = Cvar_Get( "vr_worldscaleScaler", "1.0", CVAR_ARCHIVE );
 	vr_hudDepth = Cvar_Get( "vr_hudDepth", "3", CVAR_ARCHIVE );

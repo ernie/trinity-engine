@@ -32,6 +32,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cl_trinity_rconset.h"
 #include "../qcommon/autoupdate.h"
 #include <limits.h>
+#ifdef __ANDROID__
+#include <sys/system_properties.h>
+#endif
 
 cvar_t	*cl_noprint;
 cvar_t	*cl_debugMove;
@@ -4243,6 +4246,31 @@ static void CL_InitGLimp_Cvars( void )
 }
 
 
+/* One APK serves every Android headset, so the device manufacturer tells them apart. */
+static const char *CL_PlatformName( void )
+{
+#if defined(TRINITY_FRAME)
+	return "frame";
+#elif defined(__ANDROID__)
+	char maker[PROP_VALUE_MAX];
+
+	maker[0] = '\0';
+	__system_property_get( "ro.product.manufacturer", maker );
+	if ( Q_stristr( maker, "pico" ) || Q_stristr( maker, "bytedance" ) )
+		return "pico";
+	if ( Q_stristr( maker, "valve" ) )
+		return "frame";
+	return "quest";
+#elif defined(_WIN32)
+	return "windows";
+#elif defined(__APPLE__)
+	return "macos";
+#else
+	return "linux";
+#endif
+}
+
+
 /*
 ====================
 CL_Init
@@ -4253,6 +4281,8 @@ void CL_Init( void ) {
 	cvar_t *cv;
 
 	Com_Printf( "----- Client Initialization -----\n" );
+
+	Cvar_Get( "cl_platform", CL_PlatformName(), CVAR_ROM );
 
 	Con_Init();
 
