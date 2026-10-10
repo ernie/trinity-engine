@@ -4031,7 +4031,12 @@ void Com_Init( char *commandLine ) {
 
 	FS_InitFilesystem();
 
+#ifdef DEDICATED
 	com_logfile = Cvar_Get( "logfile", "0", CVAR_TEMP );
+#else
+	// players' bug reports need a log they didn't have to know to turn on
+	com_logfile = Cvar_Get( "logfile", "1", CVAR_TEMP );
+#endif
 	Cvar_CheckRange( com_logfile, "0", "4", CV_INTEGER );
 	Cvar_SetDescription( com_logfile, "System console logging:\n"
 		" 0 - disabled\n"
