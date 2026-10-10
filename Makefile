@@ -1420,7 +1420,6 @@ Q3OBJ += \
   $(B)/client/qvm/vm.o \
   $(B)/client/qvm/vm_interpreted.o \
   $(B)/client/qvm/vm_vr.o \
-  $(B)/client/qvm/vm_vr_select.o \
   $(B)/client/qvm/vm_vr_state.o \
   $(B)/client/vr_shared_sync.o
 
@@ -1641,7 +1640,6 @@ endif
   $(B)/ded/qvm/vm.o \
   $(B)/ded/qvm/vm_interpreted.o \
   $(B)/ded/qvm/vm_vr.o \
-  $(B)/ded/qvm/vm_vr_select.o \
   $(B)/ded/qvm/vm_vr_state.o \
   $(B)/ded/vr_shared_sync.o
 

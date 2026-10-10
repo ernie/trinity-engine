@@ -63,6 +63,7 @@ typedef struct {
 	qboolean	baseGame;			/* baseq3 or missionpack, which have a bundled fallback */
 	qboolean	fallbackRunning;
 	qboolean	fallbackAvailable;
+	qboolean	apiMismatch;			/* marked for a VR API this engine can't satisfy, so the fallback would play a different game */
 } vrModuleCheck_t;
 
 /* Verdicts rise in severity; *reason names the proof for VRMOD_UNSUPPORTED. */

@@ -59,8 +59,12 @@ void VM_RegisterVRShared( vm_t *vm, int writer, intptr_t vmAddr, int structSize,
 		vm->name, apiMajor, apiMinor, vm->entryPoint ? "native" : "QVM" );
 }
 
-qboolean VM_VRSentinel( vm_t *vm ) {
-	return vm && vm->vrSentinel ? qtrue : qfalse;
+qboolean VM_VRSentinel( const vm_t *vm ) {
+	return vm && VM_VRAccepts( vm->vrApiMajor, vm->vrApiMinor, VR_API_MAJOR, VR_API_MINOR ) ? qtrue : qfalse;
+}
+
+qboolean VM_VRApiMismatch( const vm_t *vm ) {
+	return vm && vm->vrApiMajor > 0 && !VM_VRSentinel( vm ) ? qtrue : qfalse;
 }
 
 qboolean VM_VRRegistered( vm_t *vm ) {

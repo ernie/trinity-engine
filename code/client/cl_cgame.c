@@ -515,7 +515,8 @@ static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
 		return qtrue;
 	}
 
-	if ( ( VR_IsActiveMode() || CL_VR_RestartWantsVR() ) &&
+	// a QVM built for another VR API never registers, so leave it to the API-mismatch refusal
+	if ( ( VR_IsActiveMode() || CL_VR_RestartWantsVR() ) && !VM_VRApiMismatch( cgvm ) &&
 		!Q_stricmp( key, "trap_VR_RegisterState" ) ) {
 		Com_sprintf( value, valueSize, "%i", CG_VR_REGISTERSTATE );
 		return qtrue;

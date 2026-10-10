@@ -133,6 +133,15 @@ static void CL_VR_Incapable( void ) {
 		CL_VR_Failure( cachedProbe.vulkanEnable && !cachedProbe.vulkanEnable2 ?
 					   "OpenXR runtime lacks XR_KHR_vulkan_enable2" : cachedProbe.message );
 }
+#if VR_ONLY
+/* There is no flatscreen to continue in, so the reason goes to the log and the game quits. */
+static void CL_VR_Quit( const char *reason ) {
+	Com_Printf( S_COLOR_RED "%s\n", reason );
+	// Com_Quit_f takes the running command's arguments as its shutdown message
+	Cmd_Clear();
+	Com_Quit_f();
+}
+#endif
 /* qtrue for Retry. Asked before the game window opens, so Quit exits without one and Flatscreen lasts this session. */
 static qboolean CL_VR_LaunchDialog( void ) {
 #if VR_ONLY
@@ -164,15 +173,18 @@ static void CL_VR_Wait( const char *failure ) {
 	Q_strncpyz( lastFailure, cachedProbe.message, sizeof( lastFailure ) );
 	Com_Printf( "VR requested; waiting for a headset. Apply flatscreen mode to cancel.\n" );
 }
+/* The cap can fire inside a module call or a restart, so the server drop waits for CL_VR_Frame. */
+static char capDrop[MAX_STRING_CHARS];
 static void CL_VR_ReportCap( void ) {
 #if VR_ONLY
-	Com_Error( ERR_FATAL, "VR stopped after repeated errors: %s", lastFailure );
+	CL_VR_Quit( va( "VR stopped after repeated errors: %s", lastFailure ) );
 #endif
+	// a flatscreen match wouldn't show in the headset, so the player would miss the message
+	if ( CL_VR_Connected() )
+		Com_sprintf( capDrop, sizeof( capDrop ), "VR stopped after repeated errors: %s", lastFailure );
 	Q_strncpyz( lastFailure, "repeated errors while in VR", sizeof( lastFailure ) );
 	Com_Printf( "Repeated errors while in VR. Continuing in flatscreen.\n" );
-	if ( CL_VR_Connected() )
-		CL_VRModulesNoticeShow( "VR stopped after repeated errors", "Continuing in flatscreen" );
-	else
+	if ( !CL_VR_Connected() )
 		CL_VR_ErrorPopup( "VR stopped after repeated errors" );
 }
 static void CL_VR_Lost( const char *reason ) {
@@ -196,23 +208,39 @@ static void CL_VR_Lost( const char *reason ) {
 	if ( action == VRACT_CAP )
 		CL_VR_ReportCap();
 }
-/* Flat until the next connect, disconnect or game restart; vr_enabled keeps the player's choice. */
+static char vrMenuGame[MAX_QPATH];	// the last game whose menus ran in VR
+
+/* Where a game whose menus can't run in VR goes back to, or NULL when that's the game already loaded. */
+static const char *CL_VR_SwitchBackGame( void ) {
+	const char *game = vrMenuGame[0] ? vrMenuGame : FS_GetBaseGameDir();
+
+	return Q_stricmp( game, FS_GetCurrentGameDir() ) ? game : NULL;
+}
+/* Stays in VR by dropping the server or switching to a game whose menus run in VR. Failing that,
+ * plays flat until the next connect, disconnect or game restart without changing vr_enabled. */
 static void CL_VR_Unsupported( const char *reason, const char *source ) {
 	char detail[MAX_QPATH + 32], message[MAX_STRING_CHARS];
+	const char *game;
 
 	Com_sprintf( detail, sizeof( detail ), "%s QVMs are VR-incompatible", *source ? source : FS_GetCurrentGameDir() );
 	Com_sprintf( message, sizeof( message ), "VR unavailable - %s.%s%s", detail, *reason ? " " : "", reason );
 	Q_strncpyz( lastFailure, *reason ? reason : detail, sizeof( lastFailure ) );
+	// Drop instead of going flat, which the headset wouldn't show. Like a kick, the drop keeps the VR renderer and skips the error cap.
+	if ( CL_VR_Connected() )
+		Com_Error( ERR_SERVERDISCONNECT, "%s", message );
+	game = CL_VR_SwitchBackGame();
+	if ( game ) {
+		Com_Printf( "%s Switching to %s.\n", message, game );
+		CL_VR_ErrorPopup( message );
+		Cvar_Set( "fs_game", Q_stricmp( game, FS_GetBaseGameDir() ) ? game : "" );
+		Cbuf_AddText( "vid_restart\n" );
+		return;
+	}
 #if VR_ONLY
-	/* There is no flatscreen to continue in: leave the server for the menu, or quit if the menu itself can't run. */
-	Com_Error( CL_VR_Connected() ? ERR_DROP : ERR_FATAL, "%s", message );
+	CL_VR_Quit( message );
 #endif
 	Com_Printf( "%s Continuing in flatscreen.\n", message );
-	// The menu has no match to draw over, so it gets the UI's error popup.
-	if ( CL_VR_Connected() )
-		CL_VRModulesNoticeShow( "VR unavailable", detail );
-	else
-		CL_VR_ErrorPopup( message );
+	CL_VR_ErrorPopup( message );
 	CL_VR_Step( VREV_UNSUPPORTED, 0 );
 }
 void CL_VR_ConnectionEnded( void ) {
@@ -330,8 +358,8 @@ qboolean CL_VR_RestartComplete( void ) {
 	if ( machine.xrRenderer ) {
 		const char *reason, *source;
 		verdict = CL_VRModulesCheck( &reason, &source );
-		// a VR-only build stays in VR and leaves the server from the next frame's check, outside the restart
-		if ( verdict == VRMOD_UNSUPPORTED && !VR_ONLY ) {
+		// Only going flat happens here. Leaving the server or game, or quitting a VR-only build, waits for CL_VR_FrameChecks outside the restart.
+		if ( verdict == VRMOD_UNSUPPORTED && !VR_ONLY && !CL_VR_Connected() && !CL_VR_SwitchBackGame() ) {
 			CL_VR_Unsupported( reason, source );
 			return qfalse;
 		}
@@ -440,8 +468,11 @@ static void CL_VR_FrameChecks( void ) {
 		return;
 	verdict = CL_VRModulesCheck( &reason, &source );
 	if ( verdict == VRMOD_UNSUPPORTED ) {
-		if ( VR_ONLY )
+		// leaving the server or game keeps VR on, and a VR-only build never leaves it
+		if ( VR_ONLY || CL_VR_Connected() || CL_VR_SwitchBackGame() ) {
 			CL_VR_Unsupported( reason, source );
+			return;
+		}
 		if ( re.XRSetActive )
 			re.XRSetActive( qfalse );
 		CL_VRInput_Reset();
@@ -449,6 +480,9 @@ static void CL_VR_FrameChecks( void ) {
 		CL_VR_Unsupported( reason, source );
 		return;
 	}
+	// disconnecting already leaves a server's game, so record only the game whose menus ran
+	if ( cls.state == CA_DISCONNECTED )
+		Q_strncpyz( vrMenuGame, FS_GetCurrentGameDir(), sizeof( vrMenuGame ) );
 	if ( verdict == VRMOD_FALLBACK ) {
 		CL_VR_Step( VREV_REQUEST, VRPENDING_AT_SAFE_POINT );
 		return;
@@ -470,6 +504,14 @@ void CL_VR_Frame( void ) {
 
 	if ( frame.open )
 		return;
+	if ( capDrop[0] ) {
+		char message[MAX_STRING_CHARS];
+
+		Q_strncpyz( message, capDrop, sizeof( message ) );
+		capDrop[0] = '\0';
+		if ( CL_VR_Connected() )
+			Com_Error( ERR_DROP, "%s", message );
+	}
 	if ( VRState_Idle( &machine ) )
 		CL_VR_FrameChecks();
 	action = CL_VR_Step( VREV_FRAME, 0 );

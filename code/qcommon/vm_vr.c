@@ -1,7 +1,5 @@
 #include "vm_local.h"
 #include "vm_vr.h"
-#include "vm_vr_fallback.h"
-#include "vm_vr_select.h"
 #include "../vrcommon/vr_shared.h"
 #if defined(__linux__)
 #include <unistd.h>
@@ -106,20 +104,30 @@ void VM_VRSetNativeFallback( vmIndex_t index, qboolean enabled ) {
 	if ( VM_VRNativeIndex( index ) ) vrNative[index].selected = enabled;
 }
 
-qboolean VM_VRQVMAccepted( vmIndex_t index ) {
+// The VR API major version the winning QVM is marked with, or 0 when it has no marker or isn't there
+static int VM_VRQVMMarker( vmIndex_t index, int *minor ) {
 	char filename[MAX_QPATH];
 	void *buffer;
-	int length, major, minor;
-	qboolean accepted;
+	int length, major;
 
+	*minor = 0;
 	Com_sprintf( filename, sizeof( filename ), "vm/%s.qvm", index == VM_CGAME ? "cgame" : "ui" );
 	length = FS_ReadFile( filename, &buffer );
 	if ( !buffer )
-		return qfalse;
-	major = VM_VRParseMarker( (const byte *)buffer, length, &minor );
-	accepted = VM_VRAccepts( major, minor, VR_API_MAJOR, VR_API_MINOR );
+		return 0;
+	major = VM_VRParseMarker( (const byte *)buffer, length, minor );
 	FS_FreeFile( buffer );
-	return accepted;
+	return major;
+}
+
+qboolean VM_VRQVMAccepted( vmIndex_t index ) {
+	int minor, major = VM_VRQVMMarker( index, &minor );
+	return VM_VRAccepts( major, minor, VR_API_MAJOR, VR_API_MINOR );
+}
+
+qboolean VM_VRQVMApiMismatch( vmIndex_t index ) {
+	int minor, major = VM_VRQVMMarker( index, &minor );
+	return major > 0 && !VM_VRAccepts( major, minor, VR_API_MAJOR, VR_API_MINOR );
 }
 
 qboolean VM_VRNativeFallback( const vm_t *vm ) {
@@ -232,19 +240,55 @@ qboolean VM_VRSelectModule( vm_t *vm, vmInterpret_t *interpret, qboolean qvmOnly
 	// VR runs the FS-priority winner too: a server's cgame must match its game module.
 	*header = VM_LoadQVM( vm, qtrue );
 	if ( !*header ) return qfalse;
-	if ( vm->vrSentinel )
+	if ( VM_VRSentinel( vm ) )
 		Com_Printf( "%s: loaded VR-aware QVM (VR API %d.%d)\n", vm->name, VR_API_MAJOR, VR_API_MINOR );
+	else if ( VM_VRApiMismatch( vm ) )
+		Com_Printf( "%s: loaded QVM built for VR API %d.%d, which this engine doesn't support\n", vm->name, vm->vrApiMajor, vm->vrApiMinor );
 	else
 		Com_Printf( "%s: loaded QVM without a supported VR API marker\n", vm->name );
 	return qtrue;
 }
 
 int VM_VRLoadQVMFile( vm_t *vm, const char *filename, void **buffer ) {
-	int length, major, minor;
-	vm->vrSentinel = qfalse;
+	int length;
+	vm->vrApiMajor = vm->vrApiMinor = 0;
 	length = FS_ReadFile( filename, buffer );
 	if ( length <= 0 || !buffer || !*buffer ) return length;
-	major = VM_VRParseMarker( (const byte *)*buffer, length, &minor );
-	vm->vrSentinel = VM_VRAccepts( major, minor, VR_API_MAJOR, VR_API_MINOR );
+	vm->vrApiMajor = VM_VRParseMarker( (const byte *)*buffer, length, &vm->vrApiMinor );
 	return length;
+}
+
+static int VM_VRParseNumber( const byte *data, int length, int *p ) {
+	int value = 0;
+
+	while ( *p < length && data[*p] >= '0' && data[*p] <= '9' ) {
+		if ( value < 100000 )
+			value = value * 10 + data[*p] - '0';
+		( *p )++;
+	}
+	return value;
+}
+
+int VM_VRParseMarker( const byte *data, int length, int *minor ) {
+	static const char needle[] = "TRINITY_VR_API/";
+	const int needleLen = (int)sizeof( needle ) - 1;
+	int i, p, major;
+
+	*minor = 0;
+	for ( i = 0; i + needleLen <= length; i++ ) {
+		if ( data[i] != needle[0] || memcmp( data + i, needle, needleLen ) )
+			continue;
+		p = i + needleLen;
+		major = VM_VRParseNumber( data, length, &p );
+		if ( p < length && data[p] == '.' ) {
+			p++;
+			*minor = VM_VRParseNumber( data, length, &p );
+		}
+		return major;
+	}
+	return 0;
+}
+
+qboolean VM_VRAccepts( int major, int minor, int engineMajor, int engineMinor ) {
+	return major == engineMajor && minor <= engineMinor;
 }

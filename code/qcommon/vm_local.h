@@ -236,7 +236,8 @@ struct vm_s {
 	struct vr_shared_s *vrShared;	// translated host pointer into module/VM memory
 	int			vrWriter;			// VR_WRITER_* sync-out scope
 	int			vrStructSize;		// module-declared struct size, sanitized to [0,sizeof]; bounds every sync
-	qboolean	vrSentinel;			// loaded QVM carried the VR API sentinel
+	int			vrApiMajor;			// VR API the loaded QVM's marker names; 0 when unmarked
+	int			vrApiMinor;
 };
 
 qboolean VM_Compile( vm_t *vm, vmHeader_t *header );

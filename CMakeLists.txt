@@ -92,7 +92,7 @@ SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
 AUX_SOURCE_DIRECTORY(code/qcommon QCOMMON_SRCS)
 # exclude platform-dependent QVM bytecode compilers and the VM policy file
 list(FILTER QCOMMON_SRCS EXCLUDE REGEX ".*vm_[alpvx].*.c")
-list(APPEND QCOMMON_SRCS code/qcommon/vm_vr.c code/qcommon/vm_vr_select.c code/qcommon/vm_vr_state.c code/vrcommon/vr_shared_sync.c)
+list(APPEND QCOMMON_SRCS code/qcommon/vm_vr.c code/qcommon/vm_vr_state.c code/vrcommon/vr_shared_sync.c)
 # add platform-dependent QVM bytecode compilers
 IF(EMSCRIPTEN)
 	# Emscripten uses interpreted VM only - no native bytecode compiler

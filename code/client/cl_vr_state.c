@@ -73,6 +73,9 @@ vrModuleVerdict_t VRState_ModuleVerdict( const vrModuleCheck_t *check, const cha
 		return VRMOD_OK;
 	if ( check->provisional )
 		return VRMOD_WAIT;
+	// the caller names the QVM's VR API version in the reason
+	if ( check->apiMismatch )
+		return VRMOD_UNSUPPORTED;
 	if ( check->pure ) {
 		*reason = "This pure server allows only its own game code.";
 		return VRMOD_UNSUPPORTED;

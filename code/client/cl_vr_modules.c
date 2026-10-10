@@ -2,8 +2,6 @@
 #include "cl_vr.h"
 #include "cl_vr_modules.h"
 #include "../qcommon/vm_vr.h"
-#include "../qcommon/vm_vr_fallback.h"
-#include "../vrcommon/vr_defaults.h"
 
 /* The fallback choice of the connection that made it; CL_VRModulesPreflight applies it to each load. */
 static qboolean contextNativeCG, contextNativeUI;
@@ -16,8 +14,6 @@ static int contextChallenge, contextServerId;
 static char replacedSource[VM_COUNT][MAX_QPATH];
 static enum { NOTICE_NONE, NOTICE_PENDING, NOTICE_SHOWING, NOTICE_DONE } notice;
 static int noticeStart;
-/* Empty for the fallback notice, whose pak follows the running modules. */
-static char noticeText[2][MAX_QPATH + 32];
 
 void CL_VRModulesReset( void ) {
 	VM_VRCancelNativeFallback( VM_CGAME );
@@ -25,10 +21,9 @@ void CL_VRModulesReset( void ) {
 	contextNativeCG = contextNativeUI = qfalse;
 }
 
-// A VR-only build also replaces any mod's UI, which can't show flatscreen there; a mod's cgame is its gameplay.
-static qboolean CL_VRModulesFallbackGame( const char *gameDir, vmIndex_t index ) {
-	return !gameDir[0] || !Q_stricmp( gameDir, "baseq3" ) || !Q_stricmp( gameDir, "missionpack" ) ||
-		( VR_ONLY && index == VM_UI );
+// Only the base games have bundled VR modules; a mod's own modules are the mod's to make VR-ready.
+static qboolean CL_VRModulesFallbackGame( const char *gameDir ) {
+	return !gameDir[0] || !Q_stricmp( gameDir, "baseq3" ) || !Q_stricmp( gameDir, "missionpack" );
 }
 
 // A saved fallback choice holds only for the connection and game directory that made it.
@@ -79,40 +74,26 @@ static void CL_VRModulesReplaced( vmIndex_t index ) {
 // Notices belong to the connection; the UI's record belongs to the loaded UI.
 void CL_VRModulesNoticeReset( void ) {
 	notice = NOTICE_NONE;
-	noticeText[0][0] = '\0';
 	replacedSource[VM_CGAME][0] = '\0';
-}
-
-void CL_VRModulesNoticeShow( const char *headline, const char *detail ) {
-	Q_strncpyz( noticeText[0], headline, sizeof( noticeText[0] ) );
-	Q_strncpyz( noticeText[1], detail, sizeof( noticeText[1] ) );
-	notice = NOTICE_PENDING;
 }
 
 // The cgame's pak outranks the UI's; the timer starts on the first frame of play.
 const char *CL_VRModulesNotice( const char **detail ) {
-	const char *headline = noticeText[0];
+	static char fallbackDetail[MAX_QPATH + 32];
+	const char *source = NULL;
 
 	if ( notice != NOTICE_PENDING && notice != NOTICE_SHOWING )
 		return NULL;
 	if ( cls.state != CA_ACTIVE )
 		return NULL;
-	if ( headline[0] ) {
-		*detail = noticeText[1];
-	} else {
-		static char fallbackDetail[MAX_QPATH + 32];
-		const char *source = NULL;
-
-		if ( cgvm && VM_VRNativeFallback( cgvm ) && replacedSource[VM_CGAME][0] )
-			source = replacedSource[VM_CGAME];
-		else if ( uivm && VM_VRNativeFallback( uivm ) && replacedSource[VM_UI][0] )
-			source = replacedSource[VM_UI];
-		if ( !source )
-			return NULL;
-		headline = "Fallback VR modules active";
-		Com_sprintf( fallbackDetail, sizeof( fallbackDetail ), "%s QVMs are VR-incompatible", source );
-		*detail = fallbackDetail;
-	}
+	if ( cgvm && VM_VRNativeFallback( cgvm ) && replacedSource[VM_CGAME][0] )
+		source = replacedSource[VM_CGAME];
+	else if ( uivm && VM_VRNativeFallback( uivm ) && replacedSource[VM_UI][0] )
+		source = replacedSource[VM_UI];
+	if ( !source )
+		return NULL;
+	Com_sprintf( fallbackDetail, sizeof( fallbackDetail ), "%s QVMs are VR-incompatible", source );
+	*detail = fallbackDetail;
 	if ( notice == NOTICE_PENDING ) {
 		notice = NOTICE_SHOWING;
 		noticeStart = cls.realtime;
@@ -121,7 +102,7 @@ const char *CL_VRModulesNotice( const char **detail ) {
 		notice = NOTICE_DONE;
 		return NULL;
 	}
-	return headline;
+	return "Fallback VR modules active";
 }
 
 void CL_VRModulesStatus( void ) {
@@ -148,7 +129,7 @@ static void CL_VRModulesReportFallback( const vm_t *vm ) {
 		return;
 	}
 	Com_Printf( "%s: selecting bundled native VR fallback (%s QVM %s)\n", vm->name, replacedSource[vm->index],
-		vm->vrSentinel ? "did not register VR shared state" : "has no supported VR API marker" );
+		VM_VRSentinel( vm ) ? "did not register VR shared state" : "has no supported VR API marker" );
 }
 
 void CL_VRModulesPreflight( vmIndex_t index ) {
@@ -167,7 +148,8 @@ void CL_VRModulesPreflight( vmIndex_t index ) {
 		VM_VRSetNativeFallback( index, qtrue );
 		return;
 	}
-	native = !cl_connectedToPureServer && CL_VRModulesFallbackGame( gameDir, index ) && !VM_VRQVMAccepted( index ) &&
+	native = !cl_connectedToPureServer && CL_VRModulesFallbackGame( gameDir ) && !VM_VRQVMAccepted( index ) &&
+		!VM_VRQVMApiMismatch( index ) &&
 		VM_VRPrepareNativeFallback( index, qfalse, !Q_stricmp( gameDir, "missionpack" ) );
 	VM_VRSetNativeFallback( index, native );
 	if ( native ) {
@@ -204,16 +186,20 @@ vrModuleVerdict_t CL_VRModulesCheck( const char **reason, const char **source ) 
 		check.registered = VM_VRRegistered( vms[i] ) && !(cl_connectedToPureServer && vms[i]->entryPoint);
 		check.provisional = cls.state > CA_DISCONNECTED && cls.state < CA_LOADING;
 		check.pure = cl_connectedToPureServer != 0;
-		check.baseGame = CL_VRModulesFallbackGame( gameDir, vms[i]->index );
+		check.baseGame = CL_VRModulesFallbackGame( gameDir );
 		check.fallbackRunning = VM_VRNativeFallback( vms[i] );
+		check.apiMismatch = !check.registered && !check.fallbackRunning && VM_VRApiMismatch( vms[i] );
 		check.fallbackAvailable = !check.registered && !check.provisional && !check.pure && check.baseGame &&
-			!check.fallbackRunning && VM_VRPrepareNativeFallback( vms[i]->index, qfalse, missionpack );
+			!check.fallbackRunning && !check.apiMismatch && VM_VRPrepareNativeFallback( vms[i]->index, qfalse, missionpack );
 		verdict = VRState_ModuleVerdict( &check, &why );
 		fallback[i] = verdict == VRMOD_FALLBACK;
 		if ( verdict > worst ) {
 			worst = verdict;
 			worstIndex = vms[i]->index;
-			Q_strncpyz( text, why, sizeof( text ) );
+			if ( verdict == VRMOD_UNSUPPORTED && check.apiMismatch )
+				Com_sprintf( text, sizeof( text ), "VR API %d.%d not supported by engine.", vms[i]->vrApiMajor, vms[i]->vrApiMinor );
+			else
+				Q_strncpyz( text, why, sizeof( text ) );
 			*reason = text;
 		}
 	}

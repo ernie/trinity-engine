@@ -60,16 +60,24 @@ when VR cannot start. `vr_status` names the state:
 When the runtime ends the session itself, by Exit game in its dashboard, by
 quitting SteamVR, or by announcing that it is going away, the game quits.
 
+Game code that can't run in VR doesn't put the client into flatscreen while any
+menus can run in VR, since the player in the headset wouldn't see it. The
+server's or mod's game modules are
+VR-incompatible when they are a pure server's cgame or UI QVM without VR
+support, a mod other than baseq3 or missionpack without VR modules, a QVM built
+for a VR API this engine doesn't support, or a bundled fallback that is missing
+or fails to start. The message names the incompatible pak, and VR stays on:
+
+- On a server, the client disconnects to the main menu with the message, back
+  in the game it was in before the server switched it.
+- At the menu, such as after choosing a mod in the Mods menu, the client
+  switches back to the last game whose menus ran in VR, or to baseq3, and shows
+  the message there.
+
 Otherwise the client leaves VR in four cases:
 
-- The server's or mod's game modules are proven VR-incompatible: a pure server
-  whose cgame or UI QVM has no VR support, a mod other than baseq3 or
-  missionpack without VR modules, or a bundled fallback that is missing or
-  fails to start.
-  The game continues in flatscreen. The same message names the incompatible pak
-  either way: over the match once play starts, or in the main menu's error
-  message when it happens at the menu. VR returns when you disconnect, connect to a server, or change mods,
-  including from the Mods menu.
+- No game's menus can run in VR, such as when the base game's bundled fallback
+  is missing. The game continues in flatscreen with the message.
 - The headset or runtime is unavailable, the session fails, or a probe fails.
   The client waits in `WAITING_HEADSET` and returns to VR when it is back.
 - The machine cannot run VR: no OpenXR loader, no Vulkan binding in the
@@ -78,14 +86,12 @@ Otherwise the client leaves VR in four cases:
   When VR was on at launch, a failure dialog names the reason, and choosing
   Flatscreen there sets `vr_enabled` to `0`; enabling VR later in the session
   reports the reason in the console only.
-- Three errors or headset losses within 30 seconds. The game continues in
-  flatscreen, and an on-screen notice in a match, or the main menu's error
-  message, says VR stopped; `vid_restart` or the next launch tries VR again.
+- Three errors or headset losses within 30 seconds. A server is left for the
+  main menu, which continues in flatscreen with an error message saying VR
+  stopped; `vid_restart` or the next launch tries VR again.
 
-The Steam Frame and Android packages have no flatscreen to continue in. A server
-or mod whose game modules can't run in VR disconnects you to the main menu with
-the same message, and Trinity's menus stand in for another mod's own. A failed
-VR start, or three errors within 30 seconds, quits with the reason in the log.
+The Steam Frame and Android packages have no flatscreen to continue in. Where
+the PC continues in flatscreen, they quit with the reason in the log.
 
 While VR is active, game audio continues even if the desktop mirror is unfocused
 or minimized. The focus-mute settings still apply in flatscreen mode. Removing
@@ -95,15 +101,16 @@ the headset does not automatically pause the game; open the menu manually.
 
 The engine runs the cgame and UI QVM that ordinary pk3
 priority selects, in VR and flatscreen alike, because a server's cgame must
-match its game module. In VR, when that QVM has no supported VR API marker,
-non-pure baseq3 and missionpack use the bundled native modules. This fallback is
-limited to those two games. When the bundled modules replace a QVM, an on-screen
+match its game module. In VR, when that QVM has no VR API marker, non-pure
+baseq3 and missionpack use the bundled native modules. This fallback is limited
+to those two games, and never replaces a QVM built for another VR API version,
+which would be a different game. When the bundled modules replace a QVM, an on-screen
 notice at the start of each connection's play names that pak (or game
 directory) for a few seconds, and `vr_status` lists it.
 
 Pure servers prohibit native fallback. A pure server whose cgame or UI QVM has
-no VR support keeps the client in flatscreen for that connection
-(`VR_UNSUPPORTED`) and reports the reason.
+no VR support drops the client to the main menu, still in VR, with a message
+naming the pak.
 Do not disable server purity to work around a mismatched release: install the
 matching mod assets. Retail Quake III / Team Arena data is still required as
 described in the [main README](../README.md#game-data).
