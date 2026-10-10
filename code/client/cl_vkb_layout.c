@@ -41,13 +41,23 @@ const vkbKey_t *VKB_Row( int row ) {
 	return ( row >= 0 && row < VKB_ROWS ) ? rows[row] : NULL;
 }
 
+// room left above a menu field's pointer y for the field's own text
+#define VKB_FIELD_CLEARANCE	24
+
+static int vkbOnTop;
+
 vkbRect_t VKB_PanelRect( void ) {
 	vkbRect_t r;
 	r.w = VKB_PANEL_W;
 	r.h = VKB_PANEL_H;
 	r.x = ( VKB_SCREEN_W - r.w ) / 2;
-	r.y = VKB_SCREEN_H - r.h;
+	r.y = vkbOnTop ? 0 : VKB_SCREEN_H - r.h;
 	return r;
+}
+
+// The keyboard moves to the top when it would cover the field being edited, whose bottom edge is at y.
+void VKB_PlaceClearOf( int y ) {
+	vkbOnTop = y >= VKB_SCREEN_H - VKB_PANEL_H - VKB_FIELD_CLEARANCE;
 }
 
 static int VKB_Round( float v ) {

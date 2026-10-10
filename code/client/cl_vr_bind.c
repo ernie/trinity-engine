@@ -120,6 +120,10 @@ int CL_VRBind_Profile( void ) {
 	return activeProfile;
 }
 
+int CL_VRBind_CommandKey( vrContext_t context, const char *command, int *altKey ) {
+	return VR_CommandKey( context, command, activeProfile, CL_VRBind_Lookup, NULL, altKey );
+}
+
 /* The keys the router would run command with in context, as engine key codes: "<key>" or "<alt>+<key>". */
 static qboolean VRBind_KeysFor( const char *context, const char *command, char *buf, int size ) {
 	int suffix, c = VR_ContextFromName( context, &suffix ), alt, k;
@@ -136,8 +140,8 @@ static qboolean VRBind_KeysFor( const char *context, const char *command, char *
 }
 
 static void VRBind_PrintUnknownContext( const char *name ) {
-	Com_Printf( "Unknown VR context \"%s\"; use global, menu, adjust, scrub, scoreboard, vote, wheel, follow or "
-				"gameplay, each also as <context>+alt for Alt held\n",
+	Com_Printf( "Unknown VR context \"%s\"; use global, keyboard, menu, adjust, scrub, scoreboard, vote, wheel, follow "
+				"or gameplay, each also as <context>+alt for Alt held\n",
 				name );
 }
 

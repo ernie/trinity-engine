@@ -18,6 +18,8 @@ void CL_VRInput_HapticEvent( const char *event, int position, int flags, int int
 void CL_VRInput_HoverTick( int hand );
 qboolean CL_VRInput_PointerOnScreen( int hand );
 void VKeyboard_Show( void );
+void VKeyboard_ShowForField( int fieldBottom );
+qboolean VKeyboard_PressKey( int keynum );
 void VKeyboard_Hide( void );
 qboolean VKeyboard_IsActive( void );
 void VKeyboard_Draw( void );

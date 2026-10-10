@@ -155,8 +155,8 @@ void VR_RoleSticks( const clXRHandInput_t hands[2], int rightHanded, int switchS
 	turn[1] = VR_StickCurve( hands[1 - m].stick[1], deadzone );
 }
 
-static const char *contextNames[VRC_COUNT] = {"global", "menu",	 "adjust", "scrub",	 "scoreboard",
-											   "vote",	 "wheel", "follow", "gameplay"};
+static const char *contextNames[VRC_COUNT] = {"global", "keyboard", "menu", "adjust", "scrub", "scoreboard",
+											   "vote",	 "wheel",	 "follow", "gameplay"};
 
 const char *VR_ContextName( vrContext_t context ) {
 	return context >= 0 && context < VRC_COUNT ? contextNames[context] : "";
@@ -202,8 +202,10 @@ int VR_StackHas( const vrStack_t *stack, vrContext_t context ) {
 }
 
 void VR_ResolveStack( const vrSignals_t *s, vrStack_t *out ) {
-	const int flags[] = {s->textEntry || s->menu || s->offline, s->adjust, s->scrub, s->scoreboard, s->vote, s->wheel};
-	const vrContext_t layers[] = {VRC_MENU, VRC_ADJUST, VRC_SCRUB, VRC_SCOREBOARD, VRC_VOTE, VRC_WHEEL};
+	/* the keyboard layer sits above the menu layer, so buttons it leaves unbound fall through to the menu */
+	const int flags[] = {s->textEntry, s->textEntry || s->menu || s->offline, s->adjust, s->scrub, s->scoreboard, s->vote,
+						 s->wheel};
+	const vrContext_t layers[] = {VRC_KEYBOARD, VRC_MENU, VRC_ADJUST, VRC_SCRUB, VRC_SCOREBOARD, VRC_VOTE, VRC_WHEEL};
 	unsigned i;
 	out->count = 0;
 	out->layers[out->count++] = VRC_GLOBAL;
@@ -300,8 +302,9 @@ int VR_HoldsSetMapping( vrHolds_t *h, int mapping, vrBindEvent_t *events, int ma
 	return previous >= 0 && previous != mapping ? VR_ReleaseAll( h, events, maxEvents ) : 0;
 }
 
+/* Backspace repeats while held, like a held key */
 static int VRB_Repeats( const char *binding ) {
-	return !strncmp( binding, "+menunav", 8 );
+	return !strncmp( binding, "+menunav", 8 ) || VRB_NameEquals( binding, "+key BACKSPACE" );
 }
 
 /* Whether binding runs command as one of its ';'-separated parts. */
@@ -417,6 +420,24 @@ const char *VR_KeyGlyph( vrKey_t key, int rightHanded, int switchSticks, char *b
 	return buf;
 }
 
+int VR_KeyGlyphCell( vrKey_t key, int rightHanded, int switchSticks ) {
+	/* the atlas order: NAMES in the mod's tools/generate_vr_glyphs.py */
+	static const char *const cells[] = {
+		"trigger_l", "trigger_r", "grip_l", "grip_r", "gripclick_l", "gripclick_r", "thumbrest_l", "thumbrest_r",
+		"bumper_l", "bumper_r", "trackpad_l", "trackpad_r", "a_l", "a_r", "b_l", "b_r",
+		"stickclick_l", "stickclick_r", "stick_up_l", "stick_down_l", "stick_left_l", "stick_right_l",
+		"stick_up_r", "stick_down_r", "stick_left_r", "stick_right_r",
+		"a", "b", "x", "y", "menu", "view", "dpad_up", "dpad_down", "dpad_left", "dpad_right",
+	};
+	char name[32];
+	unsigned i;
+	VR_KeyGlyph( key, rightHanded, switchSticks, name, sizeof( name ) );
+	for ( i = 0; i < sizeof( cells ) / sizeof( cells[0] ); i++ )
+		if ( !strcmp( name, cells[i] ) )
+			return (int)i;
+	return -1;
+}
+
 typedef struct {
 	int families;
 	vrContext_t context;
@@ -473,6 +494,14 @@ static const vrDefault_t defaultBindings[] = {
 	NAV( P, VRC_MENU ),
 	{T | F, VRC_MENU, VRK_A, "+key SPACE"},
 	{I, VRC_MENU, VRK_WPN_A, "+key SPACE"},
+	/* the virtual keyboard's own keys, while it is open */
+	{T | F, VRC_KEYBOARD, VRK_A, "+key SPACE"},
+	{T | F, VRC_KEYBOARD, VRK_B, "+key BACKSPACE"},
+	{T | F, VRC_KEYBOARD, VRK_X, "+key TAB"},
+	{T | F, VRC_KEYBOARD, VRK_Y, "+key ENTER"},
+	{I, VRC_KEYBOARD, VRK_WPN_A, "+key SPACE"},
+	{I, VRC_KEYBOARD, VRK_WPN_B, "+key BACKSPACE"},
+	{I, VRC_KEYBOARD, VRK_OFF_A, "+key TAB"},
 	/* weapon adjust */
 	{T | F, VRC_ADJUST, VRK_A, "weapon_adjust"},
 	{T | F, VRC_ADJUST, VRK_B, "+adjust_reset"},

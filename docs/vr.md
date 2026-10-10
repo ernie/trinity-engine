@@ -136,7 +136,8 @@ with `vid_restart`.
 ### Virtual keyboard
 
 The console, the chat line and menu text fields bring up an on-screen keyboard
-on the virtual screen. It is a 65% PC layout: the main block, a column of
+on the virtual screen. It sits along the bottom, and moves to the top when the
+menu field being edited would be under it. It is a 65% PC layout: the main block, a column of
 Home, End, Page Up and Page Down, and arrow keys. Shift is one-shot, so it
 applies to the next character and clears; Caps Lock latches and affects
 letters only, and Shift under it gives lowercase. Either hand types; the

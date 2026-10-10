@@ -1277,7 +1277,7 @@ static intptr_t CL_UISystemCalls( intptr_t *args ) {
 		return 0;
 	case UI_VKEYBOARD_SHOW:
 		if ( VR_IsActiveMode() ) {
-			VKeyboard_Show();
+			VKeyboard_ShowForField( args[1] );
 		}
 		return 0;
 	case UI_VKEYBOARD_HIDE:

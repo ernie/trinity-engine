@@ -43,6 +43,7 @@ typedef struct { int shift, caps; } vkbMods_t;
 
 const vkbKey_t *VKB_Row( int row );		// terminated by a key with units 0
 vkbRect_t VKB_PanelRect( void );
+void VKB_PlaceClearOf( int y );		// -1 for the bottom of the screen
 vkbRect_t VKB_KeyRect( int row, int index );
 const vkbKey_t *VKB_KeyAt( int x, int y, vkbRect_t *rect );
 int VKB_InPanel( int x, int y );

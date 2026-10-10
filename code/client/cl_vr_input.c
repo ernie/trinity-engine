@@ -161,12 +161,14 @@ static int VRInput_SourceKey( void ) {
 
 static void VRInput_KeyDown_f( void ) {
 	int target = Key_StringToKeynum( Cmd_Argv( 1 ) );
-	if ( target > 0 )
+	// with the keyboard open, a button bound to one of its keys presses that key
+	if ( target > 0 && !VKeyboard_PressKey( target ) )
 		CL_KeyEvent( target, qtrue, com_frameTime );
 }
 static void VRInput_KeyUp_f( void ) {
 	int target = Key_StringToKeynum( Cmd_Argv( 1 ) );
-	if ( target > 0 )
+	// a key the keyboard pressed never went down, so there is nothing to release
+	if ( target > 0 && Key_IsDown( target ) )
 		CL_KeyEvent( target, qfalse, com_frameTime );
 }
 

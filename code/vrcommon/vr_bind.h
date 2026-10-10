@@ -19,7 +19,8 @@ typedef enum {
 } vrKey_t;
 
 typedef enum {
-	VRC_GLOBAL, VRC_MENU, VRC_ADJUST, VRC_SCRUB, VRC_SCOREBOARD, VRC_VOTE, VRC_WHEEL, VRC_FOLLOW, VRC_GAMEPLAY,
+	VRC_GLOBAL, VRC_KEYBOARD, VRC_MENU, VRC_ADJUST, VRC_SCRUB, VRC_SCOREBOARD, VRC_VOTE, VRC_WHEEL, VRC_FOLLOW,
+	VRC_GAMEPLAY,
 	VRC_COUNT
 } vrContext_t;
 
@@ -102,6 +103,8 @@ int VR_CaptureKey( vrHolds_t *h, const unsigned char now[VRK_COUNT] );
 int VR_KeyPresent( int profile, vrKey_t key );
 /* The glyph the mod draws for key, hand included: trigger_l, stick_up_r, a, menu, dpad_left (code/game/vr_glyph.c). */
 const char *VR_KeyGlyph( vrKey_t key, int rightHanded, int switchSticks, char *buf, int size );
+/* That glyph's cell in the mod's gfx/vr/glyphs atlas (8 by 8), or -1. */
+int VR_KeyGlyphCell( vrKey_t key, int rightHanded, int switchSticks );
 /* Every default of the profile's family, the plain set then the Alt set. */
 void VR_ForEachDefault( int profile,
 						void ( *fn )( vrContext_t context, int alt, vrKey_t key, const char *binding, void *user ),

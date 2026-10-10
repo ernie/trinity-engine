@@ -3,6 +3,7 @@
 #include "client.h"
 #include "cl_vr_input.h"
 #include "cl_vkb_layout.h"
+#include "cl_vr_bind.h"
 #include "../vrcommon/vr_clientinfo.h"
 #include "../vrcommon/vr_shared.h"
 
@@ -17,6 +18,7 @@ extern vr_clientinfo_t vr;
 #define VKB_GLOW_CORNER		12
 #define VKB_GLOW_SPREAD		8
 #define VKB_PRESS_DROP		2
+#define VKB_BUTTON_PX		14		// a bound controller button's glyph cell, in a key's corner
 #define VKB_ICON_CELLS		8
 
 #define KEY_REPEAT_DELAY	500		// milliseconds
@@ -56,6 +58,7 @@ typedef struct {
 	qboolean	loaded;			// registered against the current renderer
 	fontInfo_t	font;			// glyphScale stays 0 when the pak has no font
 	qhandle_t	cap, panel, glow, icons;	// 0 when the pak lacks the image
+	qhandle_t	buttons;		// the mod's controller button glyphs, 0 when the pak lacks them
 } vkbAssets_t;
 
 static vkbAssets_t assets;
@@ -91,6 +94,7 @@ static void VKeyboard_LoadAssets( void ) {
 	assets.panel = re.RegisterShaderNoMip( "gfx/vkb/panel" );
 	assets.glow = re.RegisterShaderNoMip( "gfx/vkb/glow" );
 	assets.icons = re.RegisterShaderNoMip( "gfx/vkb/icons" );
+	assets.buttons = re.RegisterShaderNoMip( "gfx/vr/glyphs" );
 	assets.loaded = qtrue;
 }
 
@@ -208,12 +212,21 @@ Show, hide, state
 */
 void VKeyboard_Show( void ) {
 	vkb.active = qtrue;
+	VKB_PlaceClearOf( -1 );
 	VKB_ModsReset( &vkb.mods );
 	vkb.lastHover[VKB_HAND_PRIMARY] = vkb.lastHover[VKB_HAND_OFFHAND] = NULL;
 	vkb.repeatKey = NULL;
 	if ( !vkb.clickSound ) {
 		vkb.clickSound = S_RegisterSound( "sound/misc/click.wav", qfalse );
 	}
+}
+
+// The menus call this after each key with the edited field's bottom edge, so an open keyboard just moves and keeps its shift state.
+void VKeyboard_ShowForField( int fieldBottom ) {
+	if ( !vkb.active ) {
+		VKeyboard_Show();
+	}
+	VKB_PlaceClearOf( fieldBottom );
 }
 
 void VKeyboard_Hide( void ) {
@@ -269,12 +282,41 @@ static void VKeyboard_DrawGlow( const vkbRect_t *r, const float *color ) {
 			r->w + 2 * VKB_GLOW_SPREAD, r->h + 2 * VKB_GLOW_SPREAD, VKB_GLOW_CORNER, color );
 }
 
+/* Shows the controller button bound to the key in its top corner, so players learn the shortcut while typing. */
+static void VKeyboard_DrawButton( const vkbKey_t *key, const vkbRect_t *r, qboolean pressed, const float *color ) {
+	const char *command = key->action == VKB_SPACE ? "+key SPACE"
+						: key->action == VKB_BACKSPACE ? "+key BACKSPACE"
+						: key->action == VKB_TAB ? "+key TAB"
+						: key->action == VKB_ENTER ? "+key ENTER" : NULL;
+	float x, y, w, h, s, t;
+	int k, alt, cell;
+
+	if ( !command || !assets.buttons )
+		return;
+	k = CL_VRBind_CommandKey( VRC_KEYBOARD, command, &alt );
+	if ( k < 0 || alt >= 0 )	// an Alt combo would need two glyphs in a corner
+		return;
+	cell = VR_KeyGlyphCell( (vrKey_t)k, vr_righthanded->integer, vr_switchThumbsticks->integer );
+	if ( cell < 0 )
+		return;
+	w = h = VKB_BUTTON_PX;
+	x = r->x + 2;
+	y = r->y + 2 + ( pressed ? VKB_PRESS_DROP : 0 );
+	s = ( cell % 8 ) / 8.0f;
+	t = ( cell / 8 ) / 8.0f;
+	re.SetColor( color );
+	SCR_AdjustFrom640( &x, &y, &w, &h );
+	re.DrawStretchPic( x, y, w, h, s, t, s + 1 / 8.0f, t + 1 / 8.0f, assets.buttons );
+	re.SetColor( NULL );
+}
+
 static void VKeyboard_DrawLabel( const vkbKey_t *key, const vkbRect_t *r, qboolean hovered, qboolean pressed, qboolean active ) {
 	const float cx = r->x + r->w / 2.0f, cy = r->y + r->h / 2.0f + ( pressed ? VKB_PRESS_DROP : 0 );
 	const float *color = ( hovered || active ) ? colorWhite : key->action == VKB_CHAR ? textPlain : textSpecial;
 	const int cell = VKeyboard_IconCell( key );
 	char str[2] = { 0, 0 };
 
+	VKeyboard_DrawButton( key, r, pressed, color );
 	if ( cell >= 0 ) {
 		// Enter, Backspace and Tab sit on wide keys and read better half again as large as the arrows
 		const float iconPx = ( cell == ICON_ENTER || cell == ICON_BACKSPACE || cell == ICON_TAB ) ? VKB_ICON_PX * 1.5f : VKB_ICON_PX;
@@ -523,6 +565,31 @@ static void VKeyboard_ProcessKeyPress( const vkbKey_t *key, int handIndex ) {
 	vkb.repeatLastTime = cls.realtime;
 	vkb.repeatStarted = qfalse;
 	vkb.repeatHand = handIndex;
+}
+
+/* A controller button bound to one of the keyboard's keys presses that key, as tapping it would. */
+qboolean VKeyboard_PressKey( int keynum ) {
+	if ( !vkb.active )
+		return qfalse;
+	switch ( keynum ) {
+		case K_SPACE:
+			VKeyboard_FireAction( ' ', VKB_SPACE );
+			return qtrue;
+		case K_BACKSPACE:
+			VKeyboard_FireAction( 0, VKB_BACKSPACE );
+			return qtrue;
+		case K_TAB:
+			VKeyboard_FireAction( 0, VKB_TAB );
+			return qtrue;
+		case K_ENTER:
+			// as with the keyboard's own Enter, the keyboard stays open for more console commands and closes after a menu field
+			VKeyboard_FireAction( 0, VKB_ENTER );
+			if ( !( Key_GetCatcher() & KEYCATCH_CONSOLE ) )
+				VKeyboard_Hide();
+			return qtrue;
+		default:
+			return qfalse;
+	}
 }
 
 static void VKeyboard_DismissWithConsole( void ) {
