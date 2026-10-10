@@ -214,6 +214,9 @@ XrResult VK_XRVK_CreateTarget( vkXRVk_t *ctx, vkXRVkTarget_t *target ) {
 	memset( &ci, 0, sizeof( ci ) );
 	ci.type = XR_TYPE_SWAPCHAIN_CREATE_INFO;
 	ci.usageFlags = VK_XRVK_TARGET_USAGE;
+	/* a mutable image without its view formats listed loses the tiler's framebuffer compression */
+	if ( ctx->plainTarget && !ctx->formatList )
+		ci.usageFlags &= ~XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT;
 	ci.format = ctx->format;
 	ci.sampleCount = 1;
 	ci.width = target->width;
@@ -242,6 +245,7 @@ XrResult VK_XRVK_CreateTarget( vkXRVk_t *ctx, vkXRVkTarget_t *target ) {
 	}
 	if ( !target->handle )
 		CHECK( VKXR_CreateSwapchain( ctx, &ci, target ) );
+	target->mutableFormat = (ci.usageFlags & XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT) != 0;
 	CHECK( ctx->xr.EnumerateSwapchainImages( target->handle, 0, &target->count, NULL ) );
 	if ( !target->count || target->count > VK_XRVK_MAX_IMAGES ) {
 		result = XR_ERROR_LIMIT_REACHED;

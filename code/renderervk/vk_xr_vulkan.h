@@ -38,6 +38,7 @@ typedef struct {
 	int acquired, waited;
 	int foveation; /* created for XR_FB_foveation profiles */
 	VkImageCreateFlags createFlags; /* extra flags the runtime accepted */
+	int mutableFormat; /* created with MUTABLE_FORMAT, so it takes a UNORM view */
 	XrSwapchainImageVulkan2KHR images[VK_XRVK_MAX_IMAGES];
 } vkXRVkTarget_t;
 
@@ -62,6 +63,7 @@ typedef struct {
 	int createInfoMeta;					   /* XR_META_vulkan_swapchain_create_info enabled */
 	int foveation;						   /* ask for swapchains that take XR_FB_foveation profiles; set before Bind */
 	VkImageCreateFlags targetCreateFlags; /* extra flags to request; set before Bind */
+	int plainTarget; /* a plain sRGB swapchain is fine when the runtime takes no format list; set before Bind */
 	XrTime displayTime;
 	XrDuration displayPeriod; /* the runtime's predicted frame interval, i.e. the display rate it runs the app at */
 	VkFormat format;

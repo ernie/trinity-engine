@@ -353,7 +353,7 @@ VkResult VK_XR_CreateDevice( PFN_vkCreateDevice normal, VkPhysicalDevice physica
 }
 
 void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device, uint32_t queueFamily,
-				 VkImageCreateFlags targetFlags ) {
+				 VkImageCreateFlags targetFlags, qboolean plainTarget ) {
 	XrGraphicsBindingVulkan2KHR binding;
 	VkPhysicalDeviceProperties properties;
 	PFN_vkGetPhysicalDeviceProperties getProperties;
@@ -376,6 +376,7 @@ void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device
 	xr.maxEyeHeight = MIN( properties.limits.maxFramebufferHeight, properties.limits.maxImageDimension2D );
 	xr.renderScale = atof( ri.Cvar_VariableString( "vr_superSampling" ) );
 	xr.targetCreateFlags = targetFlags;
+	xr.plainTarget = plainTarget;
 	{
 		XrResult result = VK_XRFovCenter_Init( &runtimeFoveation, live.instance, live.system, live.getproc,
 											   live.foveationCenter );
@@ -388,8 +389,9 @@ void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device
 		ri.Error( ERR_DROP, "%s", failure );
 		return;
 	}
-	ri.Printf( PRINT_ALL, "OpenXR swapchain %ux%u, 2 layers, %u images, format list %s, create flags 0x%x of 0x%x%s\n",
-			   xr.target.width, xr.target.height, xr.target.count, xr.formatList ? "enabled" : "unavailable",
+	ri.Printf( PRINT_ALL, "OpenXR swapchain %ux%u, 2 layers, %u images, %s, format list %s, create flags 0x%x of 0x%x%s\n",
+			   xr.target.width, xr.target.height, xr.target.count, xr.target.mutableFormat ? "mutable" : "plain sRGB",
+			   xr.formatList ? "enabled" : "unavailable",
 			   (unsigned)xr.target.createFlags, (unsigned)targetFlags,
 			   xr.target.foveation ? ", runtime foveation center" : "" );
 	xrDevice = device;
@@ -975,6 +977,10 @@ void VK_XR_CopyEyes( VkCommandBuffer command, VkImage source, VkFormat format, i
 	VKXR_Transition( command, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, layout, VK_ACCESS_TRANSFER_READ_BIT,
 					 VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT );
 	copied = qtrue;
+}
+
+qboolean VK_XR_TargetMutable( void ) {
+	return xr.target.handle && xr.target.mutableFormat;
 }
 
 qboolean VK_XR_SwapchainImages( VkFormat *format, uint32_t *count, VkImage images[VK_XRVK_MAX_IMAGES] ) {

@@ -292,6 +292,7 @@ void vk_get_pipeline_def( uint32_t pipeline, Vk_Pipeline_Def *def );
 typedef enum {
 	VK_POST_CAPTURE,
 	VK_POST_XR_COMPOSITE,
+	VK_POST_XR_EYE_COMPOSITE,
 	VK_POST_DESKTOP_COMPOSITE,
 	VK_POST_SCREEN_MONO,
 	VK_POST_SCREEN_CAPTURE,
@@ -490,6 +491,9 @@ typedef struct {
 		VkPipeline eye_mirror[2];			// desktop mirror of the finished eye image
 		VkFormat format;					// swapchain format when it is sRGB, else the blit source format
 		VkRenderPass eye_pass;				// output pass writing the acquired swapchain image
+		// plain sRGB swapchain (no MUTABLE_FORMAT); the eye pass writes linear values to it, and only for world frames nothing reads back
+		qboolean plain;
+		VkPipeline eye_composite_pipeline;	// the composite against the plain eye pass
 		uint32_t eye_count;
 		VkImage eye_image[VK_XR_DIRECT_MAX_IMAGES];
 		VkImageView eye_view[VK_XR_DIRECT_MAX_IMAGES];

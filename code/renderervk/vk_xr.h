@@ -27,15 +27,18 @@ VkResult VK_XR_CreateInstance( PFN_vkCreateInstance normal, const VkInstanceCrea
 VkResult VK_XR_CreateDevice( PFN_vkCreateDevice normal, VkPhysicalDevice physical,
 							 const VkDeviceCreateInfo *info, VkDevice *device );
 VkPhysicalDevice VK_XR_PhysicalDevice( VkInstance instance );
-/* targetFlags asks the runtime for extra swapchain image create flags; it may refuse them. */
+/* targetFlags are extra swapchain create flags the runtime may refuse. plainTarget says a plain sRGB swapchain
+ * is fine when the runtime takes no format list. */
 void VK_XR_Bind( VkInstance instance, VkPhysicalDevice physical, VkDevice device, uint32_t queueFamily,
-				 VkImageCreateFlags targetFlags );
+				 VkImageCreateFlags targetFlags, qboolean plainTarget );
 void VK_XR_ShutdownSession( void );
 void VK_XR_ShutdownInstance( void );
 void VK_XR_CopyEyes( VkCommandBuffer command, VkImage source, VkFormat format, int width, int height,
 					 VkImageLayout layout );
 /* Valid after VK_XR_Bind. The images belong to the runtime. */
 qboolean VK_XR_SwapchainImages( VkFormat *format, uint32_t *count, VkImage images[VK_XRVK_MAX_IMAGES] );
+/* The swapchain images take a UNORM view. */
+qboolean VK_XR_TargetMutable( void );
 /* Index acquired this frame; valid while VK_XR_Drawing(). */
 uint32_t VK_XR_AcquiredIndex( void );
 /* Direct mode wrote the acquired image inside the frame's command buffer. */

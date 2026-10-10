@@ -1629,8 +1629,11 @@ static void vk_create_render_passes( void )
 			if ( vk.xr_output.eye_count ) {
 				// xrReleaseSwapchainImage expects the attachment layout
 				attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+				if ( vk.xr_output.plain )
+					attachments[0].format = vk.xr_output.format;
 				VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.xr_output.eye_pass ) );
 				SET_OBJECT_NAME( vk.xr_output.eye_pass, "render pass - xr eye output", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
+				attachments[0].format = vk_unorm_twin( vk.xr_output.format );
 			}
 			{
 				// the virtual-screen composition alone pays for a depth buffer; the world's output stays color-only
@@ -1654,7 +1657,8 @@ static void vk_create_render_passes( void )
 				desc.attachmentCount = 2;
 				VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.xr_output.screen_pass ) );
 				SET_OBJECT_NAME( vk.xr_output.screen_pass, "render pass - xr screen", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
-				if ( vk.xr_output.eye_count ) {
+				// the composition blends encoded values, which a plain swapchain can't take, so it goes through the intermediate
+				if ( vk.xr_output.eye_count && !vk.xr_output.plain ) {
 					attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 					VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.xr_output.screen_eye_pass ) );
 					SET_OBJECT_NAME( vk.xr_output.screen_eye_pass, "render pass - xr eye screen", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
@@ -4541,6 +4545,8 @@ void vk_update_post_process_pipelines( void )
 			vk_create_post_process_pipeline( VK_POST_DESKTOP_COMPOSITE, 0, 0 );
 		if ( vk.xr_output.image ) {
 			vk_create_post_process_pipeline( VK_POST_XR_COMPOSITE, vk.sceneWidth, vk.sceneHeight );
+			if ( vk.xr_output.plain && vk.xr_output.eye_pass )
+				vk_create_post_process_pipeline( VK_POST_XR_EYE_COMPOSITE, vk.sceneWidth, vk.sceneHeight );
 			vk_create_post_process_pipeline( VK_POST_SCREEN_MONO, gls.windowWidth, gls.windowHeight );
 			for ( int eye = 0; eye < 2; eye++ ) {
 				vk_create_post_process_pipeline( VK_POST_SCREEN_LEFT + eye, gls.windowWidth,
@@ -5231,7 +5237,7 @@ static void vk_create_framebuffers( void )
 			desc.renderPass = vk.xr_output.screen_pass;
 			VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.xr_output.screen_framebuffer ) );
 			desc.renderPass = vk.xr_output.screen_eye_pass;
-			for ( n = 0; n < vk.xr_output.eye_count; n++ ) {
+			for ( n = 0; desc.renderPass && n < vk.xr_output.eye_count; n++ ) {
 				attachments[0] = vk.xr_output.eye_view[n];
 				VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.xr_output.screen_eye_framebuffer[n] ) );
 			}
@@ -6206,6 +6212,7 @@ static void vk_xr_output_init( void ) {
 
 	vk.xr_output.format = VK_FORMAT_R8G8B8A8_SRGB;
 	vk.xr_output.eye_count = 0;
+	vk.xr_output.plain = qfalse;
 	if ( !VK_XR_SwapchainImages( &format, &count, images ) )
 		return;
 	VK_XR_TargetSize( &width, &height );
@@ -6215,11 +6222,12 @@ static void vk_xr_output_init( void ) {
 		return;
 	}
 	vk.xr_output.format = format;
+	vk.xr_output.plain = !VK_XR_TargetMutable();
 	Com_Memset( &desc, 0, sizeof( desc ) );
 	desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	desc.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-	// MUTABLE_FORMAT usage allows the UNORM view; the eye pass writes display-encoded values
-	desc.format = vk_unorm_twin( format );
+	// the eye pass writes encoded values through a UNORM view, while a plain image keeps its sRGB format and encodes on store
+	desc.format = vk.xr_output.plain ? format : vk_unorm_twin( format );
 	desc.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	desc.subresourceRange.levelCount = 1;
 	desc.subresourceRange.layerCount = 2;
@@ -6230,7 +6238,8 @@ static void vk_xr_output_init( void ) {
 		SET_OBJECT_NAME( vk.xr_output.eye_view[i], va( "xr eye view %u", i ), VK_DEBUG_REPORT_OBJECT_TYPE_IMAGE_VIEW_EXT );
 	}
 	vk.xr_output.eye_count = count;
-	ri.Printf( PRINT_ALL, "XR eye output: direct to swapchain (%s)\n", vk_format_string( format ) );
+	ri.Printf( PRINT_ALL, "XR eye output: direct to swapchain (%s%s)\n", vk_format_string( format ),
+			   vk.xr_output.plain ? ", world frames only" : "" );
 }
 
 void vk_initialize( void )
@@ -6650,8 +6659,10 @@ void vk_initialize( void )
 	vk.initSwapchainLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	//vk.initSwapchainLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	vk_create_swapchain( vk.physical_device, vk.device, vk_surface, vk.present_format, &vk.swapchain, qtrue );
+	// only the unmirrored framebuffer path can do without UNORM views of the eye images
 	VK_XR_Bind( vk_instance, vk.physical_device, vk.device, vk.queue_family_index,
-				vk.xrDirect && vk_fdm_offsets_supported() ? VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_QCOM : 0 );
+				vk.xrDirect && vk_fdm_offsets_supported() ? VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_QCOM : 0,
+				vk.fboActive && !vk_desktop_presented() );
 	// the session's swapchains exist only from here
 	vk_update_hdr_status();
 	vk.sceneWidth = glConfig.vidWidth;
@@ -6887,6 +6898,10 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 	if ( vk.xr_output.composite_pipeline ) {
 		qvkDestroyPipeline( vk.device, vk.xr_output.composite_pipeline, NULL );
 		vk.xr_output.composite_pipeline = VK_NULL_HANDLE;
+	}
+	if ( vk.xr_output.eye_composite_pipeline ) {
+		qvkDestroyPipeline( vk.device, vk.xr_output.eye_composite_pipeline, NULL );
+		vk.xr_output.eye_composite_pipeline = VK_NULL_HANDLE;
 	}
 	if ( vk.gamma_composite_pipeline ) {
 		qvkDestroyPipeline( vk.device, vk.gamma_composite_pipeline, NULL );
@@ -7663,9 +7678,11 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 		pipeline_name = "capture buffer pipeline";
 		break;
 	case VK_POST_XR_COMPOSITE: // scene, bloom and headset SDR output in one draw
-		pipeline = &vk.xr_output.composite_pipeline;
+	case VK_POST_XR_EYE_COMPOSITE:
+		pipeline = program_index == VK_POST_XR_COMPOSITE ? &vk.xr_output.composite_pipeline
+														 : &vk.xr_output.eye_composite_pipeline;
 		fsmodule = vk.modules.gamma_composite_fs_mv;
-		renderpass = vk.xr_output.pass;
+		renderpass = program_index == VK_POST_XR_COMPOSITE ? vk.xr_output.pass : vk.xr_output.eye_pass;
 		layout = vk.pipeline_layout_composite;
 		samples = VK_SAMPLE_COUNT_1_BIT;
 		pipeline_name = "XR bloom composite pipeline";
@@ -7694,7 +7711,8 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	}
 
 	// the eye pass composite already has its multiview module; the other multiview outputs sample an array image
-	if ( vk.multiview && program_index != VK_POST_SCREEN_MONO && program_index != VK_POST_XR_COMPOSITE )
+	if ( vk.multiview && program_index != VK_POST_SCREEN_MONO && program_index != VK_POST_XR_COMPOSITE &&
+		 program_index != VK_POST_XR_EYE_COMPOSITE )
 		fsmodule = vk.modules.gamma_fs_array;
 
 	if ( *pipeline != VK_NULL_HANDLE ) {
@@ -7725,11 +7743,11 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 	// Screenshot/video capture and headset output remain SDR.
 	frag_spec_data.hdr_mode =
 		(vk.hdrActive && program_index != VK_POST_CAPTURE && program_index != VK_POST_XR_COMPOSITE &&
-		 program_index != VK_POST_SCREEN_CAPTURE)
+		 program_index != VK_POST_XR_EYE_COMPOSITE && program_index != VK_POST_SCREEN_CAPTURE)
 			? ( program_index >= VK_POST_EYE_MIRROR_LEFT ? 3 : 1 )
 			: 0;
-	// the eye pass writes through a UNORM view, so its output stays encoded
-	frag_spec_data.linear_sdr_output = 0;
+	// the eye pass writes through a UNORM view, so its output stays encoded; a plain sRGB eye image encodes on store
+	frag_spec_data.linear_sdr_output = program_index == VK_POST_XR_EYE_COMPOSITE;
 	frag_spec_data.bloom_enabled = r_bloom->integer ? 1 : 0;
 	frag_spec_data.bloom_fine = r_bloom_fine->integer;
 	frag_spec_data.screen_source =
@@ -7744,7 +7762,7 @@ void vk_create_post_process_pipeline( vkPostProgram_t program_index, uint32_t wi
 
 	if ( !vk_surface_format_color_depth( vk.present_format.format, &frag_spec_data.depth_r, &frag_spec_data.depth_g, &frag_spec_data.depth_b ) )
 		ri.Printf( PRINT_ALL, "Format %s not recognized, dither to assume 8bpc\n", vk_format_string( vk.base_format.format ) );
-	if ( program_index == VK_POST_XR_COMPOSITE ) {
+	if ( program_index == VK_POST_XR_COMPOSITE || program_index == VK_POST_XR_EYE_COMPOSITE ) {
 		frag_spec_data.depth_r = frag_spec_data.depth_g = frag_spec_data.depth_b = 255;
 	}
 
@@ -11617,16 +11635,19 @@ static void vk_draw_tracking_status( void ) {
 	vk.renderPassIndex = savedPass;
 }
 
-/* The acquired eye image the eye pass writes, or eye_count for the intermediate; the index is stale while the headset draws nothing. */
-static uint32_t vk_eye_output_index( void ) {
+/* The eye image to write, or eye_count for the intermediate. A plain eye image can't hold encoded values,
+ * so anything composited, mirrored or read back goes through the intermediate. */
+static uint32_t vk_eye_output_index( qboolean world ) {
 	const uint32_t index = VK_XR_AcquiredIndex();
+	if ( vk.xr_output.plain && ( !world || ( backEnd.screenshotMask && vk.capture.image ) || !ri.CL_IsMinimized() ) )
+		return vk.xr_output.eye_count;
 	return ( VK_XR_Drawing() && vk.xr_output.eye_pass && index < vk.xr_output.eye_count ) ? index : vk.xr_output.eye_count;
 }
 
 /* After the eye pass ends: screenshot and desktop mirror from the eye image, then hand it to the runtime. */
 static void vk_finish_eye_frame( qboolean world )
 {
-	const uint32_t index = vk_eye_output_index();
+	const uint32_t index = vk_eye_output_index( world );
 	const qboolean direct = index < vk.xr_output.eye_count;
 	const VkImage image = direct ? vk.xr_output.eye_image[index] : vk.xr_output.image;
 	const VkImageLayout layout = direct ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -11713,7 +11734,7 @@ void vk_end_frame( void )
 	if ( vk.postFlow == VK_POST_FLOW_SCREEN )
 	{
 		const vrScreenGeometry_t *screen = VK_XR_Screen();
-		const uint32_t index = vk_eye_output_index();
+		const uint32_t index = vk_eye_output_index( qfalse );
 		const qboolean direct = index < vk.xr_output.eye_count;
 		const VkFormatProperties properties = vk.screenFormatProperties;
 
@@ -11769,7 +11790,7 @@ void vk_end_frame( void )
 	}
 	else if ( vk.postFlow == VK_POST_FLOW_WORLD )
 	{
-		const uint32_t index = vk_eye_output_index();
+		const uint32_t index = vk_eye_output_index( qtrue );
 		const qboolean direct = index < vk.xr_output.eye_count;
 
 		// a 2D batch still pending when the frame ends without a swap
@@ -11792,7 +11813,8 @@ void vk_end_frame( void )
 		vk_begin_render_pass( direct ? vk.xr_output.eye_pass : vk.xr_output.pass,
 							  direct ? vk.xr_output.eye_framebuffer[index] : vk.xr_output.framebuffer, qfalse,
 							  vk.sceneWidth, vk.sceneHeight );
-		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.xr_output.composite_pipeline );
+		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+							direct && vk.xr_output.plain ? vk.xr_output.eye_composite_pipeline : vk.xr_output.composite_pipeline );
 		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_composite, 0, 1, &vk.composite_descriptor, 0, NULL );
 		vk_post_process_push( vk.pipeline_layout_composite );
 		qvkCmdDraw( vk.cmd->command_buffer, 4, 1, 0, 0 );
