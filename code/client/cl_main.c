@@ -106,7 +106,6 @@ cvar_t	*cl_reconnectArgs;
 // common cvars for GLimp modules
 cvar_t	*vid_xpos;			// X coordinate of window position
 cvar_t	*vid_ypos;			// Y coordinate of window position
-cvar_t	*r_noborder;
 
 cvar_t *r_allowSoftwareGL;	// don't abort out if the pixelformat claims software
 cvar_t *r_swapInterval;
@@ -2052,6 +2051,11 @@ static void CL_Vid_Restart_f( void ) {
 				return;
 			}
 		}
+		// a new window between SDR and HDR output makes Windows turn its HDR switch off
+		if ( !VR_IsActiveMode() && !CL_VR_ModePending() && Cvar_OnlyVideoLatchedChange( "r_hdrDisplay" ) ) {
+			CL_Vid_Restart( REF_KEEP_WINDOW );
+			return;
+		}
 		CL_Vid_Restart( REF_DESTROY_WINDOW );
 	}
 }
@@ -3507,8 +3511,8 @@ static void CL_ShutdownRef( refShutdownCode_t code ) {
 	}
 
 #ifdef USE_RENDERER_DLOPEN
-	/* A surviving graphics context belongs to this renderer DLL. */
-	if ( rendererLib && code != REF_KEEP_CONTEXT ) {
+	/* A surviving window or context belongs to this renderer DLL. */
+	if ( rendererLib && code != REF_KEEP_CONTEXT && code != REF_KEEP_WINDOW ) {
 		Sys_UnloadLibrary( rendererLib );
 		rendererLib = NULL;
 	}
@@ -3534,6 +3538,8 @@ static void CL_InitRenderer( void ) {
 
 	// this sets up the renderer and calls R_Init
 	re.BeginRegistration( &cls.glconfig );
+	// what this renderer started with, so a later restart can tell what changed
+	Cvar_SnapshotLatched();
 
 	// load character sets
 	cls.charSetShader = re.RegisterShader( "gfx/2d/bigchars" );
@@ -4104,6 +4110,93 @@ static const vidmode_t cl_vidModes[] =
 };
 static const int s_numVidModes = ARRAY_LEN( cl_vidModes );
 
+#define MODE_MIN_RATE	50	// below this is TV and film timing, not a gaming rate
+#define MODE_MAX_RATES	8	// what the menus show
+
+static char *CL_FindModeEntry( char *modes, const char *key ) {
+	size_t len = strlen( key );
+	char *p = modes;
+
+	while ( ( p = strstr( p, key ) ) != NULL ) {
+		if ( ( p == modes || p[-1] == ' ' ) && ( p[len] == ':' || p[len] == ' ' || p[len] == '\0' ) )
+			return p;
+		p += len;
+	}
+	return NULL;
+}
+
+// a rate one below a listed one is its NTSC twin (59 beside 60), so it counts as listed
+static qboolean CL_HasModeRate( const char *rates, const char *end, int hz, int *count ) {
+	*count = 0;
+	while ( rates && rates < end ) {
+		int listed = atoi( rates );
+
+		if ( listed == hz || listed == hz + 1 )
+			return qtrue;
+		( *count )++;
+		rates = strchr( rates, ',' );
+		if ( !rates || rates >= end )
+			break;
+		rates++;
+	}
+	return qfalse;
+}
+
+// r_availableModes text, "WxH:hz,hz"; an entry that would overflow is dropped whole
+void CL_AppendModeRate( char *modes, size_t size, int w, int h, int hz ) {
+	char key[32], rate[16];
+	char *entry, *end, *colon;
+	size_t used = strlen( modes ), add;
+	int count;
+
+	if ( hz < MODE_MIN_RATE )
+		hz = 0;
+	Com_sprintf( key, sizeof( key ), "%dx%d", w, h );
+	entry = CL_FindModeEntry( modes, key );
+	if ( !entry ) {
+		char text[48];
+
+		if ( hz > 0 )
+			Com_sprintf( text, sizeof( text ), "%s%s:%d", used ? " " : "", key, hz );
+		else
+			Com_sprintf( text, sizeof( text ), "%s%s", used ? " " : "", key );
+		if ( used + strlen( text ) + 1 > size )
+			return;
+		strcpy( modes + used, text );
+		return;
+	}
+	if ( hz <= 0 )
+		return;
+
+	end = strchr( entry, ' ' );
+	if ( !end )
+		end = modes + used;
+	colon = memchr( entry, ':', end - entry );
+	if ( colon && ( CL_HasModeRate( colon + 1, end, hz, &count ) || count >= MODE_MAX_RATES ) )
+		return;
+
+	Com_sprintf( rate, sizeof( rate ), "%c%d", colon ? ',' : ':', hz );
+	add = strlen( rate );
+	if ( used + add + 1 > size )
+		return;
+	memmove( end + add, end, ( modes + used ) - end + 1 );
+	memcpy( end, rate, add );
+}
+
+/* The UI's mode list when the display reports none. */
+void CL_BuiltinModeList( char *buf, int size ) {
+	int i;
+
+	buf[0] = '\0';
+	for ( i = 0; i < s_numVidModes; i++ ) {
+		const char *entry = va( "%s%dx%d", buf[0] ? " " : "", cl_vidModes[i].width, cl_vidModes[i].height );
+
+		if ( (int)( strlen( buf ) + strlen( entry ) ) + 1 > size )
+			break;
+		Q_strcat( buf, size, entry );
+	}
+}
+
 qboolean CL_GetModeInfo( int *width, int *height, float *windowAspect, int mode, const char *modeFS, int dw, int dh, qboolean fullscreen )
 {
 	const	vidmode_t *vm;
@@ -4182,7 +4275,7 @@ static void CL_InitGLimp_Cvars( void )
 	r_glDriver = Cvar_Get( "r_glDriver", OPENGL_DRIVER_NAME, CVAR_ARCHIVE_ND | CVAR_LATCH );
 	Cvar_SetDescription( r_glDriver, "Specifies the OpenGL driver to use, will revert back to default if driver name set is invalid." );
 
-	r_displayRefresh = Cvar_Get( "r_displayRefresh", "0", CVAR_LATCH );
+	r_displayRefresh = Cvar_Get( "r_displayRefresh", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	Cvar_CheckRange( r_displayRefresh, "0", "500", CV_INTEGER );
 	Cvar_SetDescription( r_displayRefresh, "Override monitor refresh rate in fullscreen mode:\n   0 - use current monitor refresh rate\n > 0 - use custom refresh rate" );
 
@@ -4193,10 +4286,6 @@ static void CL_InitGLimp_Cvars( void )
 	Cvar_CheckRange( vid_ypos, NULL, NULL, CV_INTEGER );
 	Cvar_SetDescription( vid_ypos, "Saves/sets window Y-coordinate when windowed, requires \\vid_restart." );
 
-	r_noborder = Cvar_Get( "r_noborder", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
-	Cvar_CheckRange( r_noborder, "0", "1", CV_INTEGER );
-	Cvar_SetDescription( r_noborder, "Setting to 1 will remove window borders and title bar in windowed mode, hold ALT to drag & drop it with opened console." );
-
 	r_mode = Cvar_Get( "r_mode", "-2", CVAR_ARCHIVE | CVAR_LATCH );
 	Cvar_CheckRange( r_mode, "-2", va( "%i", s_numVidModes-1 ), CV_INTEGER );
 	Cvar_SetDescription( r_mode, "Set video mode:\n -2 - use current desktop resolution\n -1 - use \\r_customWidth and \\r_customHeight\n  0..N - enter \\modelist for details" );
@@ -4206,8 +4295,9 @@ static void CL_InitGLimp_Cvars( void )
 	r_modeFullscreen = Cvar_Get( "r_modeFullscreen", "-2", CVAR_ARCHIVE | CVAR_LATCH );
 #endif
 	Cvar_SetDescription( r_modeFullscreen, "Dedicated fullscreen mode, set to \"\" to use \\r_mode in all cases." );
-	r_fullscreen = Cvar_Get( "r_fullscreen", "1", CVAR_ARCHIVE | CVAR_LATCH );
-	Cvar_SetDescription( r_fullscreen, "Fullscreen mode. Set to 0 for windowed mode." );
+	r_fullscreen = Cvar_Get( "r_fullscreen", "2", CVAR_ARCHIVE | CVAR_LATCH );
+	Cvar_CheckRange( r_fullscreen, "0", "2", CV_INTEGER );
+	Cvar_SetDescription( r_fullscreen, "Window mode:\n 0: windowed\n 1: fullscreen, exclusive, at \\r_modeFullscreen and \\r_displayRefresh\n 2: borderless, covering the desktop at its own resolution and refresh rate" );
 	r_customPixelAspect = Cvar_Get( "r_customPixelAspect", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	Cvar_SetDescription( r_customPixelAspect, "Enables custom aspect of the screen, with \\r_mode -1." );
 	r_customwidth = Cvar_Get( "r_customWidth", "1600", CVAR_ARCHIVE | CVAR_LATCH );

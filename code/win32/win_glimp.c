@@ -679,8 +679,6 @@ static qboolean GLW_CreateWindow( int width, int height, int colorbits, qboolean
 		//r.right  = width;
 		//r.bottom = height;
 		
-		g_wv.borderless = 0;
-
 		if ( cdsFullscreen )
 		{
 			exstyle = WINDOW_ESTYLE_FULLSCREEN;
@@ -689,13 +687,13 @@ static qboolean GLW_CreateWindow( int width, int height, int colorbits, qboolean
 		else
 		{
 			exstyle = WINDOW_ESTYLE_NORMAL;
-			if ( r_noborder->integer ) {
+			if ( r_fullscreen->integer == 2 ) {
+				// borderless covers the monitor with no display mode change
 				stylebits = WINDOW_STYLE_NORMAL_NB;
-				g_wv.borderless = r_noborder->integer;
 			} else {
 				stylebits = WINDOW_STYLE_NORMAL;
+				AdjustWindowRect( &r, stylebits, FALSE );
 			}
-			AdjustWindowRect( &r, stylebits, FALSE );
 		}
 
 		w = r.right - r.left;
@@ -708,7 +706,7 @@ static qboolean GLW_CreateWindow( int width, int height, int colorbits, qboolean
 		r.bottom = r.top + h;
 		UpdateMonitorInfo( &r );
 
-		if ( cdsFullscreen )
+		if ( cdsFullscreen || r_fullscreen->integer == 2 )
 		{
 			x = glw_state.desktopX;
 			y = glw_state.desktopY;
@@ -989,6 +987,34 @@ void UpdateMonitorInfo( const RECT *target )
 }
 
 
+static void GLW_DetectAvailableModes( void )
+{
+	char modes[ MAX_STRING_CHARS ] = { 0 };
+	DEVMODE dm;
+	int i, pass;
+
+	Cvar_Get( "r_availableModes", "", CVAR_ROM );
+	// every size first, so a long rate list can never crowd a size out
+	for ( pass = 0; pass < 2; pass++ )
+	{
+		memset( &dm, 0, sizeof( dm ) );
+		dm.dmSize = sizeof( dm );
+		for ( i = 0; EnumDisplaySettings( glw_state.displayName[0] ? glw_state.displayName : NULL, i, &dm ); i++ )
+		{
+			if ( dm.dmPelsWidth == 0 || dm.dmPelsHeight == 0 )
+				continue;
+			CL_AppendModeRate( modes, sizeof( modes ), dm.dmPelsWidth, dm.dmPelsHeight, pass ? dm.dmDisplayFrequency : 0 );
+		}
+	}
+	if ( !modes[0] )
+		CL_BuiltinModeList( modes, sizeof( modes ) );
+	Cvar_Set( "r_availableModes", modes );
+	// the menus' "Desktop" entry and borderless size
+	Cvar_Get( "r_desktopMode", "", CVAR_ROM );
+	Cvar_Set( "r_desktopMode", va( "%dx%d", glw_state.desktopWidth, glw_state.desktopHeight ) );
+}
+
+
 /*
 ** GLW_SetMode
 */
@@ -1022,6 +1048,11 @@ static rserr_t GLW_SetMode( int mode, const char *modeFS, int colorbits, qboolea
 	{
 		Com_Printf( " invalid mode\n" );
 		return RSERR_INVALID_MODE;
+	}
+	if ( !cdsFullscreen && r_fullscreen->integer == 2 ) {
+		config->vidWidth = glw_state.desktopWidth;
+		config->vidHeight = glw_state.desktopHeight;
+		config->windowAspect = (float)config->vidWidth / config->vidHeight;
 	}
 	Com_Printf( " %d %d %s\n", config->vidWidth, config->vidHeight, win_fs[ cdsFullscreen ] );
 
@@ -1212,8 +1243,12 @@ static rserr_t GLW_SetMode( int mode, const char *modeFS, int colorbits, qboolea
 	}
 
 	// NOTE: this is overridden later on standalone 3Dfx drivers
-	glw_state.config->isFullscreen = cdsFullscreen;
+	glw_state.config->isFullscreen = cdsFullscreen || r_fullscreen->integer == 2;
 	//glw_state.config->colorBits = dm.dmBitsPerPel;
+	if ( glw_state.config->isFullscreen )
+		glw_state.lastFullscreen = r_fullscreen->integer;
+
+	GLW_DetectAvailableModes();
 
 	return RSERR_OK;
 }
@@ -1251,7 +1286,7 @@ static qboolean GLW_LoadOpenGL( const char *drivername )
 	// 
 	if ( QGL_Init( buffer ) )
 	{
-		cdsFullscreen = (r_fullscreen->integer != 0);
+		cdsFullscreen = (r_fullscreen->integer == 1);
 
 		// create the window and set up the context
 		if ( GLW_StartDriverAndSetMode( r_mode->integer, r_modeFullscreen->string, r_colorbits->integer, cdsFullscreen, qfalse ) != RSERR_OK )
@@ -1469,7 +1504,7 @@ static qboolean GLW_LoadVulkan( void )
 	//
 	if ( QVK_Init() )
 	{
-		qboolean cdsFullscreen = (r_fullscreen->integer != 0);
+		qboolean cdsFullscreen = (r_fullscreen->integer == 1);
 
 		// create the window and set up the context
 		if ( GLW_StartDriverAndSetMode( r_mode->integer, r_modeFullscreen->string, r_colorbits->integer, cdsFullscreen, qtrue ) == RSERR_OK )

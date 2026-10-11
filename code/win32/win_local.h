@@ -140,8 +140,6 @@ typedef struct
 	RECT			winRect;
 	qboolean		winRectValid;
 
-	int				borderless;
-
 	// when we get a windows message, we store the time off so keyboard processing
 	// can know the exact time of an event
 	unsigned		sysMsgTime;

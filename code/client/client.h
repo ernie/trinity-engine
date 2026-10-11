@@ -618,7 +618,6 @@ extern	cvar_t	*com_maxfps;
 
 extern	cvar_t	*vid_xpos;
 extern	cvar_t	*vid_ypos;
-extern	cvar_t	*r_noborder;
 
 extern	cvar_t	*r_allowSoftwareGL;
 extern	cvar_t	*r_swapInterval;
@@ -666,6 +665,8 @@ int CL_ServerStatus( const char *serverAddress, char *serverStatusString, int ma
 qboolean CL_CheckPaused( void );
 qboolean CL_NoDelay( void );
 
+void CL_BuiltinModeList( char *buf, int size );
+void CL_AppendModeRate( char *modes, size_t size, int w, int h, int hz );
 qboolean CL_GetModeInfo( int *width, int *height, float *windowAspect, int mode, const char *modeFS, int dw, int dh, qboolean fullscreen );
 
 

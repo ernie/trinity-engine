@@ -1166,7 +1166,13 @@ void HandleEvents( void )
 				key = IN_TranslateSDLToQ3Key( &e.key.keysym, qtrue );
 
 				if ( key == K_ENTER && keys[K_ALT].down ) {
-					Cvar_SetIntegerValue( VR_IsActiveMode() ? "vr_mirrorFullscreen" : "r_fullscreen", glw_state.isFullscreen ? 0 : 1 );
+					if ( VR_IsActiveMode() ) {
+						Cvar_SetIntegerValue( "vr_mirrorFullscreen", glw_state.isFullscreen ? 0 : 1 );
+					} else {
+						// back to whichever fullscreen kind was last used, borderless when none was
+						Cvar_SetIntegerValue( "r_fullscreen", glw_state.isFullscreen ? 0 :
+							( glw_state.lastFullscreen ? glw_state.lastFullscreen : 2 ) );
+					}
 					Cbuf_AddText( "vid_restart\n" );
 					break;
 				}

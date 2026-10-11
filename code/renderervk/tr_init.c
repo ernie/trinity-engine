@@ -1804,6 +1804,12 @@ static void R_Register( void )
 	ri.Cvar_SetGroup( r_bloom_fine, CVG_RENDERER );
 
 	if ( glConfig.vidWidth )
+	// HDR output is a swapchain choice, so a kept window applies it
+	r_hdrDisplay = ri.Cvar_Get( "r_hdrDisplay", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	ri.Cvar_CheckRange( r_hdrDisplay, "0", "1", CV_INTEGER );
+	ri.Cvar_SetDescription( r_hdrDisplay,
+		"Output true HDR for brighter highlights and more lifelike color. Requires the Vulkan renderer and an HDR-capable display with HDR turned on in your system display settings. Takes effect after a \\vid_restart. (Not the same as r_hdr, which only sets internal rendering precision.)" );
+
 		return;
 
 	//
@@ -1851,11 +1857,6 @@ static void R_Register( void )
 		" In VR, 0 draws straight into the headset swapchain image: no overbright (multi-stage surfaces and blends look different), no bloom, \\r_greyscale, \\r_dither, \\r_presentBits, \\r_hdr, HDR mirror output, screenshots or video capture; \\r_gamma is baked into textures at load, so it needs a \\vid_restart. In that mode \\r_ext_multisample works without the framebuffer, resolving into the swapchain, and the desktop mirror shows the headset image unprocessed." );
 	r_hdr = ri.Cvar_Get( "r_hdr", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_SetDescription(r_hdr, "Enables high dynamic range frame buffer texture format. Requires \\r_fbo 1.\n -1: 4-bit, for testing purposes, heavy color banding, might not work on all systems\n  0: 8 bit, default, moderate color banding with multi-stage shaders\n  1: 16 bit, enhanced blending precision, no color banding, might decrease performance on AMD / Intel GPUs\n" );
-
-	r_hdrDisplay = ri.Cvar_Get( "r_hdrDisplay", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
-	ri.Cvar_CheckRange( r_hdrDisplay, "0", "1", CV_INTEGER );
-	ri.Cvar_SetDescription( r_hdrDisplay,
-		"Output true HDR for brighter highlights and more lifelike color. Requires the Vulkan renderer and an HDR-capable display with HDR turned on in your system display settings. Takes effect after a \\vid_restart. (Not the same as r_hdr, which only sets internal rendering precision.)" );
 
 	r_hdrPaperWhite = ri.Cvar_Get( "r_hdrPaperWhite", "0", CVAR_ARCHIVE_ND );
 	ri.Cvar_CheckRange( r_hdrPaperWhite, "0", "1000", CV_FLOAT );

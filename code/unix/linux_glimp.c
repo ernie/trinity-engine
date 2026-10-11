@@ -1477,6 +1477,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 	unsigned long mask;
 	int colorbits, depthbits, stencilbits;
 	int actualWidth, actualHeight, actualRate;
+	qboolean borderless;
 
 	window_width = 0;
 	window_height = 0;
@@ -1531,9 +1532,17 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 		return RSERR_INVALID_MODE;
 	}
 
+	// borderless covers the desktop at its own mode, whatever size is saved
+	borderless = fullscreen && r_fullscreen->integer == 2;
+	if ( borderless ) {
+		config->vidWidth = glw_state.desktop_width;
+		config->vidHeight = glw_state.desktop_height;
+		config->windowAspect = (float)config->vidWidth / config->vidHeight;
+	}
+
 	actualWidth = config->vidWidth;
 	actualHeight = config->vidHeight;
-	actualRate = r_displayRefresh->integer;
+	actualRate = borderless ? 0 : r_displayRefresh->integer;
 
 	if ( actualRate )
 		Com_Printf( " %d %d @%iHz\n", actualWidth, actualHeight, actualRate );
@@ -1542,7 +1551,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 
 	if ( glw_state.randr_ext ) // try randr first
 	{
-		if ( fullscreen )
+		if ( fullscreen && !borderless )
 			RandR_SetMode( &actualWidth, &actualHeight, &actualRate );
 		else
 			glw_state.randr_active = qtrue;
@@ -1550,7 +1559,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 
 	if ( glw_state.vidmode_ext && !glw_state.randr_active )
 	{
-		if ( fullscreen )
+		if ( fullscreen && !borderless )
 			VidMode_SetMode( &actualWidth, &actualHeight, &actualRate );
 		else
 			Com_Printf( "XFree86-VidModeExtension: Ignored on non-fullscreen\n" );
@@ -1634,7 +1643,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 		motifHints_t decohint;
 		decohint.flags = (1L << 1);
 		decohint.functions = 0;
-		decohint.decorations = r_noborder->integer ? 0 : 1;
+		decohint.decorations = borderless ? 0 : 1;
 		decohint.input_mode = decohint.status = 0;
 
 		XChangeProperty( dpy, win, motifWMHints, motifWMHints, 32,
@@ -1663,7 +1672,7 @@ int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qboolean vul
 
 	if ( fullscreen )
 	{
-		if ( glw_state.randr_active || glw_state.vidmode_active )
+		if ( borderless || glw_state.randr_active || glw_state.vidmode_active )
 			XMoveWindow( dpy, win, glw_state.desktop_x, glw_state.desktop_y );
 	}
 	else

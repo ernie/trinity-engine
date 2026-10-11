@@ -183,6 +183,82 @@ void Cvar_VariableStringBuffer( const char *var_name, char *buffer, int bufsize 
 }
 
 
+// latched cvars as the video system last started: modules set latched cvars
+// outright and the console latches them, so either can be the pending change.
+// Names, not pointers, since a game restart can clear a module's cvars.
+#define MAX_LATCH_SNAPSHOT 512
+static struct {
+	char	*name;
+	char	*value;		// the value in effect, not one still waiting on a restart
+} latchSnapshot[MAX_LATCH_SNAPSHOT];
+static int latchSnapshotCount;
+
+
+/*
+============
+Cvar_SnapshotLatched
+============
+*/
+void Cvar_SnapshotLatched( void ) {
+	const cvar_t *var;
+	int i;
+
+	for ( i = 0; i < latchSnapshotCount; i++ ) {
+		Z_Free( latchSnapshot[i].name );
+		Z_Free( latchSnapshot[i].value );
+	}
+	latchSnapshotCount = 0;
+	for ( var = cvar_vars; var && latchSnapshotCount < MAX_LATCH_SNAPSHOT; var = var->next ) {
+		if ( ( var->flags & CVAR_LATCH ) && var->name && var->string ) {
+			latchSnapshot[latchSnapshotCount].name = CopyString( var->name );
+			latchSnapshot[latchSnapshotCount].value = CopyString( var->string );
+			latchSnapshotCount++;
+		}
+	}
+}
+
+
+// renderer, window and VR settings; game, server and sound settings restart
+// the same way whether or not the window is kept
+static qboolean Cvar_IsVideo( const char *var_name ) {
+	return !Q_stricmpn( var_name, "r_", 2 ) || !Q_stricmpn( var_name, "vr_", 3 ) || !Q_stricmp( var_name, "cl_renderer" );
+}
+
+
+/*
+============
+Cvar_OnlyVideoLatchedChange
+
+True when var_name is the one latched video cvar whose value, pending or set, differs from the last snapshot.
+============
+*/
+qboolean Cvar_OnlyVideoLatchedChange( const char *var_name ) {
+	qboolean found = qfalse;
+	const cvar_t *var;
+	const char *value;
+	int i;
+
+	for ( i = 0; i < latchSnapshotCount; i++ ) {
+		if ( !Cvar_IsVideo( latchSnapshot[i].name ) ) {
+			continue;
+		}
+		var = Cvar_FindVar( latchSnapshot[i].name );
+		if ( !var || !var->string ) {
+			continue;
+		}
+		value = var->latchedString ? var->latchedString : var->string;
+		if ( strcmp( latchSnapshot[i].value, value ) == 0 ) {
+			continue;
+		}
+		if ( Q_stricmp( latchSnapshot[i].name, var_name ) != 0 ) {
+			return qfalse;
+		}
+		found = qtrue;
+	}
+	return found;
+}
+
+
 /*
 ============
 Cvar_VariableStringBufferSafe

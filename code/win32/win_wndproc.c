@@ -833,42 +833,6 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 			wp.length = sizeof( WINDOWPLACEMENT );
 			if ( GetWindowPlacement( hWnd, &wp ) && wp.showCmd == SW_SHOWMINIMIZED )
 				gw_minimized = qtrue;
-
-			if ( g_wv.borderless )
-			{
-				WINDOWPOS *pos = (LPWINDOWPOS) lParam;
-				const int threshold = 10;
-				HMONITOR hMonitor;
-				MONITORINFO mi;
-				const RECT *r;
-				RECT rr;
-
-				rr.left = pos->x;
-				rr.right = pos->x + pos->cx;
-				rr.top = pos->y;
-				rr.bottom = pos->y + pos->cy;
-				hMonitor = MonitorFromRect( &rr, MONITOR_DEFAULTTONEAREST );
-
-				if ( hMonitor )
-				{
-					mi.cbSize = sizeof( mi );
-					GetMonitorInfo( hMonitor, &mi );
-					r = &mi.rcWork;
-
-					// snap window to current monitor borders
-					if ( pos->x >= ( r->left - threshold ) && pos->x <= ( r->left + threshold ) )
-						pos->x = r->left;
-					else if ( ( pos->x + pos->cx ) >= ( r->right - threshold ) && ( pos->x + pos->cx ) <= ( r->right + threshold ) )
-						pos->x = ( r->right - pos->cx );
-
-					if ( pos->y >= ( r->top - threshold ) && pos->y <= ( r->top + threshold ) )
-						pos->y = r->top;
-					else if ( ( pos->y + pos->cy ) >= ( r->bottom - threshold ) && ( pos->y + pos->cy ) <= ( r->bottom + threshold ) )
-						pos->y = ( r->bottom - pos->cy );
-
-					return 0;
-				}
-			}
 		}
 		break;
 
@@ -940,7 +904,10 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 	case WM_SYSKEYDOWN:
 	case WM_KEYDOWN:
 		if ( wParam == VK_RETURN && ( uMsg == WM_SYSKEYDOWN || GetKeyState( VK_RMENU ) & 0x8000 ) ) {
-			Cvar_SetIntegerValue( "r_fullscreen", glw_state.cdsFullscreen ? 0 : 1 );
+			if ( glw_state.config && glw_state.config->isFullscreen )
+				Cvar_SetIntegerValue( "r_fullscreen", 0 );
+			else
+				Cvar_SetIntegerValue( "r_fullscreen", glw_state.lastFullscreen ? glw_state.lastFullscreen : 2 );
 			Cbuf_AddText( "vid_restart\n" );
 			return 0;
 		}
@@ -962,12 +929,6 @@ LRESULT WINAPI MainWndProc( HWND hWnd, UINT uMsg, WPARAM  wParam, LPARAM lParam 
 			}
 		}
 		return 0;
-
-	case WM_NCHITTEST:
-		// in borderless mode - drag using client area when holding ALT
-		if ( g_wv.borderless && GetKeyState( VK_MENU ) & (1<<15) )
-			return HTCAPTION;
-		break;
 
 	case WM_ERASEBKGND: 
 		// avoid GDI clearing the OpenGL window background in Vista/7

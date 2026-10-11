@@ -620,6 +620,9 @@ int		Cvar_VariableIntegerValue( const char *var_name );
 const char *Cvar_VariableString( const char *var_name );
 void	Cvar_VariableStringBuffer( const char *var_name, char *buffer, int bufsize );
 void	Cvar_VariableStringBufferSafe( const char *var_name, char *buffer, int bufsize, int flag );
+void	Cvar_SnapshotLatched( void );
+qboolean	Cvar_OnlyVideoLatchedChange( const char *var_name );
+// true when var_name is the one latched video cvar that differs from the last snapshot
 // returns an empty string if not defined
 
 unsigned Cvar_Flags( const char *var_name );

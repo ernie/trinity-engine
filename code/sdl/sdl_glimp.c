@@ -186,53 +186,34 @@ static int FindNearestDisplay( int *x, int *y, int w, int h )
 }
 
 
-/* r_availableModes: desktop sizes for the UI, refreshed per window so another display's list never carries over. */
+/* r_availableModes: "WxH:hz,hz" desktop sizes for the UI, refreshed per window so another display's list never carries over. */
 static void GLimp_DetectAvailableModes( void )
 {
 	char modes[ MAX_STRING_CHARS ] = { 0 };
-	int display, count, i;
-	size_t used = 0;
+	int display, count, i, pass;
 
 	Cvar_Get( "r_availableModes", "", CVAR_ROM );
-	Cvar_Set( "r_availableModes", "" );
 	display = SDL_GetWindowDisplayIndex( SDL_window );
-	if ( display < 0 )
-		return;
-	count = SDL_GetNumDisplayModes( display );
-	for ( i = 0; i < count; i++ )
+	count = display >= 0 ? SDL_GetNumDisplayModes( display ) : 0;
+	// every size first, so a long rate list can never crowd a size out
+	for ( pass = 0; pass < 2; pass++ )
 	{
-		SDL_DisplayMode mode;
-		char entry[ 32 ];
-		const char *match;
-		size_t length;
+		for ( i = 0; i < count; i++ )
+		{
+			SDL_DisplayMode mode;
 
-		if ( SDL_GetDisplayMode( display, i, &mode ) < 0 || mode.w <= 0 || mode.h <= 0 )
-			continue;
-		Com_sprintf( entry, sizeof( entry ), "%dx%d ", mode.w, mode.h );
-		match = strstr( modes, entry );
-		while ( match && match != modes && match[-1] != ' ' )
-			match = strstr( match + 1, entry );
-		if ( match )
-			continue;
-		length = strlen( entry );
-		if ( used + length >= sizeof( modes ) )
-			break;
-		memcpy( modes + used, entry, length + 1 );
-		used += length;
+			if ( SDL_GetDisplayMode( display, i, &mode ) < 0 || mode.w <= 0 || mode.h <= 0 )
+				continue;
+			CL_AppendModeRate( modes, sizeof( modes ), mode.w, mode.h, pass ? mode.refresh_rate : 0 );
+		}
 	}
-	if ( used )
-		modes[ used - 1 ] = '\0';
+	if ( !modes[0] )
+		CL_BuiltinModeList( modes, sizeof( modes ) );
 	Cvar_Set( "r_availableModes", modes );
+	// the menus' "Desktop" entry and borderless size
+	Cvar_Get( "r_desktopMode", "", CVAR_ROM );
+	Cvar_Set( "r_desktopMode", va( "%dx%d", glw_state.desktop_width, glw_state.desktop_height ) );
 }
-
-static SDL_HitTestResult SDL_HitTestFunc( SDL_Window *win, const SDL_Point *area, void *data )
-{
-	if ( Key_GetCatcher() & KEYCATCH_CONSOLE && keys[ K_ALT ].down )
-		return SDL_HITTEST_DRAGGABLE;
-
-	return SDL_HITTEST_NORMAL;
-}
-
 
 /*
 ===============
@@ -251,6 +232,8 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 	int y;
 	Uint32 flags = SDL_WINDOW_SHOWN;
 	qboolean mirror = vulkan && CL_VR_RestartWantsVR();
+	// borderless covers the desktop at its own mode, whatever size is saved
+	qboolean borderless = fullscreen && !mirror && r_fullscreen->integer == 2;
 
 #ifdef USE_VULKAN_API
 	if ( vulkan ) {
@@ -310,6 +293,12 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		return RSERR_INVALID_MODE;
 	}
 
+	if ( borderless ) {
+		config->vidWidth = glw_state.desktop_width;
+		config->vidHeight = glw_state.desktop_height;
+		config->windowAspect = (float)config->vidWidth / config->vidHeight;
+	}
+
 	Com_Printf( " %d %d\n", config->vidWidth, config->vidHeight );
 
 	// Destroy existing state if it exists
@@ -332,7 +321,7 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 
 	if ( fullscreen )
 	{
-		if ( mirror ) {
+		if ( mirror || borderless ) {
 			flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 		} else {
 #ifdef MACOS_X
@@ -341,10 +330,6 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			flags |= SDL_WINDOW_FULLSCREEN;
 #endif
 		}
-	}
-	else if ( r_noborder->integer )
-	{
-		flags |= SDL_WINDOW_BORDERLESS;
 	}
 
 	//flags |= SDL_WINDOW_ALLOW_HIGHDPI;
@@ -496,7 +481,12 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 			SDL_HideWindow( SDL_window );
 		}
 
-		if ( fullscreen && !mirror )
+		if ( borderless )
+		{
+			if ( display >= 0 )
+				config->displayFrequency = desktopMode.refresh_rate;
+		}
+		else if ( fullscreen && !mirror )
 		{
 			SDL_DisplayMode mode;
 
@@ -595,8 +585,8 @@ static int GLW_SetMode( int mode, const char *modeFS, qboolean fullscreen, qbool
 		return RSERR_INVALID_MODE;
 	}
 
-	if ( !fullscreen && r_noborder->integer )
-		SDL_SetWindowHitTest( SDL_window, SDL_HitTestFunc, NULL );
+	if ( fullscreen && !mirror )
+		glw_state.lastFullscreen = r_fullscreen->integer;
 
 #ifdef USE_VULKAN_API
 	if ( vulkan )

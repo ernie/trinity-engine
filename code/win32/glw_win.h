@@ -52,6 +52,7 @@ typedef struct
 	qboolean	gammaSet;
 
 	qboolean	cdsFullscreen;
+	int			lastFullscreen;	// r_fullscreen kind Alt+Enter returns to
 	int			monitorCount;
 
 	FILE		*log_fp;	// TODO: implement?

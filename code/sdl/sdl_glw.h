@@ -47,6 +47,8 @@ typedef struct
 
 	int monitorCount;
 
+	int lastFullscreen;		// r_fullscreen kind Alt+Enter returns to
+
 } glwstate_t;
 
 extern SDL_Window *SDL_window;
