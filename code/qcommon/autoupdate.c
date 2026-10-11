@@ -633,6 +633,8 @@ static void Update_BeginDownload( void )
 		dl->func.easy_setopt( dl->cURL, CURLOPT_VERBOSE, 1 );
 
 	dl->func.easy_setopt( dl->cURL, CURLOPT_URL, releaseAssetURL );
+	if ( Com_DL_CABundle() )
+		dl->func.easy_setopt( dl->cURL, CURLOPT_CAINFO, Com_DL_CABundle() );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_USERAGENT, va( "%s/%s", UPDATE_GITHUB_REPO, Update_GetCurrentVersion() ) );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_WRITEFUNCTION, Update_FileWriteCallback );
 	dl->func.easy_setopt( dl->cURL, CURLOPT_WRITEDATA, NULL );

@@ -174,6 +174,8 @@ static void CL_TrinityLogin_f( void ) {
 	trinityLogin.headers = qcurl_slist_append( NULL, "Content-Type: application/json" );
 
 	qcurl_easy_setopt( trinityLogin.curl, CURLOPT_URL, url );
+	if ( Com_DL_CABundle() )
+		qcurl_easy_setopt( trinityLogin.curl, CURLOPT_CAINFO, Com_DL_CABundle() );
 	qcurl_easy_setopt( trinityLogin.curl, CURLOPT_POSTFIELDS, trinityLogin.postData );
 	qcurl_easy_setopt( trinityLogin.curl, CURLOPT_HTTPHEADER, trinityLogin.headers );
 	qcurl_easy_setopt( trinityLogin.curl, CURLOPT_WRITEFUNCTION, CL_TrinityWriteCallback );
