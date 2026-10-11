@@ -262,6 +262,7 @@ jobs:
     needs: dependency-gate
     name: Release Android APK (Quest, PICO)
     runs-on: ubuntu-latest
+    environment: release
 
     steps:
 
