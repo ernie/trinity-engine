@@ -1148,6 +1148,8 @@ void HandleEvents( void )
 	SDL_Event e;
 	keyNum_t key = 0;
 	static keyNum_t lastKeyDown = 0;
+	// mouse presses passed on since this window last gained or lost focus
+	static unsigned int buttonsDown = 0;
 
 	if ( !SDL_WasInit( SDL_INIT_VIDEO ) )
 			return;
@@ -1274,6 +1276,16 @@ void HandleEvents( void )
 						case SDL_BUTTON_X2:     b = K_MOUSE5;     break;
 						default:                b = K_AUX1 + ( e.button.button - SDL_BUTTON_X2 + 1 ) % 16; break;
 					}
+					if ( e.type == SDL_MOUSEBUTTONDOWN ) {
+						buttonsDown |= 1u << ( e.button.button & 31 );
+					} else if ( !( buttonsDown & ( 1u << ( e.button.button & 31 ) ) ) ) {
+						// SDL kept a button held across a window re-create (a game switch, a full vid_restart)
+						// as still down, so it dropped the next press as no change; the release is a whole click
+						Com_QueueEvent( in_eventTime, SE_KEY, b, qtrue, 0, NULL );
+					}
+					if ( e.type == SDL_MOUSEBUTTONUP ) {
+						buttonsDown &= ~( 1u << ( e.button.button & 31 ) );
+					}
 					Com_QueueEvent( in_eventTime, SE_KEY, b,
 						( e.type == SDL_MOUSEBUTTONDOWN ? qtrue : qfalse ), 0, NULL );
 				}
@@ -1323,8 +1335,8 @@ void HandleEvents( void )
 					case SDL_WINDOWEVENT_RESTORED:
 					case SDL_WINDOWEVENT_MAXIMIZED:		gw_minimized = qfalse; break;
 					// keyboard focus:
-					case SDL_WINDOWEVENT_FOCUS_LOST:	lastKeyDown = 0; Key_ClearStates(); IN_SyncModifiers(); gw_active = qfalse; break;
-					case SDL_WINDOWEVENT_FOCUS_GAINED:	lastKeyDown = 0; Key_ClearStates(); IN_SyncModifiers(); gw_active = qtrue; gw_minimized = qfalse;
+					case SDL_WINDOWEVENT_FOCUS_LOST:	lastKeyDown = 0; buttonsDown = 0; Key_ClearStates(); IN_SyncModifiers(); gw_active = qfalse; break;
+					case SDL_WINDOWEVENT_FOCUS_GAINED:	lastKeyDown = 0; buttonsDown = 0; Key_ClearStates(); IN_SyncModifiers(); gw_active = qtrue; gw_minimized = qfalse;
 														if ( re.SetColorMappings ) {
 															re.SetColorMappings();
 														}
