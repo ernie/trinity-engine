@@ -831,6 +831,49 @@ static void Sys_RemoveDirectoryRecursive( const char *path )
 }
 
 
+#define UPDATE_MOVE_WAIT_MSEC	10000
+
+/*
+==================
+Sys_UpdateMoveFile
+
+The relaunched process starts before the old one has closed its files, and a virus
+scanner can briefly hold a freshly written file, so a move waits for them on the console.
+==================
+*/
+static qboolean Sys_UpdateMoveFile( const char *src, const char *dst, const char *name )
+{
+	int waited;
+	MSG msg;
+
+	for ( waited = 0; ; waited += 100 ) {
+		if ( MoveFile( src, dst ) ) {
+			if ( waited )
+				Sys_ShowConsole( 1, qfalse );
+			return qtrue;
+		}
+		if ( waited >= UPDATE_MOVE_WAIT_MSEC ) {
+			Conbuf_AppendText( va( "Update: %s is still in use (error %lu)\n", name, GetLastError() ) );
+			Sys_ShowConsole( 1, qfalse );
+			return qfalse;
+		}
+		if ( waited == 0 ) {
+			// the early console's close handler sets cvars, which don't exist before Com_Init
+			Sys_ShowConsole( 1, qtrue );
+			Sys_SetStatus( "Applying update..." );
+			Conbuf_AppendText( va( "Update: waiting for %s to be released...\n", name ) );
+		}
+		while ( PeekMessage( &msg, NULL, 0, 0, PM_REMOVE ) ) {
+			if ( msg.message == WM_QUIT )
+				continue;
+			TranslateMessage( &msg );
+			DispatchMessage( &msg );
+		}
+		Sleep( 100 );
+	}
+}
+
+
 /*
 ==================
 Sys_ApplyPendingUpdate
@@ -938,14 +981,11 @@ void Sys_ApplyPendingUpdate( void )
 		FS_CreatePath( dstPath );
 		FS_CreatePath( bakPath );
 
-		// backup current file to .updates/previous/
-		MoveFile( dstPath, bakPath );
-
-		// move staged file into place
-		if ( !MoveFile( srcPath, dstPath ) ) {
+		// backup current file to .updates/previous/, then move the staged file into place
+		if ( ( GetFileAttributes( dstPath ) != INVALID_FILE_ATTRIBUTES && !Sys_UpdateMoveFile( dstPath, bakPath, line ) )
+			|| !Sys_UpdateMoveFile( srcPath, dstPath, line ) ) {
 			int i;
-			fprintf( stderr, "Update: failed to move %s -> %s (error %lu)\n",
-				srcPath, dstPath, GetLastError() );
+			Conbuf_AppendText( "Update: not applied, starting the current version\n" );
 			MoveFile( bakPath, dstPath );
 			for ( i = 0; i < movedCount; i++ ) {
 				DeleteFile( movedDst[i] );
