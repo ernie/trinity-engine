@@ -125,7 +125,7 @@ with `vid_restart`.
 | `vr_mirrorEnabled` | `0` disables mirror content, `1` enables it |
 | `vr_mirrorFullscreen` | `0` windowed, `1` fullscreen |
 | `vr_mirrorWidth`, `vr_mirrorHeight` | Windowed mirror size; defaults 1280 by 720 |
-| `vr_desktopContentType` | `0` left eye, `1` right eye, `2` both |
+| `vr_desktopContentType` | `0` left eye, `1` right eye (default), `2` both |
 | `vr_desktopContentFit` | `0` contain, `1` fill/crop |
 | `vr_desktopMenuStyle` | `0` desktop menu view, `1` VR view |
 | `vr_screenCurvature` | Virtual screen curvature; `0` is flat, `0.5` is the default curve, `1` is the tightest |

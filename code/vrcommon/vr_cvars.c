@@ -97,7 +97,7 @@ void VR_InitCvars( void )
 	vr_currentHudDepth = Cvar_Get( "vr_currentHudDepth", "3", 0 );  // Runtime copy, not archived
 	vr_showConsoleMessages = Cvar_Get( "vr_showConsoleMessages", "1", CVAR_ARCHIVE );
 	vr_desktopContentFit = Cvar_Get( "vr_desktopContentFit", "1", CVAR_ARCHIVE ); // 0 - fit/contain, 1 - fill/crop
-	vr_desktopContentType = Cvar_Get( "vr_desktopContentType", "0", CVAR_ARCHIVE ); // 0 - left eye, 1 - right eye, 2 - both eyes
+	vr_desktopContentType = Cvar_Get( "vr_desktopContentType", "1", CVAR_ARCHIVE ); // 0 - left eye, 1 - right eye (most people are right-eye dominant), 2 - both eyes
 	vr_desktopMenuStyle = Cvar_Get( "vr_desktopMenuStyle", "0", CVAR_ARCHIVE ); // 0 - desktop view, 1 - VR view
 	VR_InitMirrorCvars();
 	vr_virtualScreenMode = Cvar_Get( "vr_virtualScreenMode", "0", CVAR_ARCHIVE ); // 0 - fixed, 1 - follow
