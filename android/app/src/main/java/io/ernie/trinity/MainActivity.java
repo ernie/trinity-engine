@@ -169,7 +169,6 @@ public class MainActivity extends SDLActivity
 		copy_asset(homeDir, "THIRD-PARTY-NOTICES.txt", true);
 
 		copy_asset(homeDir, "commandline.txt", false);
-		copy_asset(homeDir + "/baseq3", "autoexec.cfg", false);
 		// only Trinity's paks: the retail game data is the player's own
 		copy_asset(homeDir + "/baseq3", "pak8t.pk3", true);
 		copy_asset(homeDir + "/baseq3", "zzz-trinity-announcer.pk3", true);
