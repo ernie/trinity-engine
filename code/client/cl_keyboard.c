@@ -542,11 +542,11 @@ static void VKeyboard_ProcessKeyPress( const vkbKey_t *key, int handIndex ) {
 			vkb.repeatKey = NULL;
 			return;
 		case VKB_ENTER:
-			// The console takes further commands; a UI menu is done after Enter
+			// the console takes further commands; a menu reopens the keyboard when Enter lands on another field
 			if ( !( Key_GetCatcher() & KEYCATCH_CONSOLE ) ) {
 				VKeyboard_PlayClickSound();
-				VKeyboard_Tap( K_ENTER );
 				VKeyboard_Hide();
+				VKeyboard_Tap( K_ENTER );
 				return;
 			}
 			break;
@@ -582,10 +582,14 @@ qboolean VKeyboard_PressKey( int keynum ) {
 			VKeyboard_FireAction( 0, VKB_TAB );
 			return qtrue;
 		case K_ENTER:
-			// as with the keyboard's own Enter, the keyboard stays open for more console commands and closes after a menu field
-			VKeyboard_FireAction( 0, VKB_ENTER );
-			if ( !( Key_GetCatcher() & KEYCATCH_CONSOLE ) )
+			// as the keyboard's own Enter
+			if ( Key_GetCatcher() & KEYCATCH_CONSOLE ) {
+				VKeyboard_FireAction( 0, VKB_ENTER );
+			} else {
+				VKeyboard_PlayClickSound();
 				VKeyboard_Hide();
+				VKeyboard_Tap( K_ENTER );
+			}
 			return qtrue;
 		default:
 			return qfalse;
