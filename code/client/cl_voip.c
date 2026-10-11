@@ -38,7 +38,6 @@ cvar_t *cl_voipCapture;
 cvar_t *cl_voipSendTarget;
 cvar_t *cl_voipGainDuringCapture;
 cvar_t *cl_voipCaptureMult;
-cvar_t *cl_voipShowMeter;
 cvar_t *cl_voipVolume;
 cvar_t *cl_voip;
 
@@ -69,11 +68,10 @@ void CL_VoipCvarInit( void )
 	cl_voipCapture = Cvar_Get( "cl_voipCapture", "0", 0 );
 	Cvar_SetDescription( cl_voipCapture, "1 while the VOIP capture device is open and audio is being analyzed. Normally driven by PTT bindings (+voiprecord) or cl_voipUseVAD; safe to set manually for scripted control." );
 	cl_voipSendTarget = Cvar_Get( "cl_voipSendTarget", "spatial", 0 );
-	cl_voipGainDuringCapture = Cvar_Get( "cl_voipGainDuringCapture", "0.2", CVAR_ARCHIVE );
+	cl_voipGainDuringCapture = Cvar_Get( "cl_voipGainDuringCapture", "1", CVAR_ARCHIVE );
 	cl_voipCaptureMult = Cvar_Get( "cl_voipCaptureMult", "2.0", CVAR_ARCHIVE );
 	cl_voipUseVAD = Cvar_Get( "cl_voipUseVAD", "0", CVAR_ARCHIVE );
 	cl_voipVADThreshold = Cvar_Get( "cl_voipVADThreshold", "0.1", CVAR_ARCHIVE );
-	cl_voipShowMeter = Cvar_Get( "cl_voipShowMeter", "1", CVAR_ARCHIVE );
 	cl_voipVolume = Cvar_Get( "cl_voipVolume", "1.0", CVAR_ARCHIVE );
 	Cvar_CheckRange( cl_voipVolume, "0", "2", CV_FLOAT );
 	Cvar_SetDescription( cl_voipVolume, "Sets volume for incoming VOIP audio (0.0 - 2.0, allows boost)." );

@@ -590,7 +590,6 @@ extern cvar_t *cl_voipCapture;
 extern cvar_t *cl_voipSendTarget;
 extern cvar_t *cl_voipGainDuringCapture;
 extern cvar_t *cl_voipCaptureMult;
-extern cvar_t *cl_voipShowMeter;
 extern cvar_t *cl_voipVolume;
 extern cvar_t *cl_voip;
 extern cvar_t *cl_voipLevel;
@@ -665,9 +664,9 @@ int CL_ServerStatus( const char *serverAddress, char *serverStatusString, int ma
 qboolean CL_CheckPaused( void );
 qboolean CL_NoDelay( void );
 
+qboolean CL_GetModeInfo( int *width, int *height, float *windowAspect, int mode, const char *modeFS, int dw, int dh, qboolean fullscreen );
 void CL_BuiltinModeList( char *buf, int size );
 void CL_AppendModeRate( char *modes, size_t size, int w, int h, int hz );
-qboolean CL_GetModeInfo( int *width, int *height, float *windowAspect, int mode, const char *modeFS, int dw, int dh, qboolean fullscreen );
 
 
 //
