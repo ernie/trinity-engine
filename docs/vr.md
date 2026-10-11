@@ -169,7 +169,10 @@ Windows does not, so PCVR follows the eye gaze pose (`XR_EXT_eye_gaze_interactio
 instead. The engine carries that pose through the head's turn since the eye was
 sampled, which keeps the sharp region on a point the eyes hold in the world; with
 the eyes riding along with the head, as when reading the HUD mid-turn, it lands a
-little behind the gaze. `xr_info` reports which source is in use.
+little behind the gaze. `xr_info` reports which source is in use. Through
+SteamVR's Steam Link, the eye gaze pose only reaches PC apps with **Share eye
+tracking data to other apps on this PC** turned on in Steam Link's settings;
+without it Eye-Tracked has no gaze to follow.
 
 ## Moving from Trinity VR
 
