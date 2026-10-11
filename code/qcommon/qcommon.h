@@ -1253,6 +1253,7 @@ void Key_WriteBindings( fileHandle_t f );
 
 void CL_VRBind_InitCommands( void );
 void CL_VRBind_Write( fileHandle_t f );
+void CL_VRBind_GameRestart( void );
 // VR context bindings, registered with the key commands and saved beside them
 
 void S_ClearSoundBuffer( void );

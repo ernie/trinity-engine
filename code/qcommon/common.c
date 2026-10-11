@@ -3157,6 +3157,10 @@ Change to a new mod properly with cleaning up cvars before switching.
 */
 void Com_GameRestart( int checksumFeed, qboolean clientRestart )
 {
+#ifndef DEDICATED
+	char vrMode[MAX_CVAR_VALUE_STRING];
+#endif
+
 	// make sure no recursion can be triggered
 	if ( !com_gameRestarting && com_fullyInitialized )
 	{
@@ -3197,8 +3201,19 @@ void Com_GameRestart( int checksumFeed, qboolean clientRestart )
 
 		FS_Restart( checksumFeed );
 
+#ifndef DEDICATED
+		Q_strncpyz( vrMode, Cvar_VariableString( "vr_enabled" ), sizeof( vrMode ) );
+		CL_VRBind_GameRestart();
+#endif
+
 		// Load new configuration
 		Com_ExecuteCfg();
+
+#ifndef DEDICATED
+		// the switch keeps the display mode it started in, so the new game's saved one can't drop VR at the next restart
+		if ( vrMode[0] )
+			Cvar_Set( "vr_enabled", vrMode );
+#endif
 
 #ifndef DEDICATED
 		if ( clientRestart )

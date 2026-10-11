@@ -6,6 +6,7 @@
 /* Registered before the config executes, so saved vrbind lines parse at startup. */
 void CL_VRBind_InitCommands( void );
 void CL_VRBind_Write( fileHandle_t f );
+void CL_VRBind_GameRestart( void );
 /* A vrLookup_t: plain gameplay reads the ordinary bind table, the other sets their own tables. */
 const char *CL_VRBind_Lookup( vrContext_t context, int alt, vrKey_t key, void *user );
 /* Tracks the active controller type; the first known type applies its defaults when nothing is bound. */

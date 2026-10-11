@@ -243,6 +243,16 @@ void CL_VRBind_Write( fileHandle_t f ) {
 	VRBind_WriteContexts( f );
 }
 
+/* A game's config brings its own VR bindings, or the defaults when it has none; its unbindall clears only the gameplay ones. */
+void CL_VRBind_GameRestart( void ) {
+	int alt, c, k;
+	for ( alt = 0; alt < 2; alt++ )
+		for ( c = 0; c < VRC_COUNT; c++ )
+			for ( k = 0; k < VRK_COUNT; k++ )
+				VRBind_Set( (vrContext_t)c, alt, (vrKey_t)k, NULL );
+	activeProfile = -1;
+}
+
 void CL_VRBind_InitCommands( void ) {
 	Cmd_AddCommand( "vrbind", VRBind_Bind_f );
 	Cmd_AddCommand( "vrunbind", VRBind_Unbind_f );
