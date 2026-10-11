@@ -120,7 +120,12 @@ static void VKXR_UpdateRefresh( void ) {
 	}
 	refreshRequested = wanted;
 	result = VK_XRRefresh_Request( &refresh, wanted );
-	if ( XR_FAILED( result ) ) {
+	if ( result == XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB && refresh.current > 0 ) {
+		// the setting names the rate the headset runs, so the menu never shows one it isn't using
+		ri.Printf( PRINT_ALL, "OpenXR refresh rate %.0f Hz isn't offered; using the headset's %.0f Hz\n", wanted, refresh.current );
+		refreshRequested = refresh.current;
+		ri.Cvar_Set( "vr_refreshrate", va( "%.0f", refresh.current ) );
+	} else if ( XR_FAILED( result ) ) {
 		ri.Printf( PRINT_WARNING, "OpenXR refresh request %.1f Hz unavailable (%d)\n", wanted, (int)result );
 	}
 }
