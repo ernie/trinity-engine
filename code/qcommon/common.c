@@ -46,7 +46,7 @@ const int demo_protocols[] = { 66, 67, OLD_PROTOCOL_VERSION, NEW_PROTOCOL_VERSIO
 #define DEF_COMHUNKMEGS		56
 #else
 #define MIN_COMHUNKMEGS		64
-#define DEF_COMHUNKMEGS		128
+#define DEF_COMHUNKMEGS		512
 #endif
 
 #ifdef USE_MULTI_SEGMENT
@@ -4132,7 +4132,7 @@ void Com_Init( char *commandLine ) {
 #ifndef DEDICATED
 	com_introPlayed = Cvar_Get( "com_introplayed", "0", CVAR_ARCHIVE );
 	Cvar_SetDescription( com_introPlayed, "Skips the introduction cinematic." );
-	com_skipIdLogo  = Cvar_Get( "com_skipIdLogo", "0", CVAR_ARCHIVE );
+	com_skipIdLogo  = Cvar_Get( "com_skipIdLogo", "1", CVAR_ARCHIVE );
 	Cvar_SetDescription( com_skipIdLogo, "Skip playing Id Software logo cinematic at startup." );
 #endif
 
