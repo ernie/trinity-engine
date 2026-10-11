@@ -92,6 +92,7 @@ cvar_t	*r_hdrHighlight;
 cvar_t	*r_hdrSaturation;
 cvar_t	*r_hdrSaturationFull;
 cvar_t	*r_hdrSoftKnee;
+cvar_t	*r_hdrSdrCurve;
 cvar_t	*r_hdrPeak;
 cvar_t	*r_hdrCalibrate;
 cvar_t	*r_hdrActive;
@@ -1803,13 +1804,13 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_bloom_fine, "Adds the half-resolution blur level to the bloom: a tighter glow that also follows texture detail. Default 0 starts at quarter resolution." );
 	ri.Cvar_SetGroup( r_bloom_fine, CVG_RENDERER );
 
-	if ( glConfig.vidWidth )
 	// HDR output is a swapchain choice, so a kept window applies it
 	r_hdrDisplay = ri.Cvar_Get( "r_hdrDisplay", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_hdrDisplay, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription( r_hdrDisplay,
 		"Output true HDR for brighter highlights and more lifelike color. Requires the Vulkan renderer and an HDR-capable display with HDR turned on in your system display settings. Takes effect after a \\vid_restart. (Not the same as r_hdr, which only sets internal rendering precision.)" );
 
+	if ( glConfig.vidWidth )
 		return;
 
 	//
@@ -1887,6 +1888,12 @@ static void R_Register( void )
 	ri.Cvar_SetGroup( r_hdrSoftKnee, CVG_RENDERER );
 	ri.Cvar_SetDescription( r_hdrSoftKnee,
 		"How gradually the HDR highlight treatment (path-to-white plus roll-off) eases in above paper-white. The value is a width in paper-white units: the effect ramps from nothing at 1x to full at (1 + this)x paper-white. 0 = a hard kick at paper-white (a slope discontinuity that reads as a band); 1.0 = full effect by twice paper-white (default)." );
+
+	r_hdrSdrCurve = ri.Cvar_Get( "r_hdrSdrCurve", "1", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_hdrSdrCurve, "0", "1", CV_INTEGER );
+	ri.Cvar_SetGroup( r_hdrSdrCurve, CVG_RENDERER );
+	ri.Cvar_SetDescription( r_hdrSdrCurve,
+		"How HDR output decodes SDR content (the menus, the HUD and the scene below paper white):\n 0: sRGB piecewise, as Windows shows SDR apps in HDR\n 1: gamma 2.2, matching how SDR monitors show the game (default)" );
 
 	r_hdrPeak = ri.Cvar_Get( "r_hdrPeak", "400", CVAR_ARCHIVE_ND );
 	ri.Cvar_CheckRange( r_hdrPeak, "250", "10000", CV_FLOAT );

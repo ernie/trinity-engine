@@ -43,6 +43,7 @@ layout(push_constant) uniform Push {
 	float hdrSaturationFull; // emitter intensity at which the bleed reaches its max
 	float hdrSoftKnee;  // width of the smooth highlight onset above paper-white
 	int bloomActive;    // the blur ran this frame
+	int sdrCurve;       // SDR content decode in HDR: 0 = sRGB piecewise, 1 = gamma 2.2
 } push;
 
 const vec3 sRGB = { 0.2126, 0.7152, 0.0722 };
@@ -52,6 +53,11 @@ vec3 sRGBtoLinear(vec3 c) {
 	vec3 lower = c / 12.92;
 	vec3 higher = pow((c + vec3(0.055)) / vec3(1.055), vec3(2.4));
 	return mix(higher, lower, cutoff);
+}
+
+// SDR displays decode with 2.2; sRGB's linear toe lifts darks and drains saturation
+vec3 sdrToLinear(vec3 c) {
+	return push.sdrCurve == 1 ? pow(max(c, vec3(0.0)), vec3(2.2)) : sRGBtoLinear(c);
 }
 
 // Reconstructs scRGB-linear HDR output from the SDR color buffer and the emissive
@@ -71,8 +77,8 @@ vec3 hdrReconstruct( vec3 base, vec3 emissive, float coverage, bool encoded,
 	float clip = smoothstep( 1.0, 1.1, em )
 	           * smoothstep( 0.990, 1.0, max( max( base.r, base.g ), base.b ) ) * ( 1.0 - coverage );
 	// An encoded base already carries gamma and overbright; the emissive layer never does.
-	vec3 lin = encoded ? sRGBtoLinear( mix( base, max( base, pow( emissive, vec3( gamma ) ) * obScale ), clip ) )
-	                   : sRGBtoLinear( pow( mix( base, max( base, emissive ), clip ), vec3( gamma ) ) * obScale );
+	vec3 lin = encoded ? sdrToLinear( mix( base, max( base, pow( emissive, vec3( gamma ) ) * obScale ), clip ) )
+	                   : sdrToLinear( pow( mix( base, max( base, emissive ), clip ), vec3( gamma ) ) * obScale );
 
 	// Highlights (m>1.0): bleed over-white emitters toward white, then roll the
 	// headroom off toward the panel peak.
@@ -174,7 +180,7 @@ void main() {
 #endif
 	// Screen content already went through gamma/overbright before capture.
 	if (screenSource != 0) {
-		vec3 linear = screenSource == 2 ? base : sRGBtoLinear(base);
+		vec3 linear = screenSource == 2 ? base : ( hdrMode == 1 ? sdrToLinear(base) : sRGBtoLinear(base) );
 		if (hdrMode == 1) out_color = vec4(linear * (push.paperWhite / 80.0), 1.0);
 		else if (linearSDROutput == 1) out_color = vec4(linear, 1.0);
 		else if (screenSource == 2) out_color = vec4(VKXR_SdrEncoded(base.r),VKXR_SdrEncoded(base.g),VKXR_SdrEncoded(base.b),1.0);

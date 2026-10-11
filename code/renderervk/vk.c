@@ -6402,7 +6402,7 @@ void vk_initialize( void )
 
 	vk_set_render_scale();
 
-	vr_desktopContentType = ri.Cvar_Get( "vr_desktopContentType", "0", 0 );
+	vr_desktopContentType = ri.Cvar_Get( "vr_desktopContentType", "1", 0 );
 	vr_desktopContentFit = ri.Cvar_Get( "vr_desktopContentFit", "1", 0 );
 	vr_desktopMenuStyle = ri.Cvar_Get( "vr_desktopMenuStyle", "0", 0 );
 
@@ -6745,7 +6745,7 @@ void vk_initialize( void )
 		VkPushConstantRange pp_push_range;
 		pp_push_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		pp_push_range.offset = 0;
-		pp_push_range.size = 2 * sizeof( int32_t ) + 6 * sizeof( float ); // hdrCalibrate + paperWhite, hdrPeak, hdrHighlight, hdrSaturation, hdrSaturationFull, hdrSoftKnee + bloomActive
+		pp_push_range.size = 3 * sizeof( int32_t ) + 6 * sizeof( float ); // hdrCalibrate + paperWhite, hdrPeak, hdrHighlight, hdrSaturation, hdrSaturationFull, hdrSoftKnee + bloomActive + sdrCurve
 		desc.pushConstantRangeCount = 1;
 		desc.pPushConstantRanges = &pp_push_range;
 
@@ -10996,8 +10996,10 @@ static void vk_post_process_push( VkPipelineLayout layout ) {
 		float paperWhite, hdrPeak, hdrHighlight, hdrSaturation;
 		float hdrSaturationFull, hdrSoftKnee;
 		int32_t bloomActive;
+		int32_t sdrCurve;
 	} push;
 	push.hdrCalibrate = (vk.hdrActive && r_hdrCalibrate->integer) ? 1 : 0;
+	push.sdrCurve = r_hdrSdrCurve->integer;
 	// the blur ran this frame exactly when the post-scene pass opened
 	push.bloomActive = vk.postOpen ? 1 : 0;
 #ifdef __APPLE__

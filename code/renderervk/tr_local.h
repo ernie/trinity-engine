@@ -1400,6 +1400,7 @@ extern cvar_t	*r_hdrHighlight;
 extern cvar_t	*r_hdrSaturation;
 extern cvar_t	*r_hdrSaturationFull;
 extern cvar_t	*r_hdrSoftKnee;
+extern cvar_t	*r_hdrSdrCurve;
 extern cvar_t	*r_hdrPeak;
 extern cvar_t	*r_hdrCalibrate;
 extern cvar_t	*r_hdrActive;
