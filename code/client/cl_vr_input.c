@@ -10,7 +10,6 @@
 static clBHaptics_t suitHaptics;
 static qboolean suitEnabled;
 static cvar_t *vrSensitivity;
-static cvar_t *cgStereoSeparation;
 /* The runtime's FOV, before VRInput_PublishFov decides what the frame sees */
 static float rawFovX = 90, rawFovUp = (float)M_PI / 4, rawFovDown = -(float)M_PI / 4;
 static struct {
@@ -428,7 +427,6 @@ void CL_VRInput_Init( void ) {
 	vr.menuCursorY = vr.offhandCursorY = 240;
 	/* Share the existing mouse/VR UI setting; keep the engine's default. */
 	vrSensitivity = Cvar_Get( "vr_sensitivity", "100", CVAR_ARCHIVE );
-	cgStereoSeparation = Cvar_Get( "cg_stereoSeparation", "0", 0 );
 	/* Usable projection denominators until the runtime supplies its stereo FOV. */
 	vr.weapon_zoomLevel = 1;
 	vr.fov_y = rawFovX = 90;
@@ -586,7 +584,7 @@ static void VRInput_Signals( vrSignals_t *s ) {
 void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	qboolean wheel, priorWheel, menu;
 	vec3_t oldAngles, oldPosition;
-	int i, primary, secondary;
+	int i, primary, secondary, twoHanded;
 	const clXRHandInput_t *weapon, *other;
 	vrSignals_t signals;
 	vrThresholds_t thresholds;
@@ -798,14 +796,13 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	vr.weapon_zoomed = !VRInput_PointerLayer() && vr_weaponScope->integer && vr.weapon_stabilised &&
 					   cl.snap.ps.weapon == WP_RAILGUN && VectorLength( vr.weaponoffset ) < .24f &&
 					   cl.snap.ps.stats[STAT_HEALTH] > 0;
-	if ( !VRInput_PointerLayer() && vr_twoHandedWeapons->integer && vr.weapon_stabilised ) {
+	/* The scope pose is a shouldered rifle, so zoom always aims along the gun stock line. */
+	twoHanded = vr.weapon_zoomed ? 2 : vr_twoHandedWeapons->integer;
+	if ( !VRInput_PointerLayer() && twoHanded && vr.weapon_stabilised ) {
 		vec3_t direction;
-		if ( vr_twoHandedWeapons->integer == 2 ) {
-			float yaw = -vr.hmdorientation[YAW] * (float)M_PI / 180;
-			float separation = cgStereoSeparation->value * .5f;
-			direction[0] = vr.offhandposition[0] - vr.hmdposition[0] - cosf( yaw ) * separation;
-			direction[1] = vr.offhandposition[1] - vr.hmdposition[1] + .1f;
-			direction[2] = vr.offhandposition[2] - vr.hmdposition[2] - sinf( yaw ) * separation;
+		if ( twoHanded == 2 ) {
+			VectorSubtract( vr.offhandposition, vr.hmdposition, direction );
+			direction[1] += .1f;
 		} else
 			for ( i = 0; i < 3; i++ )
 				direction[i] =
@@ -816,7 +813,7 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 				-atan2f( direction[1], sqrtf( direction[0] * direction[0] + direction[2] * direction[2] ) ) *
 				180 / (float)M_PI;
 			vr.weaponangles[YAW] = -atan2f( direction[0], -direction[2] ) * 180 / (float)M_PI;
-			vr.weaponangles[ROLL] = vr_twoHandedWeapons->integer == 2 ? 0 : vr.weaponangles[ROLL] * .5f;
+			vr.weaponangles[ROLL] = twoHanded == 2 ? 0 : vr.weaponangles[ROLL] * .5f;
 		}
 	}
 	if ( VRInput_Cvar( vr_snapturn, 45 ) <= 0 && !VRInput_ModalLayer() && !Key_GetCatcher() && input.previousTime &&

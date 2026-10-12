@@ -74,7 +74,7 @@ void VR_InitCvars( void )
 	// Degrees on top of the fixed VR_GRIP_TO_AIM_PITCH correction; zero is no personal adjustment
 	vr_weaponPitch = Cvar_Get( "vr_weaponPitch", "0", CVAR_ARCHIVE );
 	vr_heightAdjust = Cvar_Get( "vr_heightAdjust", "0.0", CVAR_ARCHIVE );
-	vr_twoHandedWeapons = Cvar_Get( "vr_twoHandedWeapons", "0", CVAR_ARCHIVE );
+	vr_twoHandedWeapons = Cvar_Get( "vr_twoHandedWeapons", "1", CVAR_ARCHIVE );
 	Cvar_Get( "vr_showItemInHand", "1", CVAR_ARCHIVE );
 	vr_refreshrate = Cvar_Get( "vr_refreshrate", "90", CVAR_ARCHIVE );
 	vr_refreshrates = Cvar_Get( "vr_refreshrates", "", CVAR_ROM );	// space-separated rates the runtime supports, for the UI
