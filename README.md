@@ -92,7 +92,7 @@ Toggle it in-game under **Setup → Display → HDR Display** and tune it under
   the in-game calibration slider covers `250`–`2000`.
 - `r_hdrPaperWhite` (default `0`) — nits that normal (SDR) white maps to; `0` = auto from the
   peak.
-- `r_hdrHighlight` (default `1.0`, range `0.5`–`4.0`) — extra emphasis on the brightest
+- `r_hdrHighlightBoost` (default `1.0`, range `0.5`–`2.0`) — extra emphasis on the brightest
   highlights; does not change overall brightness.
 - `r_hdrSaturation` (default `0.0`, range `0`–`1`) — how far the brightest highlights bleed
   toward white (`1` keeps full color, `0` lets them go fully white).

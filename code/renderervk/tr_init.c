@@ -88,7 +88,7 @@ cvar_t	*r_fbo;
 cvar_t	*r_hdr;
 cvar_t	*r_hdrDisplay;
 cvar_t	*r_hdrPaperWhite;
-cvar_t	*r_hdrHighlight;
+cvar_t	*r_hdrHighlightBoost;
 cvar_t	*r_hdrSaturation;
 cvar_t	*r_hdrSaturationFull;
 cvar_t	*r_hdrSoftKnee;
@@ -1865,11 +1865,11 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_hdrPaperWhite,
 		"How bright normal white looks in HDR, in nits (the brightness of menus, the HUD, and fully-lit surfaces). 0 = auto (recommended): picks a comfortable level from your display's peak brightness (r_hdrPeak). Or set a number yourself. Higher is brighter, lower is dimmer." );
 
-	r_hdrHighlight = ri.Cvar_Get( "r_hdrHighlight", "1.0", CVAR_ARCHIVE_ND );
-	ri.Cvar_CheckRange( r_hdrHighlight, "0.5", "4.0", CV_FLOAT );
-	ri.Cvar_SetGroup( r_hdrHighlight, CVG_RENDERER );
-	ri.Cvar_SetDescription( r_hdrHighlight,
-		"How much extra pop the brightest true highlights get in HDR (lights, explosions, plasma, sky). 1 = natural. Raise for punchier highlights, lower for a calmer look. Does not change overall brightness." );
+	r_hdrHighlightBoost = ri.Cvar_Get( "r_hdrHighlightBoost", "1.0", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_hdrHighlightBoost, "0.5", "2.0", CV_FLOAT );
+	ri.Cvar_SetGroup( r_hdrHighlightBoost, CVG_RENDERER );
+	ri.Cvar_SetDescription( r_hdrHighlightBoost,
+		"How bright the brightest highlights get in HDR (lights, explosions, plasma, sky). 1 = natural. Raise for punchier highlights, lower for a calmer look. Higher values flatten detail near the display's peak. Does not change overall brightness." );
 
 	r_hdrSaturation = ri.Cvar_Get( "r_hdrSaturation", "0.0", CVAR_ARCHIVE_ND );
 	ri.Cvar_CheckRange( r_hdrSaturation, "0.0", "1.0", CV_FLOAT );
@@ -1915,6 +1915,7 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_hdrStatus,
 		"Read-only HDR output state of the outputs being shown (the window, or in VR the headset and the desktop mirror when it is on):\n"
 		" active: HDR output is live\n"
+		" edr: HDR output is live and macOS supplies the peak and paper white\n"
 		" available: HDR can be turned on with \\r_hdrDisplay\n"
 		" nofbo: HDR needs \\r_fbo 1\n"
 		" ossetting: the display can show HDR but its HDR switch is off in the system display settings\n"

@@ -1396,7 +1396,7 @@ extern cvar_t	*r_fbo;
 extern cvar_t	*r_hdr;
 extern cvar_t	*r_hdrDisplay;
 extern cvar_t	*r_hdrPaperWhite;
-extern cvar_t	*r_hdrHighlight;
+extern cvar_t	*r_hdrHighlightBoost;
 extern cvar_t	*r_hdrSaturation;
 extern cvar_t	*r_hdrSaturationFull;
 extern cvar_t	*r_hdrSoftKnee;

@@ -12,9 +12,9 @@ with HDR turned on in the OS.
 | `r_hdrDisplay` | `0` | 0-1 | Master on/off. Latched; needs `vid_restart`. |
 | `r_hdrPeak` | `1000` | 250-10000 | Display peak brightness in nits. The setting to match to your panel. |
 | `r_hdrPaperWhite` | `0` | 0-1000 | Nits that "SDR white" maps to. `0` = auto (derived from peak). |
-| `r_hdrHighlight` | `1.0` | 0.5-4.0 | Extra push for the brightest true highlights. `1` = natural. |
+| `r_hdrHighlightBoost` | `1.0` | 0.5-2.0 | Extra push for the brightest true highlights. `1` = natural. |
 
-`r_hdrPeak`, `r_hdrPaperWhite`, and `r_hdrHighlight` apply live (no restart).
+`r_hdrPeak`, `r_hdrPaperWhite`, and `r_hdrHighlightBoost` apply live (no restart).
 
 ## How it works
 
@@ -105,7 +105,7 @@ tracked but not built until the edge case is confirmed in testing.
   "DisplayHDR 400/600" badge (those are lower).
 - Leave `r_hdrPaperWhite` on auto; raise it only if the image feels dim in a
   bright room.
-- Tune `r_hdrHighlight` to taste while watching the scene.
+- Tune `r_hdrHighlightBoost` to taste while watching the scene.
 
 Keep `r_hdrPeak` matched to the real display peak. Setting it higher makes the
 rolloff cap above what the panel can show, so the OS compresses on top of our

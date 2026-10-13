@@ -2392,7 +2392,11 @@ static void vk_update_hdr_status( void )
 	const char *status;
 
 	if ( vk.hdrActive ) {
+#ifdef __APPLE__
+		status = "edr";
+#else
 		status = "active";
+#endif
 	} else if ( !xrCapable && !desktopCapable ) {
 		status = "unsupported";
 	} else if ( !r_fbo->integer ) {
@@ -11015,7 +11019,7 @@ static void vk_post_process_push( VkPipelineLayout layout ) {
 	push.paperWhite = vk_hdr_paper_white();
 	push.hdrPeak = r_hdrPeak->value;
 #endif
-	push.hdrHighlight = r_hdrHighlight->value;
+	push.hdrHighlight = r_hdrHighlightBoost->value;
 	push.hdrSaturation = r_hdrSaturation->value;
 	push.hdrSaturationFull = r_hdrSaturationFull->value;
 	push.hdrSoftKnee = r_hdrSoftKnee->value;
