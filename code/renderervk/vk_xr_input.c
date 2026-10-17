@@ -15,7 +15,7 @@ static inline const char *CL_XRProfileName( int profile ) {
 	return profile >= 0 && profile < CL_XRP_COUNT ? names[profile] : NULL;
 }
 static inline float CL_XRProfilePitch( int profile ) {
-	static const float pitch[CL_XRP_COUNT] = {[CL_XRP_TOUCH] = -30, [CL_XRP_PICO4] = -46, [CL_XRP_PICO4S] = -46,
+	static const float pitch[CL_XRP_COUNT] = {[CL_XRP_TOUCH] = -30, [CL_XRP_PICO4] = -42, [CL_XRP_PICO4S] = -42,
 											  [CL_XRP_INDEX] = -20, [CL_XRP_SIMPLE] = 0, [CL_XRP_FRAME] = -27.2f};
 	return profile >= 0 && profile < CL_XRP_COUNT ? pitch[profile] : 0;
 }
