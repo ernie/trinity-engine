@@ -71,7 +71,7 @@ void VR_InitCvars( void )
 	vr_switchThumbsticks = Cvar_Get( "vr_switchThumbsticks", "0", CVAR_ARCHIVE );
 	vr_snapturn = Cvar_Get( "vr_snapturn", "0", CVAR_ARCHIVE );
 	vr_directionMode = Cvar_Get( "vr_directionMode", "1", CVAR_ARCHIVE ); // 0 = HMD, 1 = Off-hand
-	// Degrees on top of the fixed VR_GRIP_TO_AIM_PITCH correction; zero is no personal adjustment
+	// Degrees on top of the controller's pitch correction; zero is no personal adjustment
 	vr_weaponPitch = Cvar_Get( "vr_weaponPitch", "0", CVAR_ARCHIVE );
 	vr_heightAdjust = Cvar_Get( "vr_heightAdjust", "0.0", CVAR_ARCHIVE );
 	vr_twoHandedWeapons = Cvar_Get( "vr_twoHandedWeapons", "1", CVAR_ARCHIVE );

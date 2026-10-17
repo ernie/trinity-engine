@@ -11,7 +11,7 @@ typedef struct {
 } clXRPose_t;
 typedef struct {
 	float trigger, squeeze, stick[2], trackpad;
-	float pitchCorrection; /* degrees the active controller's grip pose needs on top of vr_weaponPitch */
+	float pitchCorrection; /* degrees the active controller's aim pose needs on top of vr_weaponPitch */
 	unsigned buttons;
 	int active;
 	int profile; /* CL_XRP_* the runtime reports for this hand, -1 until known */

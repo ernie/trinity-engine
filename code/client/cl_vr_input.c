@@ -53,11 +53,11 @@ static float VRInput_Cvar( const cvar_t *cv, float fallback ) {
 	return cv && VR_FloatFinite( cv->value ) ? cv->value : fallback;
 }
 
-static void CL_VRInput_QuaternionAngles( const float quaternion[4], float gripPitch, vec3_t angles ) {
+static void CL_VRInput_QuaternionAngles( const float quaternion[4], float pitch, vec3_t angles ) {
 	float q[4], length, x, y, z, w, s, c;
 	float forward[3], rightZ, upZ;
 	int i;
-	if ( !VR_FloatsFinite( quaternion, 4 ) || !VR_FloatFinite( gripPitch ) ) {
+	if ( !VR_FloatsFinite( quaternion, 4 ) || !VR_FloatFinite( pitch ) ) {
 		VectorClear( angles );
 		return;
 	}
@@ -69,9 +69,8 @@ static void CL_VRInput_QuaternionAngles( const float quaternion[4], float gripPi
 	}
 	for ( i = 0; i < 4; i++ )
 		q[i] = quaternion[i] / length;
-	/* Postmultiply a local X rotation for the grip-to-aim correction. */
-	s = sinf( gripPitch * (float)M_PI / 360 );
-	c = cosf( gripPitch * (float)M_PI / 360 );
+	s = sinf( pitch * (float)M_PI / 360 );
+	c = cosf( pitch * (float)M_PI / 360 );
 	x = q[0] * c + q[3] * s;
 	y = q[1] * c + q[2] * s;
 	z = q[2] * c - q[1] * s;
@@ -641,20 +640,20 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	rawFovX = (vr.fov_angle_right - vr.fov_angle_left) * 180 / (float)M_PI;
 	VRInput_PublishFov();
 	vr.fov_y = (rawFovUp - rawFovDown) * 180 / (float)M_PI;
-	if ( weapon->grip.positionValid && weapon->grip.orientationValid ) {
+	if ( weapon->aim.positionValid && weapon->aim.orientationValid ) {
 		VectorCopy( vr.weaponoffset_last[1], vr.weaponoffset_last[0] );
 		VectorCopy( vr.weaponoffset, vr.weaponoffset_last[1] );
-		VectorCopy( weapon->grip.position, vr.weaponposition );
+		VectorCopy( weapon->aim.position, vr.weaponposition );
 		vr.weaponposition[1] += VRInput_Cvar( vr_heightAdjust, 0 );
 		VectorSubtract( vr.weaponposition, vr.hmdposition, vr.weaponoffset );
-		CL_VRInput_QuaternionAngles( weapon->grip.orientation, -90 + weapon->pitchCorrection + VRInput_Cvar( vr_weaponPitch, 0 ),
+		CL_VRInput_QuaternionAngles( weapon->aim.orientation, weapon->pitchCorrection + VRInput_Cvar( vr_weaponPitch, 0 ),
 									vr.weaponangles );
 	}
-	if ( other->grip.positionValid && other->grip.orientationValid ) {
-		VectorCopy( other->grip.position, vr.offhandposition );
+	if ( other->aim.positionValid && other->aim.orientationValid ) {
+		VectorCopy( other->aim.position, vr.offhandposition );
 		vr.offhandposition[1] += VRInput_Cvar( vr_heightAdjust, 0 );
 		VectorSubtract( vr.offhandposition, vr.hmdposition, vr.offhandoffset );
-		CL_VRInput_QuaternionAngles( other->grip.orientation, -90 + other->pitchCorrection + VRInput_Cvar( vr_weaponPitch, 0 ),
+		CL_VRInput_QuaternionAngles( other->aim.orientation, other->pitchCorrection + VRInput_Cvar( vr_weaponPitch, 0 ),
 									vr.offhandangles );
 	}
 	if ( weapon->aim.orientationValid )
@@ -788,7 +787,7 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	if ( priorWheel && !wheel && !menu )
 		Cbuf_AddText( "weapon_select\n" );
 	vr.weapon_stabilised = qfalse;
-	if ( stabiliseHeld > 0 && weapon->grip.positionValid && other->grip.positionValid ) {
+	if ( stabiliseHeld > 0 && weapon->aim.positionValid && other->aim.positionValid ) {
 		vec3_t distance;
 		VectorSubtract( vr.weaponposition, vr.offhandposition, distance );
 		vr.weapon_stabilised = VectorLength( distance ) < .4f;
@@ -906,7 +905,7 @@ qboolean CL_VRInput_ApplyMove( usercmd_t *cmd ) {
 		cmd->upmove = (signed char)Com_Clamp( -127, 127, cmd->upmove - original * sinf( pitch ) );
 	}
 	cmd->buttons |= keys.buttons & 0xFFF & ~BUTTON_TALK; // bits 12-25 carry the head pose
-	if ( !input.sample.hands[primary].aim.orientationValid || !input.sample.hands[primary].grip.positionValid )
+	if ( !input.sample.hands[primary].aim.orientationValid || !input.sample.hands[primary].aim.positionValid )
 		cmd->buttons &= ~BUTTON_ATTACK;
 	if ( vr_analogWalk->integer ) {
 		int speed = abs( cmd->rightmove ) > abs( cmd->forwardmove ) ? abs( cmd->rightmove ) : abs( cmd->forwardmove );

@@ -14,10 +14,9 @@ static inline const char *CL_XRProfileName( int profile ) {
 											  [CL_XRP_SIMPLE] = "Simple",	   [CL_XRP_FRAME] = "Steam Frame"};
 	return profile >= 0 && profile < CL_XRP_COUNT ? names[profile] : NULL;
 }
-/* Grip poses follow each handle's angle; measured on the headset, 0 until a controller needs one. */
 static inline float CL_XRProfilePitch( int profile ) {
-	static const float pitch[CL_XRP_COUNT] = {[CL_XRP_TOUCH] = 0, [CL_XRP_PICO4] = 0,	[CL_XRP_PICO4S] = 0,
-											  [CL_XRP_INDEX] = 0, [CL_XRP_SIMPLE] = 0, [CL_XRP_FRAME] = 20};
+	static const float pitch[CL_XRP_COUNT] = {[CL_XRP_TOUCH] = -30, [CL_XRP_PICO4] = -46, [CL_XRP_PICO4S] = -46,
+											  [CL_XRP_INDEX] = -20, [CL_XRP_SIMPLE] = 0, [CL_XRP_FRAME] = -27.2f};
 	return profile >= 0 && profile < CL_XRP_COUNT ? pitch[profile] : 0;
 }
 static inline const char *CL_XRProfileComponent( int profile, const char *action, int hand ) {
