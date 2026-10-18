@@ -34,21 +34,14 @@ mirror controls, and migration from Trinity VR.
 
 ### VR network support
 
-The engine also supports crossplay between flatscreen and VR clients:
-
-**Server engine**: Advertises `vr_support=1` in serverinfo and reads each
-client's `vr` userinfo key. A client that reports VR sends 32-bit buttons and VR
-head orientation data; the rest send the standard 16-bit fields. The server
-selects the field width per packet from that key.
-
-**Client engine**: Reports its display mode through the `vr` userinfo key and
-widens commands only on servers that advertise `vr_support`. Switching display
-mode keeps the connection.
-
-The engine handles OpenXR tracking, input, and stereo rendering together with the
-[Trinity](https://github.com/ernie/trinity) game mod's VR-aware game interfaces. See
-[VR_PROTOCOL.md](https://github.com/ernie/trinity/blob/main/docs/VR_PROTOCOL.md) for the
-full protocol specification.
+Flatscreen and VR clients play together, and switching display mode keeps the
+connection. On a server running this engine and a VR-aware mod such as
+[Trinity](https://github.com/ernie/trinity), everyone sees VR players' head
+movement. The
+[VR protocol](https://github.com/ernie/quake3-vr-mod-template/blob/v1.0/docs/VR_PROTOCOL.md)
+describes the wire format, and the
+[VR mod template](https://github.com/ernie/quake3-vr-mod-template) shows how
+to add VR support to a mod.
 
 ### Improved Stencil Shadows
 
@@ -190,6 +183,8 @@ xattr -cr Trinity.app
 ## The Trinity Ecosystem
 
 **[Trinity](https://github.com/ernie/trinity)**: A unified Quake III Arena / Team Arena game mod featuring unlagged weapons, VR head and torso tracking, an orbital follow camera for spectating and demo playback, Quake Live-style damage indicators, and visual enhancements. It provides the VR-aware game modules and server-side support for crossplay between this engine's VR mode, Trinity Standalone and flatscreen players.
+
+**[VR mod template](https://github.com/ernie/quake3-vr-mod-template)**: The stock ioquake3 mod source with the Trinity VR API added one step per commit, plus the integration guide and the VR protocol.
 
 **[Trinity Engine](https://github.com/ernie/trinity-engine)**: This project. Unified flatscreen and OpenXR VR client, dedicated server, and TrinityVision player, forked from Quake3e. Loads game modules at runtime; VR uses compatible cgame/UI QVMs or the packaged native fallback where permitted.
 
