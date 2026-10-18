@@ -4596,165 +4596,6 @@ void vk_update_post_process_pipelines( void )
 }
 
 
-typedef struct vk_attach_desc_s  {
-	VkImage descriptor;
-	VkImageView *image_view;
-	VkImageUsageFlags usage;
-	VkMemoryRequirements reqs;
-	uint32_t memoryTypeIndex;
-	VkDeviceSize  memory_offset;
-	// for layout transition:
-	VkImageAspectFlags aspect_flags;
-	VkImageLayout image_layout;
-	VkFormat image_format;
-	uint32_t layers;
-} vk_attach_desc_t;
-
-static vk_attach_desc_t attachments[ MAX_ATTACHMENTS_IN_POOL ];
-static uint32_t num_attachments = 0;
-
-
-static void vk_clear_attachment_pool( void )
-{
-	num_attachments = 0;
-}
-
-
-static void vk_alloc_attachments( void )
-{
-	VkImageViewCreateInfo view_desc;
-	VkMemoryDedicatedAllocateInfoKHR alloc_info2;
-	VkMemoryAllocateInfo alloc_info;
-	VkCommandBuffer command_buffer;
-	VkDeviceMemory memory;
-	VkDeviceSize offset;
-	uint32_t memoryTypeBits;
-	uint32_t memoryTypeIndex;
-	uint32_t i;
-
-	if ( num_attachments == 0 ) {
-		return;
-	}
-
-	if ( vk.image_memory_count >= ARRAY_LEN( vk.image_memory ) ) {
-		ri.Error( ERR_DROP, "vk.image_memory_count == %i", (int)ARRAY_LEN( vk.image_memory ) );
-	}
-
-	memoryTypeBits = ~0U;
-	offset = 0;
-
-	for ( i = 0; i < num_attachments; i++ ) {
-#ifdef MIN_IMAGE_ALIGN
-		VkDeviceSize alignment = MAX( attachments[ i ].reqs.alignment, MIN_IMAGE_ALIGN );
-#else
-		VkDeviceSize alignment = attachments[ i ].reqs.alignment;
-#endif
-		memoryTypeBits &= attachments[ i ].reqs.memoryTypeBits;
-		offset = PAD( offset, alignment );
-		attachments[ i ].memory_offset = offset;
-		offset += attachments[ i ].reqs.size;
-#ifdef _DEBUG
-		ri.Printf( PRINT_ALL, S_COLOR_CYAN "[%i] type %i, size %i, align %i\n", i,
-			attachments[ i ].reqs.memoryTypeBits,
-			(int)attachments[ i ].reqs.size,
-			(int)attachments[ i ].reqs.alignment );
-#endif
-	}
-
-	if ( num_attachments == 1 && attachments[ 0 ].usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT ) {
-		// try lazy memory
-		memoryTypeIndex = find_memory_type2( memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT, NULL );
-		if ( memoryTypeIndex == ~0U ) {
-			memoryTypeIndex = find_memory_type( memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-		}
-	} else {
-		memoryTypeIndex = find_memory_type( memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	}
-
-#ifdef _DEBUG
-	ri.Printf( PRINT_ALL, "memory type bits: %04x\n", memoryTypeBits );
-	ri.Printf( PRINT_ALL, "memory type index: %04x\n", memoryTypeIndex );
-	ri.Printf( PRINT_ALL, "total size: %i\n", (int)offset );
-#endif
-
-	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc_info.pNext = NULL;
-	alloc_info.allocationSize = offset;
-	alloc_info.memoryTypeIndex = memoryTypeIndex;
-
-	if ( num_attachments == 1 ) {
-		if ( vk.dedicatedAllocation ) {
-			Com_Memset( &alloc_info2, 0, sizeof( alloc_info2 ) );
-			alloc_info2.sType =  VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR;
-			alloc_info2.image = attachments[ 0 ].descriptor;
-			alloc_info.pNext = &alloc_info2;
-		}
-	}
-
-	// allocate and bind memory
-	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &memory ) );
-
-	vk.image_memory[ vk.image_memory_count++ ] = memory;
-
-	for ( i = 0; i < num_attachments; i++ ) {
-
-		VK_CHECK( qvkBindImageMemory( vk.device, attachments[i].descriptor, memory, attachments[i].memory_offset ) );
-
-		// create color image view
-		view_desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		view_desc.pNext = NULL;
-		view_desc.flags = 0;
-		view_desc.image = attachments[ i ].descriptor;
-		view_desc.viewType = attachments[i].layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
-		view_desc.format = attachments[ i ].image_format;
-		view_desc.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view_desc.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view_desc.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view_desc.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-		view_desc.subresourceRange.aspectMask = attachments[ i ].aspect_flags;
-		view_desc.subresourceRange.baseMipLevel = 0;
-		view_desc.subresourceRange.levelCount = 1;
-		view_desc.subresourceRange.baseArrayLayer = 0;
-		view_desc.subresourceRange.layerCount = attachments[i].layers;
-
-		VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, attachments[ i ].image_view ) );
-	}
-
-	// perform layout transition
-	command_buffer = begin_command_buffer();
-	for ( i = 0; i < num_attachments; i++ ) {
-		record_image_layout_transition( command_buffer,
-			attachments[i].descriptor,
-			attachments[i].aspect_flags,
-			VK_IMAGE_LAYOUT_UNDEFINED, // old_layout
-			attachments[i].image_layout,
-			0, 0 );
-	}
-	end_command_buffer( command_buffer, __func__ );
-
-	num_attachments = 0;
-}
-
-static void vk_add_attachment_desc( VkImage desc, VkImageView *image_view, VkImageUsageFlags usage,
-									VkMemoryRequirements *reqs, VkFormat image_format,
-									VkImageAspectFlags aspect_flags, VkImageLayout image_layout,
-									uint32_t layers ) {
-	if ( num_attachments >= ARRAY_LEN( attachments ) ) {
-		ri.Error( ERR_FATAL, "Attachments array overflow" );
-	} else {
-		attachments[ num_attachments ].descriptor = desc;
-		attachments[ num_attachments ].image_view = image_view;
-		attachments[ num_attachments ].usage = usage;
-		attachments[ num_attachments ].reqs = *reqs;
-		attachments[ num_attachments ].aspect_flags = aspect_flags;
-		attachments[ num_attachments ].image_layout = image_layout;
-		attachments[ num_attachments ].image_format = image_format;
-		attachments[num_attachments].layers = layers;
-		attachments[ num_attachments ].memory_offset = 0;
-		num_attachments++;
-	}
-}
-
 static void vk_get_image_memory_erquirements( VkImage image, VkMemoryRequirements *memory_requirements )
 {
 	if ( vk.dedicatedAllocation ) {
@@ -4781,6 +4622,72 @@ static void vk_get_image_memory_erquirements( VkImage image, VkMemoryRequirement
 	}
 }
 
+// NVIDIA corrupts attachments bound more than 4 GiB into a shared allocation, so each gets its own
+static void vk_alloc_attachment( VkImage image, VkImageView *image_view, VkImageUsageFlags usage,
+								 VkFormat image_format, VkImageAspectFlags aspect_flags,
+								 VkImageLayout image_layout, uint32_t layers ) {
+	VkImageViewCreateInfo view_desc;
+	VkMemoryDedicatedAllocateInfoKHR alloc_info2;
+	VkMemoryAllocateInfo alloc_info;
+	VkMemoryRequirements reqs;
+	VkCommandBuffer command_buffer;
+	VkDeviceMemory memory;
+	uint32_t memoryTypeIndex = ~0U;
+
+	if ( vk.image_memory_count >= ARRAY_LEN( vk.image_memory ) ) {
+		ri.Error( ERR_DROP, "vk.image_memory_count == %i", (int)ARRAY_LEN( vk.image_memory ) );
+	}
+
+	vk_get_image_memory_erquirements( image, &reqs );
+
+	if ( usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT ) {
+		memoryTypeIndex = find_memory_type2( reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT, NULL );
+	}
+	if ( memoryTypeIndex == ~0U ) {
+		memoryTypeIndex = find_memory_type( reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+	}
+
+	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	alloc_info.pNext = NULL;
+	alloc_info.allocationSize = reqs.size;
+	alloc_info.memoryTypeIndex = memoryTypeIndex;
+
+	if ( vk.dedicatedAllocation ) {
+		Com_Memset( &alloc_info2, 0, sizeof( alloc_info2 ) );
+		alloc_info2.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR;
+		alloc_info2.image = image;
+		alloc_info.pNext = &alloc_info2;
+	}
+
+	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &memory ) );
+
+	vk.image_memory[ vk.image_memory_count++ ] = memory;
+
+	VK_CHECK( qvkBindImageMemory( vk.device, image, memory, 0 ) );
+
+	view_desc.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	view_desc.pNext = NULL;
+	view_desc.flags = 0;
+	view_desc.image = image;
+	view_desc.viewType = layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+	view_desc.format = image_format;
+	view_desc.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+	view_desc.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+	view_desc.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+	view_desc.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+	view_desc.subresourceRange.aspectMask = aspect_flags;
+	view_desc.subresourceRange.baseMipLevel = 0;
+	view_desc.subresourceRange.levelCount = 1;
+	view_desc.subresourceRange.baseArrayLayer = 0;
+	view_desc.subresourceRange.layerCount = layers;
+
+	VK_CHECK( qvkCreateImageView( vk.device, &view_desc, NULL, image_view ) );
+
+	command_buffer = begin_command_buffer();
+	record_image_layout_transition( command_buffer, image, aspect_flags, VK_IMAGE_LAYOUT_UNDEFINED, image_layout, 0, 0 );
+	end_command_buffer( command_buffer, __func__ );
+}
+
 static void create_color_attachment_flags( VkImageCreateFlags flags, uint32_t width, uint32_t height,
 										   VkSampleCountFlagBits samples, VkFormat format, VkImageUsageFlags usage,
 										   VkImage *image, VkImageView *image_view, VkImageLayout image_layout,
@@ -4788,7 +4695,6 @@ static void create_color_attachment_flags( VkImageCreateFlags flags, uint32_t wi
 	VkImageCreateInfo create_desc;
 	VkImageFormatListCreateInfoKHR list = {VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO_KHR};
 	VkFormat formats[2];
-	VkMemoryRequirements memory_requirements;
 
 	if ( multisample && !( usage & VK_IMAGE_USAGE_SAMPLED_BIT ) )
 		usage |= VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
@@ -4821,10 +4727,7 @@ static void create_color_attachment_flags( VkImageCreateFlags flags, uint32_t wi
 	create_desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	VK_CHECK( qvkCreateImage( vk.device, &create_desc, NULL, image ) );
 
-	vk_get_image_memory_erquirements( *image, &memory_requirements );
-
-	vk_add_attachment_desc( *image, image_view, usage, &memory_requirements, format,
-							VK_IMAGE_ASPECT_COLOR_BIT, image_layout, layers );
+	vk_alloc_attachment( *image, image_view, usage, format, VK_IMAGE_ASPECT_COLOR_BIT, image_layout, layers );
 }
 
 static void create_color_attachment( uint32_t width, uint32_t height, VkSampleCountFlagBits samples,
@@ -4839,7 +4742,6 @@ static void create_depth_attachment( VkImageCreateFlags flags, uint32_t width, u
 									 VkSampleCountFlagBits samples, VkImage *image, VkImageView *image_view,
 									 qboolean allowTransient, uint32_t layers ) {
 	VkImageCreateInfo create_desc;
-	VkMemoryRequirements memory_requirements;
 	VkImageAspectFlags image_aspect_flags;
 
 	// create depth image
@@ -4870,24 +4772,14 @@ static void create_depth_attachment( VkImageCreateFlags flags, uint32_t width, u
 
 	VK_CHECK( qvkCreateImage( vk.device, &create_desc, NULL, image ) );
 
-	vk_get_image_memory_erquirements( *image, &memory_requirements );
-
-	vk_add_attachment_desc( *image, image_view, create_desc.usage, &memory_requirements, vk.depth_format,
-							image_aspect_flags, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, layers );
+	vk_alloc_attachment( *image, image_view, create_desc.usage, vk.depth_format, image_aspect_flags,
+						 VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, layers );
 }
 
 static void vk_create_attachments( void )
 {
 	uint32_t i;
 
-	vk_clear_attachment_pool();
-
-	// It looks like resulting performance depends from order you're creating/allocating
-	// memory for attachments in vulkan i.e. similar images grouped together will provide best results
-	// so [resolve0][resolve1][msaa0][msaa1][depth0][depth1] is most optimal
-	// while cases like [resolve0][depth0][color0][...] is the worst
-
-	// TODO: preallocate first image chunk in attachment' memory pool?
 	if ( vk.fboActive ) {
 
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -5002,13 +4894,9 @@ static void vk_create_attachments( void )
 								 &vk.post_depth_view, qtrue, 2 );
 	}
 
-	//vk_alloc_attachments();
-
 	create_depth_attachment( vk_fdm_attachment_flags(), vk.sceneWidth, vk.sceneHeight, vkSamples, &vk.depth_image,
 							 &vk.depth_image_view,
 							 qtrue, (vk.multiview ? 2 : 1) );
-
-	vk_alloc_attachments();
 
 	if ( vk.xr_output.image ) {
 		VkImageViewCreateInfo view;

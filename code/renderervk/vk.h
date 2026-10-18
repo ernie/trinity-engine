@@ -33,7 +33,6 @@
 #ifndef _DEBUG
 #define USE_DEDICATED_ALLOCATION
 #endif
-//#define MIN_IMAGE_ALIGN (128*1024)
 #define MAX_ATTACHMENTS_IN_POOL \
 	(11 + VK_NUM_BLOOM_PASSES * 2) // scene/capture attachments + XR SDR output + blur pairs
 
