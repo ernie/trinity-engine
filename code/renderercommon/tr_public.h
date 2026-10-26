@@ -148,7 +148,8 @@ typedef struct {
 	void (*XRSetVirtualScreen)( qboolean enabled, qboolean menuYawLocked, refXRFrame_t *frame );
 	// a hand's menu pointer: ray in tracking space and cursor (0..1) on the screen; NULL origin hides it
 	void (*XRSetPointer)( int hand, const float *origin, const float *end, const float *cursor, qboolean blue );
-	void (*XRSetZoom)( qboolean zoomed, float *level );
+	// aim: the scope's pitch, yaw and roll in tracking space, in degrees
+	void (*XRSetZoom)( qboolean zoomed, const float *aim, float *level );
 	void (*SceneComplete)( void );
 	void (*HUDBufferStart)( qboolean clear );
 	void (*HUDBufferEnd)( void );

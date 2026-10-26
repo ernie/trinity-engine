@@ -11,7 +11,7 @@ static clBHaptics_t suitHaptics;
 static qboolean suitEnabled;
 static cvar_t *vrSensitivity;
 /* The runtime's FOV, before VRInput_PublishFov decides what the frame sees */
-static float rawFovX = 90, rawFovUp = (float)M_PI / 4, rawFovDown = -(float)M_PI / 4;
+static float rawFovX = 90;
 static struct {
 	clXRInputSample_t sample;
 	qboolean valid, tracked;
@@ -35,12 +35,8 @@ static void VRInput_PublishFov( void ) {
 		else if ( fovX > 160 )
 			fovX = 160;
 		vr.fov_x = fovX;
-		vr.fov_angle_up = (rawFovUp - rawFovDown) * .5f;
-		vr.fov_angle_down = -vr.fov_angle_up;
 	} else {
 		vr.fov_x = rawFovX;
-		vr.fov_angle_up = rawFovUp;
-		vr.fov_angle_down = rawFovDown;
 	}
 }
 
@@ -429,11 +425,7 @@ void CL_VRInput_Init( void ) {
 	/* Usable projection denominators until the runtime supplies its stereo FOV. */
 	vr.weapon_zoomLevel = 1;
 	vr.fov_y = rawFovX = 90;
-	vr.fov_angle_left = rawFovDown = -(float)M_PI / 4;
-	vr.fov_angle_right = rawFovUp = (float)M_PI / 4;
 	VRInput_PublishFov();
-	vr.eye_fov_angle_left[0] = vr.eye_fov_angle_left[1] = vr.fov_angle_left;
-	vr.eye_fov_angle_right[0] = vr.eye_fov_angle_right[1] = vr.fov_angle_right;
 }
 
 void CL_VRInput_HapticEvent( const char *event, int position, int flags, int intensity, float angle,
@@ -629,17 +621,9 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	secondary = 1 - primary;
 	weapon = &frame->input.hands[primary];
 	other = &frame->input.hands[secondary];
-	for ( i = 0; i < 2; i++ ) {
-		vr.eye_fov_angle_left[i] = frame->eyes[i].fov[0];
-		vr.eye_fov_angle_right[i] = frame->eyes[i].fov[1];
-	}
-	vr.fov_angle_left = (frame->eyes[0].fov[0] + frame->eyes[1].fov[0]) * .5f;
-	vr.fov_angle_right = (frame->eyes[0].fov[1] + frame->eyes[1].fov[1]) * .5f;
-	rawFovUp = (frame->eyes[0].fov[2] + frame->eyes[1].fov[2]) * .5f;
-	rawFovDown = (frame->eyes[0].fov[3] + frame->eyes[1].fov[3]) * .5f;
-	rawFovX = (vr.fov_angle_right - vr.fov_angle_left) * 180 / (float)M_PI;
+	rawFovX = ((frame->eyes[0].fov[1] + frame->eyes[1].fov[1]) * .5f - (frame->eyes[0].fov[0] + frame->eyes[1].fov[0]) * .5f) * 180 / (float)M_PI;
 	VRInput_PublishFov();
-	vr.fov_y = (rawFovUp - rawFovDown) * 180 / (float)M_PI;
+	vr.fov_y = ((frame->eyes[0].fov[2] + frame->eyes[1].fov[2]) * .5f - (frame->eyes[0].fov[3] + frame->eyes[1].fov[3]) * .5f) * 180 / (float)M_PI;
 	if ( weapon->aim.positionValid && weapon->aim.orientationValid ) {
 		VectorCopy( vr.weaponoffset_last[1], vr.weaponoffset_last[0] );
 		VectorCopy( vr.weaponoffset, vr.weaponoffset_last[1] );
@@ -795,7 +779,7 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	vr.weapon_zoomed = !VRInput_PointerLayer() && vr_weaponScope->integer && vr.weapon_stabilised &&
 					   cl.snap.ps.weapon == WP_RAILGUN && VectorLength( vr.weaponoffset ) < .24f &&
 					   cl.snap.ps.stats[STAT_HEALTH] > 0;
-	/* The scope pose is a shouldered rifle, so zoom always aims along the gun stock line. */
+	/* The scope pose is a shouldered rifle, so zoom aims along the gun stock line and cants with the gun hand. */
 	twoHanded = vr.weapon_zoomed ? 2 : vr_twoHandedWeapons->integer;
 	if ( !VRInput_PointerLayer() && twoHanded && vr.weapon_stabilised ) {
 		vec3_t direction;
@@ -812,7 +796,8 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 				-atan2f( direction[1], sqrtf( direction[0] * direction[0] + direction[2] * direction[2] ) ) *
 				180 / (float)M_PI;
 			vr.weaponangles[YAW] = -atan2f( direction[0], -direction[2] ) * 180 / (float)M_PI;
-			vr.weaponangles[ROLL] = twoHanded == 2 ? 0 : vr.weaponangles[ROLL] * .5f;
+			if ( twoHanded != 2 )
+				vr.weaponangles[ROLL] *= .5f;
 		}
 	}
 	if ( VRInput_Cvar( vr_snapturn, 45 ) <= 0 && !VRInput_ModalLayer() && !Key_GetCatcher() && input.previousTime &&

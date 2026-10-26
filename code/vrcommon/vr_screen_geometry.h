@@ -1,8 +1,9 @@
-/* Virtual screen placement in OpenXR meters; identical in the standalone and the engine. */
+/* Virtual screen placement in OpenXR meters. */
 #ifndef VR_SCREEN_GEOMETRY_H
 #define VR_SCREEN_GEOMETRY_H
 #include <math.h>
 #include <string.h>
+#include "vr_frame2d.h"
 /* The PC layout at scale 1: a scale shrinks it toward the eye until the bottom edge meets the floor. */
 #define VR_SCREEN_ANCHOR_DISTANCE 3.0f
 #define VR_SCREEN_CENTER_DISTANCE 7.5f
@@ -46,38 +47,19 @@ static inline void VR_ScreenShape( vrScreenGeometry_t *screen, float curvature, 
 	screen->radius = screen->curved ? VR_SCREEN_CENTER_DISTANCE * scale * VR_SCREEN_REFERENCE_CURVATURE / screen->curvature : 0;
 	screen->arc = screen->curved ? screen->width / screen->radius : 0;
 }
-/* Rectangle in one eye of the atlas, in left/top/right/bottom order. */
-static inline void VR_ScreenCaptureRect( int logicalWidth, int logicalHeight,
-	int eyeWidth, int eyeHeight, float up, float down, int rect[4] ) {
-	float width, height, x, y, tanUp, tanDown, span;
+/* The frame's centered 4:3 box in left/top/right/bottom order, each edge rounded to the nearest pixel, halves up. */
+static inline void VR_ScreenCaptureRect( int width, int height, int rect[4] ) {
+	float box[4];
 	rect[0] = rect[1] = 0;
-	rect[2] = eyeWidth;
-	rect[3] = eyeHeight;
-	if ( logicalWidth <= 0 || logicalHeight <= 0 || eyeWidth <= 0 || eyeHeight <= 0 )
+	rect[2] = width;
+	rect[3] = height;
+	if ( width <= 0 || height <= 0 )
 		return;
-	width = (float)logicalWidth;
-	height = (logicalWidth * 3) / 4;
-	if ( height > logicalHeight ) {
-		height = (float)logicalHeight;
-		width = (logicalHeight * 4) / 3;
-	}
-	x = (int)((logicalWidth - width) * 0.5f);
-	y = (logicalHeight - height) * 0.5f;
-	/* Match the 4:3 UI box and its optical-center offset before scaling into the eye atlas. */
-	tanUp = tanf( up );
-	tanDown = tanf( down );
-	span = tanUp - tanDown;
-	if ( fabsf( span ) > 0.001f )
-		y += height * 0.5f * (tanUp + tanDown) / span;
-	y = (int)y;
-	if ( y < 0 )
-		y = 0;
-	if ( y + height > logicalHeight )
-		y = logicalHeight - height;
-	rect[0] = (int)floorf( x * eyeWidth / logicalWidth + 0.5f );
-	rect[1] = (int)floorf( y * eyeHeight / logicalHeight + 0.5f );
-	rect[2] = (int)floorf( (x + width) * eyeWidth / logicalWidth + 0.5f );
-	rect[3] = (int)floorf( (y + height) * eyeHeight / logicalHeight + 0.5f );
+	VR2D_Box43( (float)width, (float)height, box );
+	rect[0] = (int)floorf( box[0] + 0.5f );
+	rect[1] = (int)floorf( box[1] + 0.5f );
+	rect[2] = (int)floorf( box[0] + box[2] + 0.5f );
+	rect[3] = (int)floorf( box[1] + box[3] + 0.5f );
 }
 /* Follow measures on the floor plane, so raising or lowering the head never moves the screen. */
 static inline float VR_ScreenFloorDistance( const float a[3], const float b[3] ) {

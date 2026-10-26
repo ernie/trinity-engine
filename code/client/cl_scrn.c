@@ -27,6 +27,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cl_vr_modules.h"
 #include "../vrcommon/vr_state.h"
 #include "../vrcommon/vr_screen_geometry.h"
+#include "../vrcommon/vr_frame2d.h"
 #include "cl_vr_bind.h"
 
 static qboolean	scr_initialized;		// ready to draw
@@ -67,14 +68,10 @@ void SCR_AdjustFrom640( float *x, float *y, float *w, float *h ) {
 	float	yscale;
 	if ( VR_IsActiveMode() && vr.virtual_screen ) {
 		static int rect[4], width, height;
-		static float up, down;
-		if ( width != cls.glconfig.vidWidth || height != cls.glconfig.vidHeight ||
-			up != vr.fov_angle_up || down != vr.fov_angle_down ) {
+		if ( width != cls.glconfig.vidWidth || height != cls.glconfig.vidHeight ) {
 			width = cls.glconfig.vidWidth;
 			height = cls.glconfig.vidHeight;
-			up = vr.fov_angle_up;
-			down = vr.fov_angle_down;
-			VR_ScreenCaptureRect( width, height, width, height, up, down, rect );
+			VR_ScreenCaptureRect( width, height, rect );
 		}
 		xscale = (rect[2] - rect[0]) / 640.0f;
 		yscale = (rect[3] - rect[1]) / 480.0f;
@@ -114,6 +111,29 @@ void SCR_AdjustFrom640( float *x, float *y, float *w, float *h ) {
 	}
 	if ( h ) {
 		*h *= yscale;
+	}
+}
+
+/*
+================
+SCR_VRBoxFrom640
+================
+*/
+void SCR_VRBoxFrom640( float *x, float *y, float *w, float *h ) {
+	float box[4], scale;
+	VR2D_Box43( cls.glconfig.vidWidth, cls.glconfig.vidHeight, box );
+	scale = box[2] / 640.0f;
+	if ( x ) {
+		*x = *x * scale + box[0];
+	}
+	if ( y ) {
+		*y = *y * scale + box[1];
+	}
+	if ( w ) {
+		*w *= scale;
+	}
+	if ( h ) {
+		*h *= scale;
 	}
 }
 
@@ -390,6 +410,17 @@ int SCR_GetBigStringWidth( const char *str ) {
 
 //===============================================================================
 
+static void SCR_DrawRawString( float x, float y, float w, float h, const char *s ) {
+	for ( ; *s; s++, x += w ) {
+		int ch = *s & 255;
+		float col = ( ch & 15 ) * 0.0625f;
+		float row = ( ch >> 4 ) * 0.0625f;
+
+		if ( ch != ' ' )
+			re.DrawStretchPic( x, y, w, h, col, row, col + 0.0625f, row + 0.0625f, cls.charSetShader );
+	}
+}
+
 /*
 =================
 SCR_DrawDemoRecording
@@ -410,11 +441,30 @@ static void SCR_DrawDemoRecording( void ) {
 
 	if (cl_drawRecording->integer == 1) {
 		sprintf(string, "RECORDING %s: %ik", clc.recordNameShort, pos / 1024);
-		SCR_DrawStringExt(320 - strlen(string) * 4, 20, 8, string, g_color_table[ColorIndex(COLOR_WHITE)], qtrue, qfalse);
 	} else if (cl_drawRecording->integer == 2) {
 		sprintf(string, "RECORDING: %ik", pos / 1024);
-		SCR_DrawStringExt(320 - strlen(string) * 4, 20, 8, string, g_color_table[ColorIndex(COLOR_WHITE)], qtrue, qfalse);
+	} else {
+		return;
 	}
+
+	if ( VR_IsActiveMode() && !vr.virtual_screen && re.HUDBufferStart && re.HUDBufferEnd ) {
+		const float black[4] = { 0, 0, 0, 1 };
+		float x, y = 20, w = 8, h = 8, shadow = 2;
+		Q_CleanStr( string );
+		x = 320 - strlen( string ) * 4;
+		SCR_VRBoxFrom640( &x, &y, &w, &h );
+		SCR_VRBoxFrom640( NULL, NULL, &shadow, NULL );
+		re.HUDBufferStart( qfalse );
+		re.SetColor( black );
+		SCR_DrawRawString( x + shadow, y + shadow, w, h, string );
+		re.SetColor( g_color_table[ColorIndex(COLOR_WHITE)] );
+		SCR_DrawRawString( x, y, w, h, string );
+		re.SetColor( NULL );
+		re.HUDBufferEnd();
+		return;
+	}
+
+	SCR_DrawStringExt(320 - strlen(string) * 4, 20, 8, string, g_color_table[ColorIndex(COLOR_WHITE)], qtrue, qfalse);
 }
 
 
@@ -529,17 +579,6 @@ static void SCR_DrawTrackingStatus( void ) {
 	re.SetColor( NULL );
 }
 
-static void SCR_DrawRawString( float x, float y, float w, float h, const char *s ) {
-	for ( ; *s; s++, x += w ) {
-		int ch = *s & 255;
-		float col = ( ch & 15 ) * 0.0625f;
-		float row = ( ch >> 4 ) * 0.0625f;
-
-		if ( ch != ' ' )
-			re.DrawStretchPic( x, y, w, h, col, row, col + 0.0625f, row + 0.0625f, cls.charSetShader );
-	}
-}
-
 static void SCR_DrawVRNotice( void ) {
 	const float background[4] = { 0.025f, 0.025f, 0.025f, 0.85f };
 	const float white[4] = { 1, 1, 1, 1 };
@@ -569,7 +608,8 @@ static void SCR_DrawVRNotice( void ) {
 	x = 320 - w * 0.5f;
 	y = 120;
 	if ( VR_IsActiveMode() && !vr.virtual_screen ) {
-		hud = Con_PlayFrom640VR( &x, &y, &w, &h );
+		SCR_VRBoxFrom640( &x, &y, &w, &h );
+		hud = re.HUDBufferStart && re.HUDBufferEnd;
 	} else {
 		SCR_AdjustFrom640( &x, &y, &w, &h );
 	}

@@ -9,6 +9,8 @@
 
 #include "tr_local.h"
 #include "../vrcommon/vr_defaults.h"
+#include "../vrcommon/vr_frame2d.h"
+#include "../vrcommon/vr_screen_geometry.h"
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -5599,7 +5601,7 @@ static qboolean vk_screen_fit_size( int *width, int *height ) {
 	int rect[4];
 	float scale[2];
 	qboolean fitted;
-	VK_XR_ScreenCaptureRect( vk.sceneWidth, vk.sceneHeight, rect );
+	VR_ScreenCaptureRect( vk.sceneWidth, vk.sceneHeight, rect );
 	*width = rect[2] - rect[0];
 	*height = rect[3] - rect[1];
 	fitted = VK_XR_ScreenTexelScale( vk.sceneWidth, vk.sceneHeight, *width, *height, scale );
@@ -5963,6 +5965,7 @@ void vk_hud_begin( qboolean clear ) {
 	VkCommandBufferBeginInfo begin;
 	VkRenderPassBeginInfo pass;
 	VkClearValue values[2];
+	float box[4];
 	if ( !vk_hud.framebuffer || !vk.frame_count || vk_hud.recording ) {
 		ri.Error( ERR_DROP, "Invalid HUD render target/lifecycle" );
 		return;
@@ -5986,8 +5989,9 @@ void vk_hud_begin( qboolean clear ) {
 	vk.renderPassIndex = RENDER_PASS_HUD;
 	vk.renderWidth = VK_HUD_WIDTH;
 	vk.renderHeight = VK_HUD_HEIGHT;
-	vk.renderScaleX = (float)VK_HUD_WIDTH / glConfig.vidWidth;
-	vk.renderScaleY = (float)VK_HUD_HEIGHT / glConfig.vidHeight;
+	VR2D_Box43( glConfig.vidWidth, glConfig.vidHeight, box );
+	vk.renderScaleX = VK_HUD_WIDTH / box[2];
+	vk.renderScaleY = VK_HUD_HEIGHT / box[3];
 	Com_Memset( values, 0, sizeof( values ) );
 #ifndef USE_REVERSED_DEPTH
 	values[1].depthStencil.depth = 1;
@@ -9468,6 +9472,19 @@ void vk_get_pipeline_def( uint32_t pipeline, Vk_Pipeline_Def *def ) {
 }
 
 
+static void vk_frame_rect( float rect[4] ) {
+	if ( vk_hud.recording ) {
+		/* The frame's centered 4:3 box fills the HUD buffer. */
+		VR2D_Box43( glConfig.vidWidth, glConfig.vidHeight, rect );
+	} else if ( backEnd.scopeHud ) {
+		VR2D_ScopeFrame( glConfig.vidWidth, glConfig.vidHeight, rect );
+	} else {
+		rect[0] = rect[1] = 0.0f;
+		rect[2] = glConfig.vidWidth;
+		rect[3] = glConfig.vidHeight;
+	}
+}
+
 static void get_viewport_rect(VkRect2D *r)
 {
 	if ( vk_hud_direct ) {
@@ -9486,12 +9503,16 @@ static void get_viewport_rect(VkRect2D *r)
 	}
 	else
 	{
-		if ( vk_hud.recording ) {
-			/* The VR module emits mode-1 HUD coordinates directly in 1280x960. */
-			r->offset.x = backEnd.viewParms.viewportX;
-			r->offset.y = glConfig.vidHeight - backEnd.viewParms.viewportY - backEnd.viewParms.viewportHeight;
-			r->extent.width = backEnd.viewParms.viewportWidth;
-			r->extent.height = backEnd.viewParms.viewportHeight;
+		if ( vk_hud.recording || backEnd.scopeHud ) {
+			float box[4], sx, sy;
+			vk_frame_rect( box );
+			sx = vk.renderWidth / box[2];
+			sy = vk.renderHeight / box[3];
+			r->offset.x = (int)floorf( ( backEnd.viewParms.viewportX - box[0] ) * sx + 0.5f );
+			r->offset.y = (int)floorf( ( glConfig.vidHeight - backEnd.viewParms.viewportY -
+										 backEnd.viewParms.viewportHeight - box[1] ) * sy + 0.5f );
+			r->extent.width = (int)floorf( backEnd.viewParms.viewportWidth * sx + 0.5f );
+			r->extent.height = (int)floorf( backEnd.viewParms.viewportHeight * sy + 0.5f );
 			return;
 		}
 		r->offset.x = backEnd.viewParms.viewportX * vk.renderScaleX;
@@ -9623,17 +9644,23 @@ static void get_mvp_transform( float *mvp )
 {
 	if ( backEnd.projection2D )
 	{
-		float mvp0 = 2.0f / (vk_hud.recording ? VK_HUD_WIDTH : glConfig.vidWidth);
-		float mvp5 = 2.0f / (vk_hud.recording ? VK_HUD_HEIGHT : glConfig.vidHeight);
+		float box[4];
+		float mvp0, mvp5, mvp12, mvp13;
+
+		vk_frame_rect( box );
+		mvp0 = 2.0f / box[2];
+		mvp5 = 2.0f / box[3];
+		mvp12 = -1.0f - box[0] * mvp0;
+		mvp13 = -1.0f - box[1] * mvp5;
 
 		mvp[0]  =  mvp0; mvp[1]  =  0.0f; mvp[2]  = 0.0f; mvp[3]  = 0.0f;
 		mvp[4]  =  0.0f; mvp[5]  =  mvp5; mvp[6]  = 0.0f; mvp[7]  = 0.0f;
 #ifdef USE_REVERSED_DEPTH
 		mvp[8]  =  0.0f; mvp[9]  =  0.0f; mvp[10] = 0.0f; mvp[11] = 0.0f;
-		mvp[12] = -1.0f; mvp[13] = -1.0f; mvp[14] = 1.0f; mvp[15] = 1.0f;
+		mvp[12] = mvp12; mvp[13] = mvp13; mvp[14] = 1.0f; mvp[15] = 1.0f;
 #else
 		mvp[8]  =  0.0f; mvp[9]  =  0.0f; mvp[10] = 1.0f; mvp[11] = 0.0f;
-		mvp[12] = -1.0f; mvp[13] = -1.0f; mvp[14] = 0.0f; mvp[15] = 1.0f;
+		mvp[12] = mvp12; mvp[13] = mvp13; mvp[14] = 0.0f; mvp[15] = 1.0f;
 #endif
 		if ( !vk_hud.recording && vk.renderPassIndex != RENDER_PASS_DESKTOP ) {
 			float scale = VK_XR_ScopeScaleY();
@@ -9742,12 +9769,16 @@ void vk_clear_depth( qboolean clear_stencil ) {
 }
 
 
+qboolean vk_overlay_target( void ) {
+	/* A single-bit mask executes layer 0 alone and yields one mono image. */
+	return VK_PassViewMask( vk.multiview, vk.renderPassIndex ) == 3 && backEnd.projection2D && VK_XR_Drawing() &&
+		   !VK_XR_ScopeNeedsBands() && !vk_hud_direct && !vk_hud.recording;
+}
+
 void vk_update_mvp( const float *m ) {
 	float push[16], eyes[2][16];
 	uint32_t viewMask = VK_PassViewMask( vk.multiview, vk.renderPassIndex );
 	qboolean arrayPass = viewMask != 0;
-	/* A single-bit mask executes layer 0 alone and yields one mono image. */
-	qboolean stereoPass = viewMask == 3;
 	int eye;
 
 	if ( m ) {
@@ -9770,11 +9801,9 @@ void vk_update_mvp( const float *m ) {
 			vk_hud_eye = savedEye;
 			Com_Memset( push, 0, sizeof( push ) );
 			push[0] = push[5] = push[10] = push[15] = 1;
-		} else if ( stereoPass && backEnd.projection2D && VK_XR_Drawing() && !VK_XR_ScopeNeedsBands() ) {
-			/* Screen-space 2D lies on a plane a unit ahead of the head, so each
-			 * eye reprojects that plane through its own cant and fov. */
+		} else if ( vk_overlay_target() && backEnd.overlayQuadrant >= 0 ) {
 			for ( eye = 0; eye < 2; eye++ ) {
-				VK_XR_ScreenMatrix( eye, eyes[eye] );
+				VK_XR_OverlayMatrix( eye, backEnd.overlayQuadrant, eyes[eye] );
 			}
 		} else if ( arrayPass && !backEnd.projection2D && backEnd.viewParms.xrMultiview ) {
 			Com_Memcpy( eyes, backEnd.viewParms.eyeProjection, sizeof( eyes ) );
@@ -10988,7 +11017,7 @@ static void vk_capture_screen_source( VkImage srcImage, VkFormatProperties prope
 	Com_Memset( &copy, 0, sizeof( copy ) );
 	copy.srcSubresource.aspectMask = copy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	copy.srcSubresource.layerCount = copy.dstSubresource.layerCount = 1;
-	VK_XR_ScreenCaptureRect( vk.sceneWidth, vk.sceneHeight, crop );
+	VR_ScreenCaptureRect( vk.sceneWidth, vk.sceneHeight, crop );
 	copy.srcOffsets[0].x = crop[0];
 	copy.srcOffsets[0].y = crop[1];
 	copy.srcOffsets[1].x = crop[2];

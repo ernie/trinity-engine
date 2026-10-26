@@ -549,8 +549,8 @@ static qboolean CL_VR_UseVirtualScreen( void ) {
 	vr.follow_mode = VR_FollowModeFor( Cvar_VariableIntegerValue( "cg_followMode" ), tvPlay.active );
 	vr.first_person_following = ((cl.snap.ps.pm_flags & PMF_FOLLOW) || clc.demoplaying) &&
 								vr.follow_mode == VRFM_FIRSTPERSON;
-	/* The SP postgame UI draws on the podium HUD; the console reads on the virtual screen everywhere. */
-	if ( (Key_GetCatcher() & KEYCATCH_CONSOLE) || (menu && !vr.sp_intermission_active) )
+	/* The SP postgame UI draws on the podium HUD; the console and chat read on the virtual screen everywhere. */
+	if ( (Key_GetCatcher() & (KEYCATCH_CONSOLE | KEYCATCH_MESSAGE)) || (menu && !vr.sp_intermission_active) )
 		return qtrue;
 	if ( intermission && cls.state == CA_ACTIVE )
 		return qfalse;
@@ -609,7 +609,8 @@ static qboolean CL_VR_BeginFrameInternal( qboolean updateInput ) {
 		}
 	}
 	if ( re.XRSetZoom ) {
-		re.XRSetZoom( vr.weapon_zoomed, &vr.weapon_zoomLevel );
+		const float aim[3] = { vr.weaponangles[PITCH], vr.weaponangles[YAW], vr.weaponangles[ROLL] };
+		re.XRSetZoom( vr.weapon_zoomed, aim, &vr.weapon_zoomLevel );
 	}
 	return !VR_IsActiveMode() || frame.stereo || CL_VR_DesktopWaitingFrame();
 }

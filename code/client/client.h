@@ -713,8 +713,6 @@ void Con_ToggleConsole_f( void );
 void Con_ClearNotify( void );
 void Con_RunConsole( void );
 void Con_DrawConsole( void );
-// Places 640x480 units in VR play like the notify lines; qtrue when they go through the HUD buffer.
-qboolean Con_PlayFrom640VR( float *x, float *y, float *w, float *h );
 void Con_PageUp( int lines );
 void Con_PageDown( int lines );
 void Con_Top( void );
@@ -736,6 +734,7 @@ void	SCR_DebugGraph( float value );
 int		SCR_GetBigStringWidth( const char *str );	// returns in virtual 640x480 coordinates
 
 void	SCR_AdjustFrom640( float *x, float *y, float *w, float *h );
+void	SCR_VRBoxFrom640( float *x, float *y, float *w, float *h );
 void	SCR_FillRect( float x, float y, float width, float height, 
 					 const float *color );
 void	SCR_DrawPic( float x, float y, float width, float height, qhandle_t hShader );

@@ -7,14 +7,6 @@
 typedef struct vr_clientinfo_s {
 	float fov_x;
 	float fov_y;
-	float fov_angle_up;    // radians, positive = up
-	float fov_angle_down;  // radians, negative = down
-	float fov_angle_left;  // radians, negative = left
-	float fov_angle_right; // radians, positive = right
-
-	// Radians; separate per eye because the stereo frusta are asymmetric
-	float eye_fov_angle_left[2];   // [0]=left eye, [1]=right eye
-	float eye_fov_angle_right[2];  // [0]=left eye, [1]=right eye
 
 	qboolean weapon_stabilised;
 	qboolean weapon_zoomed;

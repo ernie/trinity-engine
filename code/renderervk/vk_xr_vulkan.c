@@ -557,14 +557,13 @@ XrResult VK_XRVK_End( vkXRVk_t *ctx, int rendered ) {
 	projection.viewCount = 2;
 	projection.views = views;
 	layer = (const XrCompositionLayerBaseHeader *)&projection;
-	if ( ctx->scope && ctx->viewSpace && ctx->target.width ) {
+	if ( ctx->scope && ctx->target.width ) {
 		memset( &scope, 0, sizeof( scope ) );
 		scope.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
-		scope.space = ctx->viewSpace;
+		scope.space = ctx->space;
 		scope.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
 		scope.subImage = views[0].subImage;
-		scope.pose.orientation.w = 1;
-		scope.pose.position.z = -1;
+		scope.pose = ctx->scopePose;
 		scope.size.width = 1.87f;
 		scope.size.height = 1.87f * ctx->target.height / ctx->target.width;
 		layer = (const XrCompositionLayerBaseHeader *)&scope;

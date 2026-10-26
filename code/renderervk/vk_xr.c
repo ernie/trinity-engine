@@ -8,6 +8,7 @@
 #include "vk_xr_models.h"
 #include "vk_xr_meta.h"
 #include "../vrcommon/vr_float.h"
+#include "../vrcommon/vr_frame2d.h"
 #include "../vrcommon/vr_rate_list.h"
 
 #if VK_XR_DIRECT_MAX_IMAGES != VK_XRVK_MAX_IMAGES
@@ -66,19 +67,20 @@ static vec3_t floorOrigin;
 static vkXRRefresh_t refresh;
 static float refreshRequested = -1;
 static float zoomLevel = 1;
+static vec3_t scopeAim;
 static cvar_t *hudScale, *hudDepth, *hudOffset, *screenCurvature;
 static cvar_t *refreshRate, *virtualScreenMode, *worldscale, *worldscaleScaler, *foveation, *foveationStrength;
 static struct {
 	qboolean valid;
 	XrTime time;
-	float scale, depth, offset;
+	float size, depth, raise;
 	float matrix[16];
 } hudMatrices[2];
 static struct {
 	qboolean valid;
 	XrTime time;
-	float matrix[16];
-} screenMatrices[2];
+	float matrix[4][16];
+} overlayMatrices[2];
 float VK_XR_ScopeScaleY( void ) {
 	if ( !VK_XR_Drawing() || !xr.scope || !xr.target.height || !glConfig.vidWidth ) {
 		return 1;
@@ -90,8 +92,9 @@ qboolean VK_XR_ScopeNeedsBands( void ) {
 	return xr.scope;
 }
 
-void VK_XR_SetZoom( qboolean zoomed, float *level ) {
+void VK_XR_SetZoom( qboolean zoomed, const float *aim, float *level ) {
 	xr.scope = VK_XR_Drawing() && !screenGeometry.visible && zoomed;
+	VectorCopy( aim, scopeAim );
 	if ( xr.scope ) {
 		zoomLevel = MIN( zoomLevel + .05f, 2.5f );
 	} else {
@@ -256,12 +259,6 @@ void VK_XR_HeadPosition( vec3_t position ) {
 void VK_XR_FloorOrigin( vec3_t origin ) {
 	VectorCopy( floorOrigin, origin );
 }
-void VK_XR_ScreenCaptureRect( int eyeWidth, int eyeHeight, int rect[4] ) {
-	/* The capture source is the symmetric flat render, so the crop centers geometrically */
-	float halfSpan = (xr.views[0].fov.angleUp + xr.views[1].fov.angleUp -
-					  xr.views[0].fov.angleDown - xr.views[1].fov.angleDown) * .25f;
-	VR_ScreenCaptureRect( eyeWidth, eyeHeight, eyeWidth, eyeHeight, halfSpan, -halfSpan, rect );
-}
 qboolean VK_XR_ScreenTexelScale( int eyeWidth, int eyeHeight, int cropWidth, int cropHeight, float scale[2] ) {
 	float tanW = 0, tanH = 0;
 	int eye;
@@ -277,12 +274,28 @@ qboolean VK_XR_ScreenTexelScale( int eyeWidth, int eyeHeight, int cropWidth, int
 	return qtrue;
 }
 
+static void VKXR_EyeProjection( int eye, float projection[16] ) {
+	float l = tanf( xr.views[eye].fov.angleLeft ), r = tanf( xr.views[eye].fov.angleRight );
+	float b = tanf( xr.views[eye].fov.angleDown ), t = tanf( xr.views[eye].fov.angleUp );
+	Com_Memset( projection, 0, 16 * sizeof( float ) );
+	projection[0] = 2 / (r - l);
+	projection[5] = -2 / (t - b);
+	projection[8] = (r + l) / (r - l);
+	projection[9] = -(t + b) / (t - b);
+	projection[11] = -1;
+#ifdef USE_REVERSED_DEPTH
+	projection[10] = 0.01f / 99.99f;
+	projection[14] = 1.0f / 99.99f;
+#else
+	projection[10] = -100.0f / 99.99f;
+	projection[14] = -1.0f / 99.99f;
+#endif
+}
+
 void VK_XR_EyeMatrix( int eye, float matrix[16] ) {
 	const XrPosef *pose = &xr.views[eye].pose;
 	const XrQuaternionf *q = &pose->orientation;
-	float view[16] = {0}, projection[16] = {0};
-	float l = tanf( xr.views[eye].fov.angleLeft ), r = tanf( xr.views[eye].fov.angleRight );
-	float b = tanf( xr.views[eye].fov.angleDown ), t = tanf( xr.views[eye].fov.angleUp );
+	float view[16] = {0}, projection[16];
 	int i, j, k;
 	/* Transpose of the rigid head rotation; translation is -R^T * eye. */
 	view[0] = 1 - 2 * (q->y * q->y + q->z * q->z);
@@ -299,18 +312,7 @@ void VK_XR_EyeMatrix( int eye, float matrix[16] ) {
 			-(view[i] * pose->position.x + view[4 + i] * pose->position.y + view[8 + i] * pose->position.z);
 	}
 	view[15] = 1;
-	projection[0] = 2 / (r - l);
-	projection[5] = -2 / (t - b);
-	projection[8] = (r + l) / (r - l);
-	projection[9] = -(t + b) / (t - b);
-	projection[11] = -1;
-#ifdef USE_REVERSED_DEPTH
-	projection[10] = 0.01f / 99.99f;
-	projection[14] = 1.0f / 99.99f;
-#else
-	projection[10] = -100.0f / 99.99f;
-	projection[14] = -1.0f / 99.99f;
-#endif
+	VKXR_EyeProjection( eye, projection );
 	for ( i = 0; i < 4; i++ ) {
 		for ( j = 0; j < 4; j++ ) {
 			matrix[i * 4 + j] = 0;
@@ -566,7 +568,7 @@ qboolean VK_XR_SetActive( qboolean enabled ) {
 	}
 	active = enabled;
 	hudMatrices[0].valid = hudMatrices[1].valid = qfalse;
-	screenMatrices[0].valid = screenMatrices[1].valid = qfalse;
+	overlayMatrices[0].valid = overlayMatrices[1].valid = qfalse;
 	if ( enabled ) {
 		hudScale = ri.Cvar_Get( "vr_hudScale", "1", 0 );
 		hudDepth = ri.Cvar_Get( "vr_currentHudDepth", "3", 0 );
@@ -617,20 +619,13 @@ static XrPosef VKXR_CenterPose( void ) {
 	return center;
 }
 
-static void VKXR_PlaneMatrix( int eye, float scale, float offset, float shift, float matrix[16] ) {
+static void VKXR_PlaneMatrix( int eye, float halfWidth, float halfHeight, float raise, float shift, float matrix[16] ) {
 	XrPosef center;
 	const XrQuaternionf *q = &center.orientation;
-	float eyeMatrix[16], head[16] = {0}, clipToHead[16] = {0}, rotation[16], combined[16];
-	float l, r, b, t, p0, p5, p9;
+	float eyeMatrix[16], head[16] = {0}, clipToHead[16] = {0}, rotation[16], combined[16], box[4];
 	int i, j, k;
 	center = VKXR_CenterPose();
-	l = tanf( xr.views[eye].fov.angleLeft );
-	r = tanf( xr.views[eye].fov.angleRight );
-	b = tanf( xr.views[eye].fov.angleDown );
-	t = tanf( xr.views[eye].fov.angleUp );
-	p0 = 2 / (r - l);
-	p5 = -2 / (t - b);
-	p9 = -(t + b) / (t - b);
+	VR2D_Box43( glConfig.vidWidth, glConfig.vidHeight, box );
 	VK_XR_EyeMatrix( eye, eyeMatrix );
 	head[0] = 1 - 2 * (q->y * q->y + q->z * q->z);
 	head[1] = 2 * (q->x * q->y + q->w * q->z);
@@ -647,9 +642,9 @@ static void VKXR_PlaneMatrix( int eye, float scale, float offset, float shift, f
 	head[13] = xr.views[eye].pose.position.y;
 	head[14] = xr.views[eye].pose.position.z;
 	head[15] = 1;
-	clipToHead[0] = scale / p0;
-	clipToHead[5] = scale / p5;
-	clipToHead[13] = (p9 * 0.5f - offset * scale / glConfig.vidHeight) / p5;
+	clipToHead[0] = halfWidth * glConfig.vidWidth / box[2];
+	clipToHead[5] = -halfHeight * glConfig.vidHeight / box[3];
+	clipToHead[13] = raise;
 	clipToHead[14] = -1;
 	clipToHead[15] = 1;
 	for ( i = 0; i < 4; i++ ) {
@@ -682,47 +677,84 @@ static void VKXR_PlaneMatrix( int eye, float scale, float offset, float shift, f
 	Com_Memcpy( matrix, combined, sizeof( combined ) );
 }
 
+/* The panel matches the floating HUD's angular size and vertical offset at the same scale and depth. */
 void VK_XR_HudMatrix( int eye, float matrix[16] ) {
-	float scale = hudScale->value * (2.0f / 3.0f);
+	float size = hudScale->value;
 	float depth = hudDepth->value;
-	float offset = hudOffset->value;
-	float shift;
-	if ( scale <= 0 || !VR_FloatFinite( scale ) ) {
-		scale = 2.0f / 3.0f;
+	float raise, shift;
+	if ( size <= 0 || !VR_FloatFinite( size ) ) {
+		size = 1;
 	}
 	if ( depth < 0 || !VR_FloatFinite( depth ) ) {
 		depth = 3;
 	}
-	if ( !VR_FloatFinite( offset ) ) {
-		offset = 0;
+	raise = VR2D_HudYOffsetTangent( hudOffset->value, depth, worldscaleScaler ? worldscaleScaler->value : 1.0f );
+	if ( !VR_FloatFinite( raise ) ) {
+		raise = 0;
 	}
 	if ( hudMatrices[eye].valid && hudMatrices[eye].time == xr.displayTime &&
-		hudMatrices[eye].scale == scale && hudMatrices[eye].depth == depth &&
-		hudMatrices[eye].offset == offset ) {
+		hudMatrices[eye].size == size && hudMatrices[eye].depth == depth &&
+		hudMatrices[eye].raise == raise ) {
 		Com_Memcpy( matrix, hudMatrices[eye].matrix, sizeof( hudMatrices[eye].matrix ) );
 		return;
 	}
-	shift = 0.05f / (depth + 1) * glConfig.vidHeight * 4 * scale / glConfig.vidWidth;
-	VKXR_PlaneMatrix( eye, scale, offset, shift, matrix );
+	shift = 0.05f / (depth + 1) * glConfig.vidHeight * 4 * (size * 2.0f / 3.0f) / glConfig.vidWidth;
+	VKXR_PlaneMatrix( eye, size / 3.0f, size * 0.25f, raise, shift, matrix );
 	hudMatrices[eye].valid = qtrue;
 	hudMatrices[eye].time = xr.displayTime;
-	hudMatrices[eye].scale = scale;
+	hudMatrices[eye].size = size;
 	hudMatrices[eye].depth = depth;
-	hudMatrices[eye].offset = offset;
+	hudMatrices[eye].raise = raise;
 	Com_Memcpy( hudMatrices[eye].matrix, matrix, sizeof( hudMatrices[eye].matrix ) );
 }
 
-/* Screen-space 2D covers the client frame at unit distance ahead of the head,
- * with no overlay scale, offset or convergence shift. */
-void VK_XR_ScreenMatrix( int eye, float matrix[16] ) {
-	if ( screenMatrices[eye].valid && screenMatrices[eye].time == xr.displayTime ) {
-		Com_Memcpy( matrix, screenMatrices[eye].matrix, sizeof( screenMatrices[eye].matrix ) );
-		return;
+/* The overlay is head-locked at infinity in each eye's own frame. */
+static void VKXR_OverlayMatrices( int eye, float matrices[4][16] ) {
+	const XrPosef center = VKXR_CenterPose();
+	const float centerQuat[4] = {center.orientation.x, center.orientation.y, center.orientation.z,
+								 center.orientation.w};
+	const float width = glConfig.vidWidth, height = glConfig.vidHeight;
+	float tangents[2][4], mids[2][2], shared[2][4], scale[2], bias[2], projection[16], frameToPlane[16];
+	int quadrant, i, v;
+	for ( v = 0; v < 2; v++ ) {
+		const XrQuaternionf *e = &xr.views[v].pose.orientation;
+		const float eyeQuat[4] = {e->x, e->y, e->z, e->w};
+		tangents[v][0] = tanf( xr.views[v].fov.angleLeft );
+		tangents[v][1] = tanf( xr.views[v].fov.angleRight );
+		tangents[v][2] = tanf( xr.views[v].fov.angleDown );
+		tangents[v][3] = tanf( xr.views[v].fov.angleUp );
+		VR2D_EyeCenter( eyeQuat, centerQuat, mids[v] );
 	}
-	VKXR_PlaneMatrix( eye, 1, 0, 0, matrix );
-	screenMatrices[eye].valid = qtrue;
-	screenMatrices[eye].time = xr.displayTime;
-	Com_Memcpy( screenMatrices[eye].matrix, matrix, sizeof( screenMatrices[eye].matrix ) );
+	VR2D_SharedTangents( tangents, mids, shared );
+	VKXR_EyeProjection( eye, projection );
+	for ( quadrant = 0; quadrant < 4; quadrant++ ) {
+		float *m = matrices[quadrant];
+		VR2D_OverlayAffine( shared[eye], mids[eye], width, height, quadrant, scale, bias );
+		Com_Memset( frameToPlane, 0, sizeof( frameToPlane ) );
+		frameToPlane[0] = scale[0] * width * 0.5f;
+		frameToPlane[5] = scale[1] * height * 0.5f;
+		frameToPlane[12] = frameToPlane[0] + bias[0];
+		frameToPlane[13] = frameToPlane[5] + bias[1];
+		frameToPlane[14] = -1;
+		frameToPlane[15] = 1;
+		myGlMultMatrix( frameToPlane, projection, m );
+		for ( i = 0; i < 4; i++ ) {
+#ifdef USE_REVERSED_DEPTH
+			m[i * 4 + 2] = m[i * 4 + 3];
+#else
+			m[i * 4 + 2] = 0;
+#endif
+		}
+	}
+}
+
+void VK_XR_OverlayMatrix( int eye, int quadrant, float matrix[16] ) {
+	if ( !overlayMatrices[eye].valid || overlayMatrices[eye].time != xr.displayTime ) {
+		VKXR_OverlayMatrices( eye, overlayMatrices[eye].matrix );
+		overlayMatrices[eye].valid = qtrue;
+		overlayMatrices[eye].time = xr.displayTime;
+	}
+	Com_Memcpy( matrix, overlayMatrices[eye].matrix[quadrant], sizeof( overlayMatrices[eye].matrix[quadrant] ) );
 }
 
 /* Event-driven losses fail no call, so the reason comes from the state the poll left behind. */
@@ -832,9 +864,29 @@ void VK_XR_Submitted( void ) {
 	submitted = copied;
 }
 
+/* The scope hangs a meter out along the gun's aim, so it stays where the gun points as the head turns. */
+static XrPosef VKXR_ScopePose( void ) {
+	const float pitch = -DEG2RAD( scopeAim[PITCH] ) * 0.5f, yaw = DEG2RAD( scopeAim[YAW] ) * 0.5f,
+				roll = -DEG2RAD( scopeAim[ROLL] ) * 0.5f;
+	const float sy = sinf( yaw ), cy = cosf( yaw ), sp = sinf( pitch ), cp = cosf( pitch ), sr = sinf( roll ),
+				cr = cosf( roll );
+	XrPosef pose = VKXR_CenterPose();
+	pose.orientation.x = cy * sp * cr + sy * cp * sr;
+	pose.orientation.y = sy * cp * cr - cy * sp * sr;
+	pose.orientation.z = cy * cp * sr - sy * sp * cr;
+	pose.orientation.w = cy * cp * cr + sy * sp * sr;
+	pose.position.x -= sinf( 2 * yaw ) * cosf( 2 * pitch );
+	pose.position.y += sinf( 2 * pitch );
+	pose.position.z -= cosf( 2 * yaw ) * cosf( 2 * pitch );
+	return pose;
+}
+
 int VK_XR_EndFrame( void ) {
 	if ( !xr.frameBegun ) {
 		return failed || xr.lost ? -1 : 0;
+	}
+	if ( xr.scope ) {
+		xr.scopePose = VKXR_ScopePose();
 	}
 	/* The runtime orders its reads on our queue; only a submitted frame may present. */
 	if ( !VKXR_Check( VK_XRVK_End( &xr, submitted && !failed ), "xrEndFrame" ) ) {

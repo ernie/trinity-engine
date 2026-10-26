@@ -29,12 +29,6 @@ typedef struct vr_shared_s {
 	// ---- eng block: engine-written; module writes are local-transient ----
 	float fov_x;
 	float fov_y;
-	float fov_angle_up;
-	float fov_angle_down;
-	float fov_angle_left;
-	float fov_angle_right;
-	float eye_fov_angle_left[2];
-	float eye_fov_angle_right[2];
 	int   weapon_zoomed;
 	float weapon_zoomLevel;
 	int   right_handed;

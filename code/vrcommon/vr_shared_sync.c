@@ -7,10 +7,10 @@
 
 // A layout drift fails to compile here; moving a field is a MAJOR bump, a new tail field a MINOR one.
 #define VR_ABI_ASSERT( name, expr ) typedef char name[ (expr) ? 1 : -1 ]
-VR_ABI_ASSERT( vr_abi_v1_size, sizeof( vr_shared_t ) == 344 );
-VR_ABI_ASSERT( vr_abi_v1_cg_first, offsetof( vr_shared_t, VR_SHARED_CG_FIRST ) == 236 );
-VR_ABI_ASSERT( vr_abi_v1_ui_first, offsetof( vr_shared_t, VR_SHARED_UI_FIRST ) == 312 );
-VR_ABI_ASSERT( vr_abi_v1_cfg_first, offsetof( vr_shared_t, VR_SHARED_CFG_FIRST ) == 328 );
+VR_ABI_ASSERT( vr_abi_v1_size, sizeof( vr_shared_t ) == 312 );
+VR_ABI_ASSERT( vr_abi_v1_cg_first, offsetof( vr_shared_t, VR_SHARED_CG_FIRST ) == 204 );
+VR_ABI_ASSERT( vr_abi_v1_ui_first, offsetof( vr_shared_t, VR_SHARED_UI_FIRST ) == 280 );
+VR_ABI_ASSERT( vr_abi_v1_cfg_first, offsetof( vr_shared_t, VR_SHARED_CFG_FIRST ) == 296 );
 
 vr_clientinfo_t vr;
 static qboolean activeMode;
@@ -44,14 +44,6 @@ void VR_SharedSyncIn( vr_shared_t *dst, int structSize ) {
 	// eng block
 	s->fov_x = vr.fov_x;
 	s->fov_y = vr.fov_y;
-	s->fov_angle_up = vr.fov_angle_up;
-	s->fov_angle_down = vr.fov_angle_down;
-	s->fov_angle_left = vr.fov_angle_left;
-	s->fov_angle_right = vr.fov_angle_right;
-	s->eye_fov_angle_left[0] = vr.eye_fov_angle_left[0];
-	s->eye_fov_angle_left[1] = vr.eye_fov_angle_left[1];
-	s->eye_fov_angle_right[0] = vr.eye_fov_angle_right[0];
-	s->eye_fov_angle_right[1] = vr.eye_fov_angle_right[1];
 	s->weapon_zoomed = vr.weapon_zoomed;
 	s->weapon_zoomLevel = vr.weapon_zoomLevel;
 	s->right_handed = vr.right_handed;

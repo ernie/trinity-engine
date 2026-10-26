@@ -66,16 +66,15 @@ const vkXRModel_t *VK_XR_Model( int index );
 void *VK_XR_ModelAlloc( size_t size );
 void VK_XR_HeadPosition( vec3_t position );
 void VK_XR_FloorOrigin( vec3_t origin );
-void VK_XR_ScreenCaptureRect( int eyeWidth, int eyeHeight, int rect[4] );
 /* Eye pixels per capture texel at the screen's center, per axis; false until the views have been located. */
 qboolean VK_XR_ScreenTexelScale( int eyeWidth, int eyeHeight, int cropWidth, int cropHeight, float scale[2] );
 void VK_XR_EyeMatrix( int eye, float matrix[16] );
 void VK_XR_HudMatrix( int eye, float matrix[16] );
-void VK_XR_ScreenMatrix( int eye, float matrix[16] );
+void VK_XR_OverlayMatrix( int eye, int quadrant, float matrix[16] );
 void VK_XR_TargetSize( uint32_t *width, uint32_t *height );
 /* The create flags the runtime accepted for the eye swapchain. */
 VkImageCreateFlags VK_XR_TargetCreateFlags( void );
-void VK_XR_SetZoom( qboolean zoomed, float *level );
+void VK_XR_SetZoom( qboolean zoomed, const float *aim, float *level );
 float VK_XR_ScopeScaleY( void );
 qboolean VK_XR_ScopeNeedsBands( void );
 void VK_XR_FoveationCaps( qboolean supported );

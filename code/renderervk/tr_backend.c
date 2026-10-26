@@ -21,6 +21,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 #include "tr_local.h"
 #include "vk_xr.h"
+#include "../vrcommon/vr_frame2d.h"
 
 backEndData_t	*backEndData;
 backEndState_t	backEnd;
@@ -440,6 +441,34 @@ void GL_ClientState( int unit, unsigned stateBits )
 
 static void RB_SetGL2D( void );
 
+/* Each frame quadrant of the overlay target has its own matrices, so a quad crossing a center line splits there. */
+static void RB_Add2DQuad( float x, float y, float w, float h, float s1, float t1, float s2, float t2,
+	color4ub_t color ) {
+#ifdef USE_VULKAN
+	const vr2dQuad quad = { x, y, w, h, s1, t1, s2, t2 };
+	vr2dQuad pieces[4];
+	int quadrants[4], count, i;
+	if ( vk_overlay_target() ) {
+		count = VR2D_SplitQuad( &quad, glConfig.vidWidth * 0.5f, glConfig.vidHeight * 0.5f, pieces, quadrants );
+	} else {
+		pieces[0] = quad;
+		quadrants[0] = -1;
+		count = 1;
+	}
+	for ( i = 0; i < count; i++ ) {
+		if ( quadrants[i] != backEnd.overlayQuadrant ) {
+			RB_EndSurface();
+			backEnd.overlayQuadrant = quadrants[i];
+			vk_update_mvp( NULL );
+		}
+		RB_AddQuadStamp2( pieces[i].x, pieces[i].y, pieces[i].w, pieces[i].h,
+			pieces[i].s1, pieces[i].t1, pieces[i].s2, pieces[i].t2, color );
+	}
+#else
+	RB_AddQuadStamp2( x, y, w, h, s1, t1, s2, t2, color );
+#endif
+}
+
 /*
 ================
 RB_Hyperspace
@@ -473,7 +502,7 @@ static void RB_Hyperspace( void ) {
 	}
 	c.rgba[3] = 255;
 
-	RB_AddQuadStamp2( backEnd.refdef.x, backEnd.refdef.y, backEnd.refdef.width, backEnd.refdef.height,
+	RB_Add2DQuad( backEnd.refdef.x, backEnd.refdef.y, backEnd.refdef.width, backEnd.refdef.height,
 		0.0, 0.0, 0.0, 0.0, c );
 
 	RB_EndSurface();
@@ -1055,6 +1084,7 @@ static void RB_SetGL2D( void ) {
 	backEnd.projection2D = qtrue;
 
 #ifdef USE_VULKAN
+	backEnd.overlayQuadrant = -1;
 	vk_update_mvp( NULL );
 
 	// force depth range and viewport/scissor updates
@@ -1355,7 +1385,7 @@ static const void *RB_StretchPic( const void *data ) {
 
 	RB_SetGL2D();
 
-	RB_AddQuadStamp2( cmd->x, cmd->y, cmd->w, cmd->h, cmd->s1, cmd->t1, cmd->s2, cmd->t2, backEnd.color2D );
+	RB_Add2DQuad( cmd->x, cmd->y, cmd->w, cmd->h, cmd->s1, cmd->t1, cmd->s2, cmd->t2, backEnd.color2D );
 	vk_hud_keep_2d( cmd->x, cmd->y, cmd->w, cmd->h );
 	return (const void *)(cmd + 1);
 }
@@ -2007,7 +2037,8 @@ static const void *RB_HUDBuffer( const void *data ) {
 		RB_EndSurface();
 		tess.shader = NULL;
 	}
-	if ( cmd->start ) {
+	backEnd.scopeHud = cmd->start && cmd->scope;
+	if ( cmd->start && !cmd->scope ) {
 		if ( cmd->overlay ) {
 			/* Keep first-person follow HUD at eye resolution in the scene. */
 			vk_hud_set_direct( VK_XR_Screen() == NULL );

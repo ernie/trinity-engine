@@ -1168,6 +1168,8 @@ typedef struct {
 	qboolean	skyRenderedThisView;	// flag for drawing sun
 
 	qboolean	projection2D;	// if qtrue, drawstretchpic doesn't need to change modes
+	int		overlayQuadrant;	// frame quadrant the bound overlay matrices map, -1 for none
+	qboolean	scopeHud;
 	color4ub_t	color2D;
 	qboolean	doneSurfaces;   // done any 3d surfaces already
 	trRefEntity_t	entity2D;	// currentEntity will point at this when doing 2D rendering
@@ -2041,7 +2043,7 @@ typedef struct {
 } finishBloomCommand_t;
 typedef struct {
 	int commandId;
-	qboolean start, clear, overlay;
+	qboolean start, clear, overlay, scope;
 } hudBufferCommand_t;
 
 typedef struct {

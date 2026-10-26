@@ -58,7 +58,8 @@ typedef struct {
 	XrReferenceSpaceType spaceType;
 	int referenceSpaceChanged; /* Host consumes after the next valid view pose. */
 	XrTime referenceSpaceChangeTime;
-	int scope; /* Submit the mono scope texture as a head-locked quad. */
+	int scope; /* Submit the mono scope texture as a quad at scopePose. */
+	XrPosef scopePose; /* relative to space */
 	XrGraphicsRequirementsVulkan2KHR requirements;
 	XrSessionState state;
 	XrEnvironmentBlendMode blend;

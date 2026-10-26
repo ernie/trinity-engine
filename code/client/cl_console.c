@@ -305,8 +305,7 @@ static float Con_Factor( void )
 	if ( !VR_IsActiveMode() ) {
 		return cls.con_factor;
 	}
-	VR_ScreenCaptureRect( cls.glconfig.vidWidth, cls.glconfig.vidHeight, cls.glconfig.vidWidth,
-		cls.glconfig.vidHeight, 0, 0, rect );
+	VR_ScreenCaptureRect( cls.glconfig.vidWidth, cls.glconfig.vidHeight, rect );
 	return ( rect[2] - rect[0] ) / 640.0f * 0.5f;
 }
 
@@ -692,57 +691,24 @@ Con_DrawNotify
 Draws the last few lines of output transparently over the game top
 ================
 */
-/* Notify glyphs use the HUD target's pixels, not the flat console's framebuffer-sized smallchars. */
-static void Con_DrawNotifyCharVR(float x, float y, float scale, int ch)
+static void Con_DrawNotifyCharVR(float x, float y, float w, float h, int ch)
 {
 	float s, t;
 	ch &= 255;
 	if (ch == ' ' || !ch) return;
 	s = (ch & 15) * 0.0625f;
 	t = (ch >> 4) * 0.0625f;
-	re.DrawStretchPic((int)x, (int)y, (int)(SMALLCHAR_WIDTH * scale),
-		(int)(SMALLCHAR_HEIGHT * scale), s, t, s + 0.0625f, t + 0.0625f,
-		cls.charSetShader);
+	re.DrawStretchPic(x, y, w, h, s, t, s + 0.0625f, t + 0.0625f, cls.charSetShader);
 }
 
 /* Matches the in-world HUD transform without touching the screen coordinates menus and the solid console use. */
 static void Con_AdjustNotifyVR(float *x, float *y)
 {
-	float scale, tanUp, tanDown, tanHeight, opticalOffset = 0.0f;
 	if (vr.virtual_screen) {
 		SCR_AdjustFrom640(x, y, NULL, NULL);
 		return;
 	}
-	scale = cls.glconfig.vidWidth / 640.0f / 2.25f;
-	tanUp = tanf(vr.fov_angle_up);
-	tanDown = tanf(vr.fov_angle_down);
-	tanHeight = tanUp - tanDown;
-	if (fabsf(tanHeight) > 0.001f)
-		opticalOffset = 240.0f * (tanUp + tanDown) / tanHeight * scale;
-	*x = *x * scale + (cls.glconfig.vidWidth - 640.0f * scale) / 2.0f;
-	*y = *y * scale + (cls.glconfig.vidHeight - 480.0f * scale) / 2.0f + opticalOffset;
-}
-
-qboolean Con_PlayFrom640VR( float *x, float *y, float *w, float *h ) {
-	int mode = vr_currentHudDrawStatus ? vr_currentHudDrawStatus->integer : 1;
-	qboolean hudBuffer = re.HUDBufferStart && re.HUDBufferEnd;
-	float right, bottom;
-
-	if ( mode == 1 && hudBuffer ) {
-		// the mode-1 HUD buffer is 1280x960
-		*x *= 2.0f;
-		*y *= 2.0f;
-		*w *= 2.0f;
-		*h *= 2.0f;
-		return qtrue;
-	}
-	right = *x + *w;
-	bottom = *y + *h;
-	Con_AdjustNotifyVR( x, y );
-	Con_AdjustNotifyVR( &right, &bottom );
-	*w = right - *x;
-	*h = bottom - *y;
-	return hudBuffer;
+	SCR_VRBoxFrom640(x, y, NULL, NULL);
 }
 
 typedef void (*conGlyphFn_t)( int column, int row, int ch, void *ctx );
@@ -786,42 +752,46 @@ typedef struct {
 	float x0;
 	float y;
 	int start;
+	qboolean snap; // whole frame pixels
 } conVRGlyph_t;
 
 static void Con_VRNotifyGlyph( int column, int row, int ch, void *ctx ) {
 	const conVRGlyph_t *g = ctx;
 	float x = g->x0 + ( column - g->start + 1 ) * SMALLCHAR_WIDTH * g->scale;
-	Con_DrawNotifyCharVR( x, g->y, g->scale, ch );
+	float w = SMALLCHAR_WIDTH * g->scale, h = SMALLCHAR_HEIGHT * g->scale;
+	if ( g->snap ) {
+		Con_DrawNotifyCharVR( (int)x, (int)g->y, (int)w, (int)h, ch );
+		return;
+	}
+	Con_DrawNotifyCharVR( x, g->y, w, h, ch );
 }
 
-static int Con_DrawNotifyVR(void)
+/* Returns the chat line's row in 640x480 units. */
+static float Con_DrawNotifyVR(void)
 {
 	typedef struct { const short *text; int start, end; } notifySegment_t;
 	notifySegment_t segments[NUM_CON_TIMES];
-	int i, end, start, stop, space, count = 0, v = 0;
-	int mode = vr_currentHudDrawStatus ? vr_currentHudDrawStatus->integer : 1;
+	int i, end, start, stop, space, count = 0;
 	int currentColor = ColorIndex(COLOR_WHITE);
 	const int maxChars = 510 / SMALLCHAR_WIDTH;
-	/* a HUD unit covers about half the angle of a virtual-screen unit, so con_scale 1 reads alike on both */
-	float scale = ( con_scale ? con_scale->value : 1.0f ) * 2.0f;
-	float xadjust = 10.0f, yadjust = 10.0f, offset = 0.0f;
-	float unit = 2.0f; // pixels per 640 unit; mode 1's buffer is 1280x960
+	float scale = con_scale ? con_scale->value : 1.0f;
+	const int mode = vr_currentHudDrawStatus ? vr_currentHudDrawStatus->integer : 1;
+	const qboolean floating = mode == 1 && !vr.virtual_screen;
+	const float margin = floating ? 5.0f : 10.0f;
+	float xadjust = margin, yadjust = margin, offset = 0.0f, v = 0.0f, pitch;
+	float left = 0.0f, right = 640.0f, unused = 0.0f, unit;
 	const short *text;
 	conVRGlyph_t glyph;
 	const short *lines[NUM_CON_TIMES];
 	int lineCount, n;
+	qboolean hud;
 	if ((vr_showConsoleMessages && !vr_showConsoleMessages->integer) ||
-		!re.HUDBufferStart || !re.HUDBufferEnd) return 0;
-	/* Mode 0 has no floating HUD; the renderer overlays its lines as in mode 2. */
-	if (mode != 1) {
-		float left = 0.0f, right = 640.0f, unused = 0.0f;
-		Con_AdjustNotifyVR(&left, &unused);
-		Con_AdjustNotifyVR(&right, &unused);
-		unit = (right - left) / 640.0f;
-		Con_AdjustNotifyVR(&xadjust, &yadjust);
-	}
-	/* Glyphs keep mode 1's size in 640 units whatever the target's resolution. */
-	scale *= unit / 2.0f;
+		!re.HUDBufferStart || !re.HUDBufferEnd) return margin;
+	Con_AdjustNotifyVR(&left, &unused);
+	Con_AdjustNotifyVR(&right, &unused);
+	unit = (right - left) / 640.0f;
+	Con_AdjustNotifyVR(&xadjust, &yadjust);
+	scale *= unit;
 	if (cl_conXOffset->integer > 0) {
 		offset = cl_conXOffset->integer * unit;
 	}
@@ -844,22 +814,27 @@ static int Con_DrawNotifyVR(void)
 			++count;
 		}
 	}
-	if (!count) return 0;
-	re.HUDBufferStart(qfalse);
+	if (!count) return margin;
+	/* while the virtual screen is up the lines draw on it with the chat line, in every HUD mode */
+	hud = !vr.virtual_screen;
+	if (hud) re.HUDBufferStart(qfalse);
 	re.SetColor(g_color_table[currentColor]);
 	glyph.scale = scale;
 	glyph.x0 = offset + con.xadjust + xadjust;
+	/* the floating HUD's buffer resamples the frame, so its glyphs keep exact 640-unit positions */
+	glyph.snap = !floating;
+	pitch = floating ? SMALLCHAR_HEIGHT * scale : (int)(SMALLCHAR_HEIGHT * scale);
 	for (i = count > NUM_CON_TIMES ? count - NUM_CON_TIMES : 0; i < count; ++i) {
 		notifySegment_t *segment = &segments[i % NUM_CON_TIMES];
 		glyph.start = segment->start;
 		glyph.y = v + yadjust;
-		Con_WalkNotifyGlyphs( segment->text, segment->start, segment->end, v, Con_VRNotifyGlyph, &glyph, &currentColor );
-		v += SMALLCHAR_HEIGHT * scale;
+		Con_WalkNotifyGlyphs( segment->text, segment->start, segment->end, (int)v, Con_VRNotifyGlyph, &glyph, &currentColor );
+		v += pitch;
 	}
 	re.SetColor(NULL);
-	re.HUDBufferEnd();
-	/* The common chat path expects framebuffer pixels before its 480 rescale. */
-	return mode == 1 ? (int)(v * cls.glconfig.vidHeight / 960.0f) : v;
+	if (hud) re.HUDBufferEnd();
+	/* the lines start at the margin, so the chat line sits right under the last one */
+	return margin + v / unit;
 }
 
 static void Con_FlatNotifyGlyph( int column, int row, int ch, void *ctx ) {
@@ -875,7 +850,7 @@ static void Con_DrawNotify( void )
 	if (VR_IsActiveMode()) {
 		// the scope and the weapon adjust overlay hide the full HUD; the notify lines hide with it
 		if (vr.weapon_zoomed || vr.weapon_adjust) return;
-		v = Con_DrawNotifyVR();
+		v = (int)( Con_DrawNotifyVR() + 0.5f );
 		goto drawChat;
 	}
 
@@ -890,6 +865,8 @@ static void Con_DrawNotify( void )
 			v += smallchar_height;
 		}
 		re.SetColor( NULL );
+		// rescale to virtual 640x480 space
+		v /= cls.glconfig.vidHeight / 480.0;
 	}
 
 drawChat:
@@ -900,9 +877,6 @@ drawChat:
 	// draw the chat line
 	if ( Key_GetCatcher( ) & KEYCATCH_MESSAGE )
 	{
-		// rescale to virtual 640x480 space
-		v /= cls.glconfig.vidHeight / 480.0;
-
 		if (chat_team)
 		{
 			SCR_DrawBigString( SMALLCHAR_WIDTH, v, "say_team:", 1.0f, qfalse );
