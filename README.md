@@ -26,8 +26,8 @@ headset vendor's runtime. Flatscreen play and dedicated servers do not require
 a headset or runtime.
 
 Supported: Windows x64 with the SteamVR, PICOXR and Virtual Desktop VDXR
-runtimes, and Linux arm64 on the Steam Frame. Linux x86_64 and macOS OpenXR are
-untested.
+runtimes, and Linux arm64 on the Steam Frame. Linux x86_64 OpenXR is untested.
+macOS plays flatscreen only.
 
 See [VR setup and migration](docs/vr.md) for runtime setup, module compatibility,
 mirror controls, and migration from Trinity VR.

@@ -11,9 +11,10 @@ VR only and carry only the Vulkan renderer.
 Install and select the OpenXR runtime supplied by your headset or streaming
 software, then connect the headset through that software. Supported: Windows
 x64 with the SteamVR, PICOXR and Virtual Desktop VDXR runtimes, and Linux arm64
-on the Steam Frame; Linux x86_64 and macOS OpenXR are untested. On Linux, install a compatible OpenXR runtime and
-Vulkan driver. The loader packaged with the engine dispatches to that runtime
-and does not supply headset support by itself.
+on the Steam Frame; Linux x86_64 OpenXR is untested. macOS plays flatscreen
+only. On Linux, install a compatible OpenXR runtime and Vulkan driver. The
+loader packaged with the engine dispatches to that runtime and does not supply
+headset support by itself.
 
 Use `trinity.exe +set vr_enabled 1` on Windows, or the packaged Linux executable
 with `+set vr_enabled 1`. Use `+set vr_enabled 0` for flatscreen. The mode you
