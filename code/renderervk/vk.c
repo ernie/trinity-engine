@@ -11087,9 +11087,10 @@ static void vk_xr_model_asset( const vkXRModel_t *model, int asset ) {
 	const size_t size = VR_ModelPack( &model->model, NULL, NULL );
 	int i, m;
 	if ( size ) {
-		byte *packed = ri.Hunk_AllocateTempMemory( (int)size );
+		byte *packed;
 		/* hunk memory goes with the rest of tr at the next renderer restart */
 		tr.xrAssets[asset].offsets = ri.Hunk_Alloc( model->model.primitiveCount * sizeof( unsigned ), h_low );
+		packed = ri.Hunk_AllocateTempMemory( (int)size );
 		VR_ModelPack( &model->model, packed, tr.xrAssets[asset].offsets );
 		vk_create_static_buffer( packed, size, &tr.xrAssets[asset].buffer, &tr.xrAssets[asset].memory );
 		ri.Hunk_FreeTempMemory( packed );

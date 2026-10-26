@@ -398,6 +398,8 @@ void RE_RegisterFont(const char *fontName, int pointSize, fontInfo_t *font) {
 		}
 		font->glyphScale = readFloat();
 		Com_Memcpy(font->name, &fdFile[fdOffset], MAX_QPATH);
+		// shader registration can switch hunk banks, which fails while temp memory is held
+		ri.FS_FreeFile(faceData);
 
 //		Com_Memcpy(font, faceData, sizeof(fontInfo_t));
 		Q_strncpyz(font->name, name, sizeof(font->name));
@@ -405,7 +407,6 @@ void RE_RegisterFont(const char *fontName, int pointSize, fontInfo_t *font) {
 			font->glyphs[i].glyph = RE_RegisterShaderNoMip(font->glyphs[i].shaderName);
 		}
 		Com_Memcpy(&registeredFont[registeredFontCount++], font, sizeof(fontInfo_t));
-		ri.FS_FreeFile(faceData);
 		return;
 	}
 
