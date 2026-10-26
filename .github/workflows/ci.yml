@@ -30,15 +30,10 @@ jobs:
       - name: Build
         run: make -j$(nproc)
 
-      - name: Select native-module source
-        id: dependencies
-        run: |
-          release=$(jq -r '.trinity_release // empty' misc/release-dependencies.json)
-          echo "ref=${release:-main}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v6
         with:
           repository: ernie/trinity
-          ref: ${{ steps.dependencies.outputs.ref }}
+          ref: main
           path: build/trinity
       - name: Build native modules and OpenXR loader
         run: |
@@ -67,15 +62,10 @@ jobs:
       - name: Build
         run: make -j$(nproc)
 
-      - name: Select native-module source
-        id: dependencies
-        run: |
-          release=$(jq -r '.trinity_release // empty' misc/release-dependencies.json)
-          echo "ref=${release:-main}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v6
         with:
           repository: ernie/trinity
-          ref: ${{ steps.dependencies.outputs.ref }}
+          ref: main
           path: build/trinity
       - name: Build native modules and OpenXR loader
         run: |
@@ -105,15 +95,10 @@ jobs:
       - name: Build
         run: make install -j$(nproc) ARCH=aarch64 CC=gcc TRINITY_FRAME=1 DESTDIR=bin
 
-      - name: Select native-module source
-        id: dependencies
-        run: |
-          release=$(jq -r '.trinity_release // empty' misc/release-dependencies.json)
-          echo "ref=${release:-main}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v6
         with:
           repository: ernie/trinity
-          ref: ${{ steps.dependencies.outputs.ref }}
+          ref: main
           path: build/trinity
       - name: Build native modules and OpenXR loader
         run: |
@@ -143,15 +128,10 @@ jobs:
           yes | $SDKMANAGER --licenses > /dev/null 2>&1 || true
           $SDKMANAGER "ndk;27.3.13750724" "cmake;3.22.1" "build-tools;36.0.0" "platforms;android-35"
 
-      - name: Select native-module source
-        id: dependencies
-        run: |
-          release=$(jq -r '.trinity_release // empty' misc/release-dependencies.json)
-          echo "ref=${release:-main}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v6
         with:
           repository: ernie/trinity
-          ref: ${{ steps.dependencies.outputs.ref }}
+          ref: main
           path: build/trinity
 
       - name: Build unsigned APK
@@ -234,9 +214,19 @@ jobs:
             msbuild "code/win32/msvc2017/$project.vcxproj" /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:PlatformToolset=v143 /p:UseWasapi=USE_WASAPI=0
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-      - name: Build the OpenXR loader as the release does
+      - uses: actions/checkout@v6
+        with:
+          repository: ernie/trinity
+          ref: main
+          path: build/trinity
+      - name: Build native modules and the OpenXR loader as the release does
         shell: pwsh
         run: |
+          $revision = git -C build/trinity rev-parse HEAD
+          cmake -S misc/trinity-native -B build/release-native -G "Visual Studio 17 2022" -A ${{ matrix.platform }} -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_SOURCE_DIR="$PWD/build/trinity" -DTRINITY_SOURCE_REVISION="$revision"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build/release-native --config Release --target trinity-native --parallel 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $loader = (Get-Content misc/release-dependencies.json | ConvertFrom-Json).openxr_revision
           cmake -S misc/openxr-loader -B build/release-loader -G "Visual Studio 17 2022" -A ${{ matrix.platform }} -DCMAKE_BUILD_TYPE=Release -DTRINITY_RELEASE_BUILD=ON -DTRINITY_OPENXR_REVISION="$loader"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
