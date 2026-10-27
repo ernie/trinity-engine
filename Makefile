@@ -1273,6 +1273,7 @@ Q3OBJ = \
   $(B)/client/cl_vkb_layout.o \
   $(B)/client/vr_cvars.o \
   $(B)/client/vr_bind.o \
+  $(B)/client/vr_crouch.o \
   $(B)/client/xr_loader.o \
   $(B)/client/cl_renderer_recovery.o \
   $(B)/client/cl_net_chan.o \

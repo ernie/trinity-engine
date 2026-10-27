@@ -13,6 +13,7 @@ cvar_t *vr_righthanded = NULL;
 cvar_t *vr_switchThumbsticks = NULL;
 cvar_t *vr_snapturn = NULL;
 cvar_t *vr_heightAdjust = NULL;
+cvar_t *vr_physicalCrouch = NULL;
 cvar_t *vr_directionMode = NULL;
 cvar_t *vr_weaponPitch = NULL;
 cvar_t *vr_twoHandedWeapons = NULL;
@@ -74,6 +75,7 @@ void VR_InitCvars( void )
 	// Degrees on top of the controller's pitch correction; zero is no personal adjustment
 	vr_weaponPitch = Cvar_Get( "vr_weaponPitch", "0", CVAR_ARCHIVE );
 	vr_heightAdjust = Cvar_Get( "vr_heightAdjust", "0.0", CVAR_ARCHIVE );
+	vr_physicalCrouch = Cvar_Get( "vr_physicalCrouch", "1", CVAR_ARCHIVE );
 	vr_twoHandedWeapons = Cvar_Get( "vr_twoHandedWeapons", "1", CVAR_ARCHIVE );
 	Cvar_Get( "vr_showItemInHand", "1", CVAR_ARCHIVE );
 	vr_refreshrate = Cvar_Get( "vr_refreshrate", "90", CVAR_ARCHIVE );

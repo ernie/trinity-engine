@@ -465,6 +465,7 @@
     <ClCompile Include="..\..\client\cl_renderer_recovery.c" />
     <ClCompile Include="..\..\vrcommon\vr_cvars.c" />
     <ClCompile Include="..\..\vrcommon\vr_bind.c" />
+    <ClCompile Include="..\..\vrcommon\vr_crouch.c" />
     <ClCompile Include="..\..\vrcommon\xr_loader.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

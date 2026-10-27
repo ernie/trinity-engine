@@ -77,6 +77,7 @@ typedef struct {
 	refXREye_t eyes[2];
 	clXRInputSample_t input;
 	vrScreenGeometry_t screen;
+	float standHeight; // meters above the STAGE floor at the last recenter; 0 until a STAGE recenter is measured
 } refXRFrame_t;
 
 typedef struct poly_s {

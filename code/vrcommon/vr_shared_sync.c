@@ -63,6 +63,10 @@ void VR_SharedSyncIn( vr_shared_t *dst, int structSize ) {
 	VectorCopy( vr.offhandangles, s->offhandangles );
 	VectorCopy( vr.offhandoffset, s->offhandoffset );
 	VectorCopy( vr.offhandposition, s->offhandposition );
+	s->hmdposition[1] += vr.crouchLift;
+	s->hmdorigin[1] += vr.crouchLift;
+	s->weaponposition[1] += vr.crouchLift;
+	s->offhandposition[1] += vr.crouchLift;
 	s->thumbstick_location[0][0] = vr.thumbstick_location[0][0];
 	s->thumbstick_location[0][1] = vr.thumbstick_location[0][1];
 	s->thumbstick_location[1][0] = vr.thumbstick_location[1][0];

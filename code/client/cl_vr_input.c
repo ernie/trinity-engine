@@ -6,6 +6,7 @@
 #include "cl_bhaptics.h"
 #include "../vrcommon/vr_state.h"
 #include "../vrcommon/vr_input_types.h"
+#include "../vrcommon/vr_crouch.h"
 
 static clBHaptics_t suitHaptics;
 static qboolean suitEnabled;
@@ -24,6 +25,8 @@ static qboolean holdsReady;
 static vrStack_t stack;
 static unsigned char keysNow[VRK_COUNT];
 static int weaponSelectHeld, stabiliseHeld;
+static vrCrouch_t crouch;
+static qboolean crouchCarried;
 static int clickKey[VRK_COUNT + 1], navKey[VRK_COUNT + 1], navAnchorX, navAnchorY; // the last slot is the console's
 
 /* The virtual screen is a monitor: cg_fov over a symmetric crop, derived from vr.virtual_screen so the two agree. */
@@ -371,6 +374,8 @@ void CL_VRInput_Reset( void ) {
 	VRInput_RunEvents( events, VR_ReleaseAll( &holds, events, VRK_COUNT ), qtrue );
 	memset( &input, 0, sizeof( input ) );
 	memset( keysNow, 0, sizeof( keysNow ) );
+	crouch.active = 0;
+	crouchCarried = qfalse;
 	weaponSelectHeld = stabiliseHeld = 0;
 	vr.weapon_select = vr.weapon_select_using_thumbstick = vr.weapon_select_autoclose = qfalse;
 	vr.weapon_stabilised = vr.walking = vr.vkbOffhandTriggerDown = qfalse;
@@ -572,6 +577,21 @@ static void VRInput_Signals( vrSignals_t *s ) {
 	s->spectating = cl.snap.ps.persistant[PERS_TEAM] == TEAM_SPECTATOR;
 }
 
+/* Outside dry normal movement, upmove -127 swims, flies or descends. */
+static qboolean VRInput_CrouchEligible( void ) {
+	const playerState_t *ps = &cl.snap.ps;
+	vec3_t point;
+	if ( !vr_physicalCrouch || !vr_physicalCrouch->integer || clc.demoplaying || tvPlay.active )
+		return qfalse;
+	if ( ps->pm_type != PM_NORMAL || ( ps->pm_flags & PMF_FOLLOW ) || ps->stats[STAT_HEALTH] <= 0 )
+		return qfalse;
+	if ( ps->powerups[PW_FLIGHT] || ps->powerups[PW_INVULNERABILITY] )
+		return qfalse;
+	VectorCopy( ps->origin, point );
+	point[2] += MINS_Z + ( CROUCH_VIEWHEIGHT - MINS_Z ) / 2;
+	return ( CM_PointContents( point, 0 ) & MASK_WATER ) == 0;
+}
+
 void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	qboolean wheel, priorWheel, menu;
 	vec3_t oldAngles, oldPosition;
@@ -586,6 +606,8 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 		CL_VRInput_Reset();
 		return;
 	}
+	VR_CrouchSetStanding( &crouch, frame->standHeight );
+	VR_CrouchUpdate( &crouch, frame->head.position[1], VRInput_CrouchEligible() );
 	input.sample = frame->input;
 	input.valid = qtrue;
 	input.previousTime = input.time;
@@ -709,7 +731,7 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 		!VKeyboard_IsActive() && !vr.weapon_adjust && !vr.menuYawLocked )
 		CL_MouseEvent( 0, 0 );
 	thresholds.triggerPress = 1 - VRInput_Cvar( vr_triggerSensitivity, .25f );
-	thresholds.triggerRelease = fmaxf( .1f, thresholds.triggerPress - .25f );
+	thresholds.triggerRelease = thresholds.triggerPress - fminf( .25f, thresholds.triggerPress * .5f );
 	thresholds.gripPress = VRInput_Cvar( vr_gripThreshold, .5f );
 	thresholds.gripRelease = thresholds.gripPress - .1f;
 	thresholds.padPress = VRInput_Cvar( vr_trackpadThreshold, .3f );
@@ -832,6 +854,7 @@ qboolean CL_VRInput_ApplyMove( usercmd_t *cmd ) {
 	vec3_t angles;
 	usercmd_t keys;
 	int primary, i, catcher;
+	crouchCarried = qfalse;
 	if ( !VR_IsActiveMode() )
 		return qfalse;
 	/* Read every frame so a press made while neutral cannot fire afterwards. */
@@ -888,6 +911,9 @@ qboolean CL_VRInput_ApplyMove( usercmd_t *cmd ) {
 		int original = cmd->forwardmove;
 		cmd->forwardmove = (signed char)Com_Clamp( -127, 127, original * cosf( pitch ) );
 		cmd->upmove = (signed char)Com_Clamp( -127, 127, cmd->upmove - original * sinf( pitch ) );
+	} else if ( crouch.active && keys.upmove <= 0 ) {
+		cmd->upmove = -127;
+		crouchCarried = qtrue;
 	}
 	cmd->buttons |= keys.buttons & 0xFFF & ~BUTTON_TALK; // bits 12-25 carry the head pose
 	if ( !input.sample.hands[primary].aim.orientationValid || !input.sample.hands[primary].aim.positionValid )
@@ -922,4 +948,10 @@ qboolean CL_VRInput_ApplyMove( usercmd_t *cmd ) {
 	}
 	CL_VRInput_FinalizePose( cmd );
 	return qtrue;
+}
+
+void CL_VRInput_CrouchLift( void ) {
+	const float scale = VRInput_Cvar( vr_worldscale, 0 );
+	vr.crouchLift = VR_CrouchLift( &crouch, crouchCarried, cl.serverTime,
+								   VR_IsActiveMode() && scale > 0 ? ( DEFAULT_VIEWHEIGHT - CROUCH_VIEWHEIGHT ) / scale : 0 );
 }

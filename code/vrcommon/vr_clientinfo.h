@@ -39,6 +39,7 @@ typedef struct vr_clientinfo_s {
 	vec3_t hmdposition;
 	vec3_t hmdorigin; //used to recenter the mp 6DoF playspace
 	vec3_t hmdposition_delta;
+	float crouchLift; // meters added to the published heights
 
 	vec3_t hmdorientation;
 	vec3_t hmdorientation_delta;

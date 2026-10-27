@@ -64,6 +64,7 @@ static char failure[256];
 static vrScreenAnchor_t screenAnchor;
 static vrScreenGeometry_t screenGeometry;
 static vec3_t floorOrigin;
+static float standHeight;
 static vkXRRefresh_t refresh;
 static float refreshRequested = -1;
 static float zoomLevel = 1;
@@ -827,16 +828,19 @@ int VK_XR_BeginFrame( refXRFrame_t *frame ) {
 		Com_Memcpy( frame->head.position, &center.position, sizeof( frame->head.position ) );
 		Com_Memcpy( frame->head.orientation, &center.orientation, sizeof( frame->head.orientation ) );
 		if ( VKXR_Shown() && VK_XRVK_ConsumeSpaceChange( &xr ) ) {
+			standHeight = 0;
 			/* Rebase STAGE beneath the head and cancel its yaw for the floor.
 			 * In raw-stage coordinates that is this translation. */
 			VectorClear( floorOrigin );
 			if ( xr.spaceType == XR_REFERENCE_SPACE_TYPE_STAGE ) {
 				floorOrigin[0] = center.position.x;
 				floorOrigin[2] = center.position.z;
+				standHeight = center.position.y;
 			}
 			Com_Memset( &screenAnchor, 0, sizeof( screenAnchor ) );
 		}
 	}
+	frame->standHeight = standHeight;
 	gazeValid = VK_XRGaze_Sample( &gaze, xr.space, xr.viewSpace, frame->head.orientation, xr.displayTime,
 								  frame->renderable && frame->focused, gazeDirection );
 	runtimeCenterValid = 0;
@@ -933,6 +937,7 @@ void VK_XR_ShutdownSession( void ) {
 	Com_Memset( &screenAnchor, 0, sizeof( screenAnchor ) );
 	Com_Memset( &screenGeometry, 0, sizeof( screenGeometry ) );
 	VectorClear( floorOrigin );
+	standHeight = 0;
 	glConfig.stereoEnabled = qfalse;
 }
 void VK_XR_ShutdownInstance( void ) {

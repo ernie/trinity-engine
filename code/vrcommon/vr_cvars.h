@@ -9,6 +9,7 @@ extern cvar_t *vr_righthanded;
 extern cvar_t *vr_switchThumbsticks;
 extern cvar_t *vr_snapturn;
 extern cvar_t *vr_heightAdjust;
+extern cvar_t *vr_physicalCrouch;
 extern cvar_t *vr_directionMode;
 extern cvar_t *vr_weaponPitch;
 extern cvar_t *vr_twoHandedWeapons;

@@ -3431,6 +3431,7 @@ void CL_Frame( int msec, int realMsec ) {
 
 	// decide on the serverTime to render
 	CL_SetCGameTime();
+	CL_VRInput_CrouchLift();
 
 	// update the screen
 	cls.framecount++;
