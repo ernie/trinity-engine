@@ -43,20 +43,27 @@ XrResult VK_XRRefresh_Init( vkXRRefresh_t *ctx, XrInstance instance, XrSession s
 	ctx->available = 1;
 	return XR_SUCCESS;
 }
-XrResult VK_XRRefresh_Request( vkXRRefresh_t *ctx, float hz ) {
+int VK_XRRefresh_Offered( const vkXRRefresh_t *ctx, float hz ) {
 	uint32_t i;
+	if ( !ctx )
+		return -1;
+	for ( i = 0; i < ctx->count; i++ )
+		if ( fabsf( ctx->rates[i] - hz ) < .01f )
+			return (int)i;
+	return -1;
+}
+XrResult VK_XRRefresh_Request( vkXRRefresh_t *ctx, float hz ) {
+	int offered;
 	XrResult result;
 	if ( !ctx || !ctx->available )
 		return XR_ERROR_FUNCTION_UNSUPPORTED;
 	if ( !VR_FloatFinite( hz ) || hz < 0 )
 		return XR_ERROR_VALIDATION_FAILURE;
 	if ( hz != 0 ) {
-		for ( i = 0; i < ctx->count; i++ )
-			if ( fabsf( ctx->rates[i] - hz ) < .01f )
-				break;
-		if ( i == ctx->count )
+		offered = VK_XRRefresh_Offered( ctx, hz );
+		if ( offered < 0 )
 			return XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB;
-		hz = ctx->rates[i];
+		hz = ctx->rates[offered];
 	}
 	result = ctx->request( ctx->session, hz );
 	/* Requests may be applied asynchronously; do not report the target as current. */

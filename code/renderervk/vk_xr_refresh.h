@@ -18,6 +18,8 @@ typedef struct {
 /* enabled is the live owner's enabled extension flag. Failures are optional:
  * caller logs them and continues using the runtime's current refresh rate. */
 XrResult VK_XRRefresh_Init( vkXRRefresh_t *, XrInstance, XrSession, PFN_xrGetInstanceProcAddr, int enabled );
+/* index of the offered rate within .01 Hz of hz, or -1 */
+int VK_XRRefresh_Offered( const vkXRRefresh_t *, float hz );
 XrResult VK_XRRefresh_Request( vkXRRefresh_t *, float hz );
 void VK_XRRefresh_FormatRates( const vkXRRefresh_t *, char *, size_t );
 #endif
