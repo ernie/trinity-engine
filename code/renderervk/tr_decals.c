@@ -1,6 +1,7 @@
 /*
  * tr_decals.c -- enhanced blood decals: radial projection of a decal onto all
- * nearby world surfaces, stored in a ring buffer and drawn via the SF_POLY path.
+ * nearby world surfaces or one mover's, stored in a ring buffer and drawn via
+ * the SF_POLY path; a mover's decals draw with its brush entity.
  */
 #include "tr_local.h"
 
@@ -9,11 +10,13 @@
 static decal_t		r_decals[MAX_DECAL_FRAGMENTS];
 static polyVert_t	r_decalVerts[MAX_DECAL_FRAGMENTS * MAX_DECAL_VERTS_PER_FRAG];
 static int			r_decalHead;		// next fragment slot (ring)
+static decal_t		*r_modelDecals[MAX_MOD_KNOWN];
 
 void RE_ClearDecals( void ) {
 	int i;
 
 	Com_Memset( r_decals, 0, sizeof( r_decals ) );
+	Com_Memset( r_modelDecals, 0, sizeof( r_modelDecals ) );
 	r_decalHead = 0;
 
 	// bind each fragment slot to its fixed vertex window
@@ -21,6 +24,32 @@ void RE_ClearDecals( void ) {
 		r_decals[i].srf.surfaceType = SF_POLY;
 		r_decals[i].srf.verts = &r_decalVerts[i * MAX_DECAL_VERTS_PER_FRAG];
 	}
+}
+
+static void R_DecalUnlink( decal_t *d ) {
+	if ( !d->model ) {
+		return;
+	}
+	if ( d->prev ) {
+		d->prev->next = d->next;
+	} else {
+		r_modelDecals[d->model] = d->next;
+	}
+	if ( d->next ) {
+		d->next->prev = d->prev;
+	}
+	d->model = 0;
+	d->prev = d->next = NULL;
+}
+
+static void R_DecalLink( decal_t *d, int model ) {
+	d->model = model;
+	d->prev = NULL;
+	d->next = r_modelDecals[model];
+	if ( d->next ) {
+		d->next->prev = d;
+	}
+	r_modelDecals[model] = d;
 }
 
 // fog lookup mirrors RE_AddPolyToScene
@@ -61,7 +90,7 @@ static void R_DecalAxisFromNormal( const vec3_t normal, float orientation, vec3_
 // plane, and store the result as a ring decal fragment. axis[0] is the
 // surface's outward unit normal; tri are the 3 positions.
 static void R_DecalClipTriangle( const vec3_t origin, float size, float reach, vec3_t axis[3],
-		float texScale, qhandle_t hShader, const byte color[4], int lifeTime, vec3_t tri[3] ) {
+		float texScale, qhandle_t hShader, const byte color[4], int lifeTime, int model, vec3_t tri[3] ) {
 	vec3_t		poly[2][MAX_VERTS_ON_POLY];
 	vec3_t		neg;
 	int			numPoly, ping, k;
@@ -109,6 +138,11 @@ static void R_DecalClipTriangle( const vec3_t origin, float size, float reach, v
 	dec = &r_decals[r_decalHead];
 	r_decalHead = ( r_decalHead + 1 ) & ( MAX_DECAL_FRAGMENTS - 1 );
 
+	R_DecalUnlink( dec );
+	if ( model ) {
+		R_DecalLink( dec, model );
+	}
+
 	v = dec->srf.verts;	// fixed window bound in RE_ClearDecals
 	for ( k = 0; k < numPoly; k++ ) {
 		VectorCopy( poly[ping][k], v[k].xyz );
@@ -142,17 +176,32 @@ static qboolean R_DecalTriNormal( vec3_t tri[3], vec3_t normal ) {
 }
 
 void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orientation,
-		qhandle_t hShader, const float rgba[4], int lifeTime ) {
+		qhandle_t hShader, const float rgba[4], int lifeTime,
+		qhandle_t model, const vec3_t modelOrigin, const vec3_t modelAxis[3] ) {
+	const model_t	*mod;
+	vec3_t			center, delta;
 	vec3_t			mins, maxs;
 	surfaceType_t	*surfaces[64];
 	vec3_t			zeroDir = { 0, 0, 0 };
 	vec3_t			axis[3], tri[3], normal;
 	byte			color[4];
 	float			texScale;
-	int				numSurfaces, i, k, m, n;
+	int				owner, numSurfaces, i, k, m, n;
 
 	if ( tr.world == NULL || size <= 0 || hShader == 0 ) {
 		return;
+	}
+
+	mod = ( modelOrigin && modelAxis ) ? R_GetSubmodelByHandle( model ) : NULL;
+	if ( mod ) {
+		VectorSubtract( origin, modelOrigin, delta );
+		for ( i = 0; i < 3; i++ ) {
+			center[i] = DotProduct( delta, modelAxis[i] );
+		}
+		owner = mod->index;
+	} else {
+		VectorCopy( origin, center );
+		owner = 0;
 	}
 
 	color[0] = (byte)( rgba[0] * 255 );
@@ -162,13 +211,17 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 	texScale = 0.5f / size;
 
 	for ( i = 0; i < 3; i++ ) {
-		mins[i] = origin[i] - reach;
-		maxs[i] = origin[i] + reach;
+		mins[i] = center[i] - reach;
+		maxs[i] = center[i] + reach;
 	}
 
-	tr.viewCount++;
 	numSurfaces = 0;
-	R_BoxSurfaces_r( tr.world->nodes, mins, maxs, surfaces, 64, &numSurfaces, zeroDir, qtrue );
+	if ( mod ) {
+		R_BmodelSurfaces( mod->bmodel, mins, maxs, surfaces, 64, &numSurfaces, zeroDir, qtrue );
+	} else {
+		tr.viewCount++;
+		R_BoxSurfaces_r( tr.world->nodes, mins, maxs, surfaces, 64, &numSurfaces, zeroDir, qtrue );
+	}
 
 	for ( i = 0; i < numSurfaces; i++ ) {
 
@@ -185,7 +238,7 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 				for ( m = 0; m < 3; m++ ) {
 					VectorCopy( &face->points[0][0] + VERTEXSIZE * indexes[k + m], tri[m] );
 				}
-				R_DecalClipTriangle( origin, size, reach, axis, texScale, hShader, color, lifeTime, tri );
+				R_DecalClipTriangle( center, size, reach, axis, texScale, hShader, color, lifeTime, owner, tri );
 			}
 		}
 		else if ( *surfaces[i] == SF_GRID ) {
@@ -215,11 +268,11 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 						VectorAdd( tri[0], tri[1], cen );
 						VectorAdd( cen, tri[2], cen );
 						VectorScale( cen, 1.0f / 3.0f, cen );
-						if ( Distance( cen, origin ) > reach ) {
+						if ( Distance( cen, center ) > reach ) {
 							continue;	// only segments the decal sphere overlaps
 						}
 						// only front-facing segments contribute (no back-of-curve bleed)
-						if ( DotProduct( origin, normal ) - DotProduct( tri[0], normal ) < 0.0f ) {
+						if ( DotProduct( center, normal ) - DotProduct( tri[0], normal ) < 0.0f ) {
 							continue;
 						}
 						VectorAdd( sumNormal, normal, sumNormal );
@@ -249,7 +302,7 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 						if ( !R_DecalTriNormal( tri, normal ) || DotProduct( normal, sharedNormal ) <= 0.0f ) {
 							continue;
 						}
-						R_DecalClipTriangle( origin, size, reach, axis, texScale, hShader, color, lifeTime, tri );
+						R_DecalClipTriangle( center, size, reach, axis, texScale, hShader, color, lifeTime, owner, tri );
 					}
 				}
 			}
@@ -270,11 +323,11 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 				VectorAdd( tri[0], tri[1], cen );
 				VectorAdd( cen, tri[2], cen );
 				VectorScale( cen, 1.0f / 3.0f, cen );
-				if ( Distance( cen, origin ) > reach ) {
+				if ( Distance( cen, center ) > reach ) {
 					continue;
 				}
 				// only front-facing segments contribute (no back-of-curve bleed)
-				if ( DotProduct( origin, normal ) - DotProduct( tri[0], normal ) < 0.0f ) {
+				if ( DotProduct( center, normal ) - DotProduct( tri[0], normal ) < 0.0f ) {
 					continue;
 				}
 				VectorAdd( sumNormal, normal, sumNormal );
@@ -292,42 +345,58 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 				if ( !R_DecalTriNormal( tri, normal ) || DotProduct( normal, sharedNormal ) <= 0.0f ) {
 					continue;	// skip back-facing segments
 				}
-				R_DecalClipTriangle( origin, size, reach, axis, texScale, hShader, color, lifeTime, tri );
+				R_DecalClipTriangle( center, size, reach, axis, texScale, hShader, color, lifeTime, owner, tri );
 			}
 		}
 	}
 }
 
-void R_AddDecalSurfaces( void ) {
-	int			i, j;
-	decal_t		*d;
+static void R_AddDecalSurface( decal_t *d ) {
+	int			j;
 	shader_t	*sh;
+
+	// fade by age (CPU vertex alpha); retire when fully aged
+	if ( d->lifeTime > 0 ) {
+		int age = tr.refdef.time - d->spawnTime;
+		int fade;
+
+		if ( age < 0 || age >= d->lifeTime ) {
+			d->srf.numVerts = 0;	// expired (or clock reset) -> free the slot
+			R_DecalUnlink( d );
+			return;
+		}
+		fade = 255 - ( 255 * age / d->lifeTime );
+		for ( j = 0; j < d->srf.numVerts; j++ ) {
+			d->srf.verts[j].modulate.rgba[3] = (byte)( ( d->baseColor[3] * fade ) / 255 );
+		}
+	}
+
+	sh = R_GetShaderByHandle( d->srf.hShader );
+	R_AddDrawSurf( (surfaceType_t *)&d->srf, sh, d->srf.fogIndex, 0 );
+}
+
+void R_AddDecalSurfaces( void ) {
+	int			i;
+	decal_t		*d;
 
 	tr.currentEntityNum = REFENTITYNUM_WORLD;
 	tr.shiftedEntityNum = tr.currentEntityNum << QSORT_REFENTITYNUM_SHIFT;
 
 	for ( i = 0; i < MAX_DECAL_FRAGMENTS; i++ ) {
 		d = &r_decals[i];
-		if ( d->srf.numVerts < 3 || d->srf.hShader == 0 ) {
+		if ( d->srf.numVerts < 3 || d->srf.hShader == 0 || d->model ) {
 			continue;
 		}
+		R_AddDecalSurface( d );
+	}
+}
 
-		// fade by age (CPU vertex alpha); retire when fully aged
-		if ( d->lifeTime > 0 ) {
-			int age = tr.refdef.time - d->spawnTime;
-			int fade;
+// runs with the brush entity carrying the model as the current entity
+void R_AddModelDecalSurfaces( int model ) {
+	decal_t		*d, *next;
 
-			if ( age < 0 || age >= d->lifeTime ) {
-				d->srf.numVerts = 0;	// expired (or clock reset) -> free the slot
-				continue;
-			}
-			fade = 255 - ( 255 * age / d->lifeTime );
-			for ( j = 0; j < d->srf.numVerts; j++ ) {
-				d->srf.verts[j].modulate.rgba[3] = (byte)( ( d->baseColor[3] * fade ) / 255 );
-			}
-		}
-
-		sh = R_GetShaderByHandle( d->srf.hShader );
-		R_AddDrawSurf( (surfaceType_t *)&d->srf, sh, d->srf.fogIndex, 0 );
+	for ( d = r_modelDecals[model]; d; d = next ) {
+		next = d->next;
+		R_AddDecalSurface( d );
 	}
 }

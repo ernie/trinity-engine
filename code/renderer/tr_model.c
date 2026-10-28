@@ -238,6 +238,24 @@ model_t	*R_GetModelByHandle( qhandle_t index ) {
 	return mod;
 }
 
+/*
+** R_GetSubmodelByHandle
+*/
+model_t *R_GetSubmodelByHandle( qhandle_t index ) {
+	model_t		*mod;
+
+	if ( !tr.world ) {
+		return NULL;
+	}
+
+	mod = R_GetModelByHandle( index );
+	if ( mod->type != MOD_BRUSH || !mod->bmodel || mod->bmodel == tr.world->bmodels ) {
+		return NULL;
+	}
+
+	return mod;
+}
+
 //===============================================================================
 
 /*

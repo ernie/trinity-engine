@@ -369,7 +369,9 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 	if ( clip == CULL_OUT ) {
 		return;
 	}
-	
+
+	R_AddModelDecalSurfaces( pModel->index );
+
 	R_SetupEntityLighting( &tr.refdef, ent );
 	R_DlightBmodel( bmodel );
 

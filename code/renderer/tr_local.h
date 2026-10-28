@@ -933,6 +933,7 @@ typedef struct model_s {
 
 void		R_ModelInit (void);
 model_t		*R_GetModelByHandle( qhandle_t hModel );
+model_t		*R_GetSubmodelByHandle( qhandle_t hModel );
 int			R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFrame, 
 					 float frac, const char *tagName );
 void		R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs );
@@ -1716,6 +1717,8 @@ MARKERS, POLYGON PROJECTION ON WORLD POLYGONS
 
 void R_BoxSurfaces_r(mnode_t *node, vec3_t mins, vec3_t maxs, surfaceType_t **list,
 		int listsize, int *listlength, vec3_t dir, qboolean radial);
+void R_BmodelSurfaces( const bmodel_t *bmodel, vec3_t mins, vec3_t maxs, surfaceType_t **list,
+		int listsize, int *listlength, const vec3_t dir, qboolean radial );
 
 #ifndef MAX_VERTS_ON_POLY
 #define MAX_VERTS_ON_POLY 64
@@ -1726,6 +1729,9 @@ void R_ChopPolyBehindPlane( int numInPoints, vec3_t inPoints[MAX_VERTS_ON_POLY],
 		vec3_t normal, vec_t dist, vec_t epsilon );
 int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projection,
 				   int maxPoints, vec3_t pointBuffer, int maxFragments, markFragment_t *fragmentBuffer );
+int R_MarkFragments2( int numPoints, const vec3_t *points, const vec3_t projection,
+				   int maxPoints, vec3_t pointBuffer, int maxFragments, markFragment_t *fragmentBuffer,
+				   qhandle_t model, const vec3_t modelOrigin, const vec3_t modelAxis[3] );
 
 
 /*
@@ -1747,9 +1753,11 @@ void RE_AddLightToScene( const vec3_t org, float intensity, float r, float g, fl
 void RE_AddAdditiveLightToScene( const vec3_t org, float intensity, float r, float g, float b );
 void RE_AddLinearLightToScene( const vec3_t start, const vec3_t end, float intensity, float r, float g, float b );
 void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orientation,
-		qhandle_t hShader, const float rgba[4], int lifeTime );
+		qhandle_t hShader, const float rgba[4], int lifeTime,
+		qhandle_t model, const vec3_t modelOrigin, const vec3_t modelAxis[3] );
 void RE_ClearDecals( void );
 void R_AddDecalSurfaces( void );
+void R_AddModelDecalSurfaces( int model );
 
 void RE_RenderScene( const refdef_t *fd );
 
@@ -1934,11 +1942,13 @@ typedef enum {
 #define MAX_DECAL_FRAGMENTS		4096
 #define MAX_DECAL_VERTS_PER_FRAG	16
 
-typedef struct {
+typedef struct decal_s {
 	srfPoly_t	srf;
 	int			spawnTime;
 	int			lifeTime;
 	byte		baseColor[4];
+	int			model;			// inline model the verts are relative to; 0 for the world
+	struct decal_s	*prev, *next;
 } decal_t;
 
 // all of the information needed by the back end must be

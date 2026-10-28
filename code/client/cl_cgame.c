@@ -552,6 +552,11 @@ static qboolean CL_GetValue( char* value, int valueSize, const char* key ) {
 		return qtrue;
 	}
 
+	if ( !Q_stricmp( key, "trap_R_MarkFragments2" ) && re.MarkFragments2 ) {
+		Com_sprintf( value, valueSize, "%i", CG_R_MARKFRAGMENTS2 );
+		return qtrue;
+	}
+
 	// engine-oriented billboard quads: poly-batched, backend-oriented per
 	// view; advertised only when the active renderer implements it
 	if ( !Q_stricmp( key, "trap_R_AddSpritePolyToScene" ) && re.AddSpritePolyToScene ) {
@@ -1056,8 +1061,14 @@ static intptr_t CL_CgameSystemCalls( intptr_t *args ) {
 		return CL_GetValue( VMA(1), args[2], VMA(3) );
 
 	case CG_R_PROJECTDECAL:
-		re.ProjectDecal( VMA(1), VMF(2), VMF(3), VMF(4), args[5], VMA(6), args[7] );
+		re.ProjectDecal( VMA(1), VMF(2), VMF(3), VMF(4), args[5], VMA(6), args[7], args[8], VMA(9), VMA(10) );
 		return 0;
+
+	case CG_R_MARKFRAGMENTS2:
+		VM_CHECKBOUNDS3( cgvm, args[2], args[1], sizeof( vec3_t ) );
+		VM_CHECKBOUNDS3( cgvm, args[5], args[4], sizeof( vec3_t ) );
+		VM_CHECKBOUNDS3( cgvm, args[7], args[6], sizeof( markFragment_t ) );
+		return re.MarkFragments2( args[1], VMA(2), VMA(3), args[4], VMA(5), args[6], VMA(7), args[8], VMA(9), VMA(10) );
 
 	case CG_R_ADDSPRITEPOLYTOSCENE:
 		re.AddSpritePolyToScene( args[1], VMA(2), VMF(3), VMF(4), VMF(5), VMA(6) );
@@ -1081,7 +1092,7 @@ CL_DllSyscall
 */
 static intptr_t QDECL CL_DllSyscall( intptr_t arg, ... ) {
 #if !id386 || defined __clang__
-	intptr_t	args[10]; // max.count for cgame
+	intptr_t	args[11]; // max.count for cgame
 	va_list	ap;
 	int i;
 

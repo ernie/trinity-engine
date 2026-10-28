@@ -121,10 +121,19 @@ typedef struct {
 	void	(*VertexLighting)( qboolean allowed );
 	void	(*SyncRender)( void );
 
-	// enhanced blood decals: radial projected decal onto nearby world surfaces
+	// enhanced blood decals: radial projected decal onto nearby world
+	// surfaces, or onto a mover's inline model posed at modelOrigin and
+	// modelAxis; any other model, or no pose, means the world
 	void	(*ProjectDecal)( const vec3_t origin, float size, float reach, float orientation,
-				qhandle_t hShader, const float rgba[4], int lifeTime );
+				qhandle_t hShader, const float rgba[4], int lifeTime,
+				qhandle_t model, const vec3_t modelOrigin, const vec3_t modelAxis[3] );
 	void	(*ClearDecals)( void );
+
+	// MarkFragments on one inline model posed at modelOrigin and
+	// modelAxis; returned points are in the model's space
+	int		(*MarkFragments2)( int numPoints, const vec3_t *points, const vec3_t projection,
+				int maxPoints, vec3_t pointBuffer, int maxFragments, markFragment_t *fragmentBuffer,
+				qhandle_t model, const vec3_t modelOrigin, const vec3_t modelAxis[3] );
 
 	// engine-oriented billboard quad: poly-batched, backend-oriented per view
 	void	(*AddSpritePolyToScene)( qhandle_t hShader, const vec3_t origin, float width, float height, float rotation, const byte *rgba );

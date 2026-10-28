@@ -194,6 +194,40 @@ void R_BoxSurfaces_r(mnode_t *node, vec3_t mins, vec3_t maxs, surfaceType_t **li
 
 /*
 =================
+R_BmodelSurfaces
+
+=================
+*/
+void R_BmodelSurfaces( const bmodel_t *bmodel, vec3_t mins, vec3_t maxs, surfaceType_t **list, int listsize, int *listlength, const vec3_t dir, qboolean radial ) {
+	const msurface_t	*surf;
+	cplane_t			*plane;
+	int					i, s;
+
+	for ( i = 0; i < bmodel->numSurfaces && *listlength < listsize; i++ ) {
+		surf = tr.world->surfaces + bmodel->firstSurface + i;
+		if ( ( surf->shader->surfaceFlags & ( SURF_NOIMPACT | SURF_NOMARKS ) )
+			|| ( surf->shader->contentFlags & CONTENTS_FOG ) ) {
+			continue;
+		}
+		if ( *surf->data == SF_FACE ) {
+			plane = &( ( srfBspSurface_t * ) surf->data )->cullPlane;
+			s = BoxOnPlaneSide( mins, maxs, plane );
+			if ( s == 1 || s == 2 || ( !radial && DotProduct( plane->normal, dir ) > -0.5 ) ) {
+				continue;
+			}
+		} else if ( *surf->data == SF_GRID || *surf->data == SF_TRIANGLES ) {
+			if ( !BoundsIntersect( mins, maxs, surf->cullinfo.bounds[0], surf->cullinfo.bounds[1] ) ) {
+				continue;
+			}
+		} else {
+			continue;
+		}
+		list[(*listlength)++] = surf->data;
+	}
+}
+
+/*
+=================
 R_AddMarkFragments
 
 =================
@@ -253,11 +287,11 @@ static void R_AddMarkFragments(int numClipPoints, vec3_t clipPoints[2][MAX_VERTS
 
 /*
 =================
-R_MarkFragments
+R_MarkFragmentsOn
 
 =================
 */
-int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projection,
+static int R_MarkFragmentsOn( const bmodel_t *bmodel, int numPoints, const vec3_t *points, const vec3_t projection,
 				   int maxPoints, vec3_t pointBuffer, int maxFragments, markFragment_t *fragmentBuffer ) {
 	int				numsurfaces, numPlanes;
 	int				i, j, k, m, n;
@@ -318,7 +352,11 @@ int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projectio
 	numPlanes = numPoints + 2;
 
 	numsurfaces = 0;
-	R_BoxSurfaces_r(tr.world->nodes, mins, maxs, surfaces, 64, &numsurfaces, projectionDir, qfalse);
+	if ( bmodel ) {
+		R_BmodelSurfaces( bmodel, mins, maxs, surfaces, 64, &numsurfaces, projectionDir, qfalse );
+	} else {
+		R_BoxSurfaces_r(tr.world->nodes, mins, maxs, surfaces, 64, &numsurfaces, projectionDir, qfalse);
+	}
 	//assert(numsurfaces <= 64);
 	//assert(numsurfaces != 64);
 
@@ -469,5 +507,53 @@ int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projectio
 		}
 	}
 	return returnedFragments;
+}
+
+/*
+=================
+R_MarkFragments
+
+=================
+*/
+int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projection,
+				   int maxPoints, vec3_t pointBuffer, int maxFragments, markFragment_t *fragmentBuffer ) {
+	return R_MarkFragmentsOn( NULL, numPoints, points, projection, maxPoints, pointBuffer, maxFragments, fragmentBuffer );
+}
+
+/*
+=================
+R_MarkFragments2
+
+=================
+*/
+int R_MarkFragments2( int numPoints, const vec3_t *points, const vec3_t projection,
+				   int maxPoints, vec3_t pointBuffer, int maxFragments, markFragment_t *fragmentBuffer,
+				   qhandle_t model, const vec3_t modelOrigin, const vec3_t modelAxis[3] ) {
+	const model_t	*mod;
+	vec3_t			localPoints[MAX_VERTS_ON_POLY];
+	vec3_t			localProjection;
+	vec3_t			delta;
+	int				i, j;
+
+	mod = R_GetSubmodelByHandle( model );
+	if ( !mod || numPoints <= 0 || !modelOrigin || !modelAxis ) {
+		return 0;
+	}
+
+	if ( numPoints > MAX_VERTS_ON_POLY ) {
+		numPoints = MAX_VERTS_ON_POLY;
+	}
+	for ( i = 0; i < numPoints; i++ ) {
+		VectorSubtract( points[i], modelOrigin, delta );
+		for ( j = 0; j < 3; j++ ) {
+			localPoints[i][j] = DotProduct( delta, modelAxis[j] );
+		}
+	}
+	for ( j = 0; j < 3; j++ ) {
+		localProjection[j] = DotProduct( projection, modelAxis[j] );
+	}
+
+	return R_MarkFragmentsOn( mod->bmodel, numPoints, (const vec3_t *)localPoints, localProjection,
+		maxPoints, pointBuffer, maxFragments, fragmentBuffer );
 }
 

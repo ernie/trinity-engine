@@ -534,6 +534,8 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 		return;
 	}
 
+	R_AddModelDecalSurfaces( pModel->index );
+
 #ifdef USE_PMLIGHT
 #ifdef USE_LEGACY_DLIGHTS
 	if ( r_dlightMode->integer ) 
