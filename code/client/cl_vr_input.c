@@ -844,8 +844,8 @@ static void CL_VRInput_FinalizePose( usercmd_t *cmd ) {
 	if ( CL_VR_UsercmdButtonBits() != 32 )
 		return;
 	pitch = (int)((Com_Clamp( -80, 80, vr.hmdorientation[PITCH] ) + 90) * 127 / 180);
-	yaw = (int)((Com_Clamp( -80, 80, AngleSubtract( vr.hmdorientation[YAW], vr.weaponangles[YAW] ) ) + 90) * 127 /
-				180);
+	yaw = (int)((Com_Clamp( -80, 80, AngleSubtract( cl.viewangles[YAW], SHORT2ANGLE( cmd->angles[YAW] ) ) ) + 90) *
+				127 / 180);
 	cmd->buttons |= (pitch & 127) << 12 | (yaw & 127) << 19;
 }
 
