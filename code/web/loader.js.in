@@ -140,6 +140,11 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
     let demoData = null;
     let demoFilename = null;
     let demoMapName = null;
+
+    // Demo map pk3s carry the server's winning shader definitions, so they go
+    // in the top game folder under a name that sorts after every other pk3.
+    const demoPk3Dir = () => `/${fs_game || fs_basegame}`;
+    const demoPk3File = (name) => `zzzz-demo-${name}`;
     if (demoUrl) {
         statusEl.textContent = 'Downloading demo...';
         const resp = await fetch(demoUrl);
@@ -392,7 +397,7 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
                     }
                     if (demoMapName) {
                         const name = `${demoMapName.toLowerCase()}.pk3`;
-                        assets.push({ url: new URL(`demopk3s/maps/${name}`, dataURL).href, dir: `/${fs_basegame}`, name, optional: true });
+                        assets.push({ url: new URL(`demopk3s/maps/${name}`, dataURL).href, dir: demoPk3Dir(), name, file: demoPk3File(name), optional: true });
                     }
 
                     // Kick off every fetch in parallel; cachedFetch returns a
@@ -432,7 +437,7 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
                         const data = await bodies[i];
                         if (!data) continue;
                         mod.FS.mkdirTree(a.dir);
-                        mod.FS.writeFile(`${a.dir}/${a.name}`, data);
+                        mod.FS.writeFile(`${a.dir}/${a.file || a.name}`, data);
                     }
 
                     // Load demo file into virtual filesystem
@@ -511,7 +516,8 @@ export async function loadEngine({ canvas, statusEl, enginePath, configUrl, demo
                                 try {
                                     const resp = await cachedFetch(new URL(`demopk3s/maps/${name}`, dataURL).href, `Loading ${pending}`, statusEl, authToken);
                                     if (resp.ok) {
-                                        mod.FS.writeFile(`/${fs_basegame}/${name}`, new Uint8Array(await resp.arrayBuffer()));
+                                        mod.FS.mkdirTree(demoPk3Dir());
+                                        mod.FS.writeFile(`${demoPk3Dir()}/${demoPk3File(name)}`, new Uint8Array(await resp.arrayBuffer()));
                                     } else {
                                         console.warn(`Map pk3 not found: ${name} (${resp.status})`);
                                     }
