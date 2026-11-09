@@ -9,7 +9,7 @@ cd "$1"
 # name and size, so a pak cut short by an interrupted copy is sent again
 "$HERE/ssh.sh" 'cd ~/.trinity && stat -c "%s %n" baseq3/*.pk3 missionpack/*.pk3 2>/dev/null; true' | sort -k2 > /tmp/frame-have
 find baseq3 missionpack -maxdepth 1 -name '*.pk3' ! -name 'pak[0-8].pk3' ! -name 'pak8t.pk3' ! -name 'pak3t.pk3' \
-	! -name 'zzz-trinity-announcer.pk3' ! -name 'zzz-trinity-bots.pk3' -printf '%s %p\n' | sort -k2 > /tmp/frame-want
+	! -name 'zzz-trinity-announcer.pk3' -printf '%s %p\n' | sort -k2 > /tmp/frame-want
 comm -23 /tmp/frame-want /tmp/frame-have | cut -d' ' -f2- > /tmp/frame-missing
 echo "$(wc -l < /tmp/frame-missing) paks to send, started $(date +%T)"
 if [ -s /tmp/frame-missing ]; then
