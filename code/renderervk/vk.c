@@ -1877,6 +1877,25 @@ static void vk_clean_staging_buffer( void )
 }
 
 
+static void vk_clean_cinematic_uploads( void )
+{
+	int i;
+
+	for ( i = 0; i < (int)ARRAY_LEN( vk.cinematic ); i++ ) {
+		struct cinematic_upload_s *up = &vk.cinematic[i];
+		if ( up->command_buffer != VK_NULL_HANDLE )
+			qvkFreeCommandBuffers( vk.device, vk.command_pool, 1, &up->command_buffer );
+		if ( up->fence != VK_NULL_HANDLE )
+			qvkDestroyFence( vk.device, up->fence, NULL );
+		if ( up->buffer != VK_NULL_HANDLE )
+			qvkDestroyBuffer( vk.device, up->buffer, NULL );
+		if ( up->memory != VK_NULL_HANDLE )
+			qvkFreeMemory( vk.device, up->memory, NULL );
+	}
+	Com_Memset( vk.cinematic, 0, sizeof( vk.cinematic ) );
+}
+
+
 #ifdef USE_UPLOAD_QUEUE
 static qboolean vk_wait_staging_buffer( void )
 {
@@ -6994,6 +7013,8 @@ void vk_shutdown( refShutdownCode_t code )
 		vk.pipelineCache = VK_NULL_HANDLE;
 	}
 
+	vk_clean_cinematic_uploads();
+
 	qvkDestroyCommandPool( vk.device, vk.command_pool, NULL );
 
 	qvkDestroyDescriptorPool(vk.device, vk.descriptor_pool, NULL);
@@ -7192,6 +7213,7 @@ void vk_release_resources( void ) {
 		qvkFreeMemory(vk.device, vk_world.image_chunks[i].memory, NULL);
 
 	vk_clean_staging_buffer();
+	vk_clean_cinematic_uploads();
 
 	// vk_destroy_samplers();
 
@@ -7518,6 +7540,118 @@ void vk_upload_image_data( image_t *image, int x, int y, int width, int height, 
 	record_image_layout_transition( command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
 	end_command_buffer( command_buffer, __func__ );
 #endif
+
+	if ( buf != pixels ) {
+		ri.Hunk_FreeTempMemory( buf );
+	}
+}
+
+
+/* Each video owns its staging memory and fence, so an update waits only for that video's previous one. */
+void vk_update_cinematic_image( image_t *image, int client, int width, int height, byte *pixels ) {
+
+	struct cinematic_upload_s *up = &vk.cinematic[ client ];
+	VkCommandBufferBeginInfo begin_info;
+	VkBufferImageCopy region;
+	VkSubmitInfo submit_info;
+	VkDeviceSize size;
+	VkResult res;
+	byte *buf;
+	int n;
+
+	buf = resample_image_data( image->internalFormat, pixels, width * height * 4, &n /*bpp*/ );
+	size = (VkDeviceSize)width * height * n;
+
+	if ( up->pending ) {
+		res = qvkWaitForFences( vk.device, 1, &up->fence, VK_TRUE, 5 * 1000000000ULL );
+		if ( res != VK_SUCCESS ) {
+			ri.Error( ERR_FATAL, "vkWaitForFences() failed with %s at %s", vk_result_string( res ), __func__ );
+		}
+		VK_CHECK( qvkResetFences( vk.device, 1, &up->fence ) );
+		up->pending = qfalse;
+	}
+
+	if ( up->command_buffer == VK_NULL_HANDLE ) {
+		VkCommandBufferAllocateInfo alloc_info;
+		VkFenceCreateInfo fence_desc;
+
+		alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		alloc_info.pNext = NULL;
+		alloc_info.commandPool = vk.command_pool;
+		alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		alloc_info.commandBufferCount = 1;
+		VK_CHECK( qvkAllocateCommandBuffers( vk.device, &alloc_info, &up->command_buffer ) );
+
+		fence_desc.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		fence_desc.pNext = NULL;
+		fence_desc.flags = 0;
+		VK_CHECK( qvkCreateFence( vk.device, &fence_desc, NULL, &up->fence ) );
+	}
+
+	if ( up->size < size ) {
+		VkBufferCreateInfo buffer_desc;
+		VkMemoryRequirements memory_requirements;
+		VkMemoryAllocateInfo alloc_info;
+		void *data;
+
+		if ( up->buffer != VK_NULL_HANDLE )
+			qvkDestroyBuffer( vk.device, up->buffer, NULL );
+		if ( up->memory != VK_NULL_HANDLE )
+			qvkFreeMemory( vk.device, up->memory, NULL );
+
+		buffer_desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		buffer_desc.pNext = NULL;
+		buffer_desc.flags = 0;
+		buffer_desc.size = size;
+		buffer_desc.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+		buffer_desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		buffer_desc.queueFamilyIndexCount = 0;
+		buffer_desc.pQueueFamilyIndices = NULL;
+		VK_CHECK( qvkCreateBuffer( vk.device, &buffer_desc, NULL, &up->buffer ) );
+
+		qvkGetBufferMemoryRequirements( vk.device, up->buffer, &memory_requirements );
+
+		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		alloc_info.pNext = NULL;
+		alloc_info.allocationSize = memory_requirements.size;
+		alloc_info.memoryTypeIndex = find_memory_type( memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, &up->memory ) );
+		VK_CHECK( qvkBindBufferMemory( vk.device, up->buffer, up->memory, 0 ) );
+		VK_CHECK( qvkMapMemory( vk.device, up->memory, 0, VK_WHOLE_SIZE, 0, &data ) );
+		up->ptr = (byte*)data;
+		up->size = size;
+	}
+
+	Com_Memcpy( up->ptr, buf, size );
+
+	Com_Memset( &region, 0, sizeof( region ) );
+	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	region.imageSubresource.layerCount = 1;
+	region.imageExtent.width = width;
+	region.imageExtent.height = height;
+	region.imageExtent.depth = 1;
+
+	begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	begin_info.pNext = NULL;
+	begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	begin_info.pInheritanceInfo = NULL;
+	VK_CHECK( qvkBeginCommandBuffer( up->command_buffer, &begin_info ) );
+	record_image_layout_transition( up->command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0 );
+	qvkCmdCopyBufferToImage( up->command_buffer, up->buffer, image->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region );
+	record_image_layout_transition( up->command_buffer, image->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, 0 );
+	VK_CHECK( qvkEndCommandBuffer( up->command_buffer ) );
+
+	submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submit_info.pNext = NULL;
+	submit_info.waitSemaphoreCount = 0;
+	submit_info.pWaitSemaphores = NULL;
+	submit_info.pWaitDstStageMask = NULL;
+	submit_info.commandBufferCount = 1;
+	submit_info.pCommandBuffers = &up->command_buffer;
+	submit_info.signalSemaphoreCount = 0;
+	submit_info.pSignalSemaphores = NULL;
+	VK_CHECK( qvkQueueSubmit( vk.queue, 1, &submit_info, up->fence ) );
+	up->pending = qtrue;
 
 	if ( buf != pixels ) {
 		ri.Hunk_FreeTempMemory( buf );

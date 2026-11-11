@@ -316,6 +316,7 @@ void vk_queue_wait_idle( void );
 //
 void vk_create_image( image_t *image, int width, int height, int mip_levels );
 void vk_upload_image_data( image_t *image, int x, int y, int width, int height, int miplevels, byte *pixels, int size, qboolean update );
+void vk_update_cinematic_image( image_t *image, int client, int width, int height, byte *pixels );
 void vk_update_descriptor_set( image_t *image, qboolean mipmap );
 void vk_destroy_image_resources( VkImage *image, VkImageView *imageView );
 void vk_update_attachment_descriptors( void );
@@ -808,6 +809,16 @@ typedef struct {
 		VkDeviceSize offset;
 #endif
 	} staging_buffer;
+
+	struct cinematic_upload_s {
+		VkBuffer buffer;
+		VkDeviceMemory memory;
+		byte *ptr;
+		VkDeviceSize size;
+		VkCommandBuffer command_buffer;
+		VkFence fence;
+		qboolean pending;
+	} cinematic[ MAX_VIDEO_HANDLES ];
 
 	struct samplers_s {
 		int count;

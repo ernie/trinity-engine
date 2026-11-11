@@ -1180,6 +1180,7 @@ void RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int clien
 		image->width = image->uploadWidth = cols;
 		image->height = image->uploadHeight = rows;
 #ifdef USE_VULKAN
+		vk_wait_idle();
 		vk_create_image( image, cols, rows, 1 );
 		vk_upload_image_data( image, 0, 0, cols, rows, 1, data, cols * rows * 4, qfalse );
 #else
@@ -1193,7 +1194,7 @@ void RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int clien
 		// otherwise, just subimage upload it so that drivers can tell we are going to be changing
 		// it and don't try and do a texture compression
 #ifdef USE_VULKAN
-		vk_upload_image_data( image, 0, 0, cols, rows, 1, data, cols * rows * 4, qtrue );
+		vk_update_cinematic_image( image, client, cols, rows, data );
 #else
 		qglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, data );
 #endif
