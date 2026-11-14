@@ -173,8 +173,8 @@ void main() {
 			+ sceneSample(bloom2, frag_tex_coord).rgb + sceneSample(bloom3, frag_tex_coord).rgb;
 		if ( bloomFine != 0 )
 			bloom += sceneSample(bloom0, frag_tex_coord).rgb;
-		// bloom lands under the post-scene draws: the scene's alpha is what they let through
-		base = min( base + bloom * bloomFactor * scene.a, vec3(1.0) );
+		// bloom lands under the post-scene draws: a channel holds at most the share of the scene they let through
+		base += min( bloom * bloomFactor * scene.a, max( vec3( scene.a ) - base, vec3(0.0) ) );
 	}
 	coverage = 1.0 - scene.a;
 #endif
