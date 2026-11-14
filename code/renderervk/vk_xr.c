@@ -93,6 +93,10 @@ qboolean VK_XR_ScopeNeedsBands( void ) {
 	return xr.scope;
 }
 
+float VK_XR_ScopeRoll( void ) {
+	return xr.scope ? DEG2RAD( scopeAim[ROLL] ) : 0;
+}
+
 void VK_XR_SetZoom( qboolean zoomed, const float *aim, float *level ) {
 	xr.scope = VK_XR_Drawing() && !screenGeometry.visible && zoomed;
 	VectorCopy( aim, scopeAim );
@@ -877,15 +881,13 @@ void VK_XR_Submitted( void ) {
 
 /* The scope hangs a meter out along the gun's aim, so it stays where the gun points as the head turns. */
 static XrPosef VKXR_ScopePose( void ) {
-	const float pitch = -DEG2RAD( scopeAim[PITCH] ) * 0.5f, yaw = DEG2RAD( scopeAim[YAW] ) * 0.5f,
-				roll = -DEG2RAD( scopeAim[ROLL] ) * 0.5f;
-	const float sy = sinf( yaw ), cy = cosf( yaw ), sp = sinf( pitch ), cp = cosf( pitch ), sr = sinf( roll ),
-				cr = cosf( roll );
+	const float pitch = -DEG2RAD( scopeAim[PITCH] ) * 0.5f, yaw = DEG2RAD( scopeAim[YAW] ) * 0.5f;
+	const float sy = sinf( yaw ), cy = cosf( yaw ), sp = sinf( pitch ), cp = cosf( pitch );
 	XrPosef pose = VKXR_CenterPose();
-	pose.orientation.x = cy * sp * cr + sy * cp * sr;
-	pose.orientation.y = sy * cp * cr - cy * sp * sr;
-	pose.orientation.z = cy * cp * sr - sy * sp * cr;
-	pose.orientation.w = cy * cp * cr + sy * sp * sr;
+	pose.orientation.x = cy * sp;
+	pose.orientation.y = sy * cp;
+	pose.orientation.z = -sy * sp;
+	pose.orientation.w = cy * cp;
 	pose.position.x -= sinf( 2 * yaw ) * cosf( 2 * pitch );
 	pose.position.y += sinf( 2 * pitch );
 	pose.position.z -= cosf( 2 * yaw ) * cosf( 2 * pitch );

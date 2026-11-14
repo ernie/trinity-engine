@@ -77,6 +77,7 @@ VkImageCreateFlags VK_XR_TargetCreateFlags( void );
 void VK_XR_SetZoom( qboolean zoomed, const float *aim, float *level );
 float VK_XR_ScopeScaleY( void );
 qboolean VK_XR_ScopeNeedsBands( void );
+float VK_XR_ScopeRoll( void );
 void VK_XR_FoveationCaps( qboolean supported );
 void VK_XR_FoveationMap( vkFovMap_t *map );
 #endif

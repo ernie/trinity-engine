@@ -9798,8 +9798,20 @@ static void get_mvp_transform( float *mvp )
 #endif
 		if ( !vk_hud.recording && vk.renderPassIndex != RENDER_PASS_DESKTOP ) {
 			float scale = VK_XR_ScopeScaleY();
+			const float roll = VK_XR_ScopeRoll();
 			mvp[5] *= scale;
 			mvp[13] *= scale;
+			if ( roll ) {
+				/* The scope's 2D turns with the gun inside a level picture; the turn is in square pixels. */
+				const float s = sinf( roll ), c = cosf( roll ), aspect = (float)vk.renderHeight / vk.renderWidth;
+				const float m0 = mvp[0], m5 = mvp[5], m12 = mvp[12], m13 = mvp[13];
+				mvp[0] = c * m0;
+				mvp[1] = s / aspect * m0;
+				mvp[4] = -s * aspect * m5;
+				mvp[5] = c * m5;
+				mvp[12] = c * m12 - s * aspect * m13;
+				mvp[13] = s / aspect * m12 + c * m13;
+			}
 		}
 	}
 	else
@@ -11079,16 +11091,19 @@ static void vk_post_process_push( VkPipelineLayout layout ) {
 }
 
 /* SCREEN */
+/* The turned mask leaves the picture's corners bare, so everything outside the scope opening's box goes black. */
 static void vk_render_scope_bands( void ) {
-	float scale = VK_XR_ScopeScaleY();
+	float radiusX, radiusY;
 	VkClearAttachment colors[2];
-	VkClearRect rects[2];
-	uint32_t band;
+	VkClearRect rects[4];
+	uint32_t side, band, inner, count = 0, i;
 
-	if ( !VK_XR_ScopeNeedsBands() || scale >= 1 || scale <= 0 )
+	if ( !vk_fdm_scope( &radiusX, &radiusY ) )
 		return;
-	band = (uint32_t)((1 - scale) * 0.5f * vk.sceneHeight);
-	if ( !band )
+	side = radiusX * 2 < vk.sceneWidth ? (uint32_t)((vk.sceneWidth - radiusX * 2) * 0.5f) : 0;
+	band = radiusY * 2 < vk.sceneHeight ? (uint32_t)((vk.sceneHeight - radiusY * 2) * 0.5f) : 0;
+	inner = vk.sceneHeight - band * 2;
+	if ( !side && !band )
 		return;
 	if ( tess.numIndexes ) {
 		RB_EndSurface();
@@ -11097,14 +11112,25 @@ static void vk_render_scope_bands( void ) {
 	Com_Memset( colors, 0, sizeof( colors ) );
 	Com_Memset( rects, 0, sizeof( rects ) );
 	colors[0].aspectMask = colors[1].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	// black; in the post-scene pass zero alpha also keeps bloom out of the bands
+	// black; in the post-scene pass zero alpha also keeps bloom out of the surround
 	colors[0].clearValue.color.float32[3] = VK_PassIsPostScene( vk.renderPassIndex ) ? 0.0f : 1.0f;
 	colors[1].colorAttachment = 1;
-	rects[0].rect.extent.width = rects[1].rect.extent.width = vk.sceneWidth;
-	rects[0].rect.extent.height = rects[1].rect.extent.height = band;
-	rects[1].rect.offset.y = vk.sceneHeight - band;
-	rects[0].layerCount = rects[1].layerCount = 1;
-	qvkCmdClearAttachments( vk.cmd->command_buffer, vk.hdrActive ? 2 : 1, colors, 2, rects );
+	if ( band ) {
+		rects[count].rect.extent.width = rects[count + 1].rect.extent.width = vk.sceneWidth;
+		rects[count].rect.extent.height = rects[count + 1].rect.extent.height = band;
+		rects[count + 1].rect.offset.y = vk.sceneHeight - band;
+		count += 2;
+	}
+	if ( side && inner ) {
+		rects[count].rect.extent.width = rects[count + 1].rect.extent.width = side;
+		rects[count].rect.extent.height = rects[count + 1].rect.extent.height = inner;
+		rects[count].rect.offset.y = rects[count + 1].rect.offset.y = band;
+		rects[count + 1].rect.offset.x = vk.sceneWidth - side;
+		count += 2;
+	}
+	for ( i = 0; i < count; i++ )
+		rects[i].layerCount = 1;
+	qvkCmdClearAttachments( vk.cmd->command_buffer, vk.hdrActive ? 2 : 1, colors, count, rects );
 }
 
 static void vk_screen_mip_barrier( uint32_t base, uint32_t count, VkImageLayout oldLayout, VkImageLayout newLayout,
