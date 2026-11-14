@@ -609,8 +609,12 @@ static qboolean CL_VR_BeginFrameInternal( qboolean updateInput ) {
 		}
 	}
 	if ( re.XRSetZoom ) {
-		const float aim[3] = { vr.weaponangles[PITCH], vr.weaponangles[YAW], vr.weaponangles[ROLL] };
+		/* Outside 6DoF the zoomed view aims through the command, which carries the previous frame's weapon direction. */
+		static vec3_t commanded;
+		const float *direction = vr.use_6dof ? vr.weaponangles : commanded;
+		const float aim[3] = { direction[PITCH], direction[YAW], vr.weaponangles[ROLL] };
 		re.XRSetZoom( vr.weapon_zoomed, aim, &vr.weapon_zoomLevel );
+		VectorCopy( vr.weaponangles, commanded );
 	}
 	return !VR_IsActiveMode() || frame.stereo || CL_VR_DesktopWaitingFrame();
 }
