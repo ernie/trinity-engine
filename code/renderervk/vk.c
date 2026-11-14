@@ -11300,14 +11300,9 @@ static void vk_xr_model_asset( const vkXRModel_t *model, int asset ) {
 	tr.xrAssets[asset].loaded = qtrue;
 }
 
-/* Frontend, once a frame: updates the models and makes sure whichever are loaded have their drawing resources. */
-void vk_prepare_xr_models( void ) {
+/* Finds each loaded model's drawing resources, creating those of up to budget assets. */
+static void vk_match_xr_models( int budget ) {
 	int slot, asset;
-	qboolean busy;
-	if ( !VK_XR_Enabled() || !tr.registered )
-		return;
-	/* fetching a model, decoding a texture and uploading one each stall the frame: one of them a frame */
-	busy = VK_XR_UpdateModels();
 	for ( slot = 0; slot < VK_XR_MODELS_MAX; slot++ ) {
 		const vkXRModel_t *model = VK_XR_Model( slot );
 		if ( !model ) {
@@ -11329,16 +11324,33 @@ void vk_prepare_xr_models( void ) {
 			if ( asset == (int)ARRAY_LEN( tr.xrAssets ) ) {
 				ri.Printf( PRINT_WARNING, "OpenXR controller model not drawn: %d different models are already loaded\n", asset );
 				asset = -1;
-			} else if ( busy ) {
+			} else if ( budget <= 0 ) {
 				continue;
 			} else {
 				vk_xr_model_asset( model, asset );
-				busy = qtrue;
+				budget--;
 			}
 		}
 		tr.xrModels[slot].serial = model->serial;
 		tr.xrModels[slot].asset = asset;
 	}
+}
+
+/* Frontend, once a frame: updates the models and makes sure whichever are loaded have their drawing resources.
+ * A frame drawn from inside a load passes create as qfalse: the image and shader registries are mid-call there. */
+void vk_prepare_xr_models( qboolean create ) {
+	qboolean busy;
+	if ( !VK_XR_Enabled() || !tr.registered )
+		return;
+	/* fetching a model, decoding a texture and uploading one each stall the frame: one of them a frame */
+	busy = VK_XR_UpdateModels();
+	vk_match_xr_models( create && !busy ? 1 : 0 );
+}
+
+/* A renderer restart keeps the loaded models; their drawing resources come back before any load begins. */
+void vk_restore_xr_models( void ) {
+	if ( VK_XR_Enabled() )
+		vk_match_xr_models( ARRAY_LEN( tr.xrAssets ) );
 }
 
 #define VK_XR_POOL_SEGMENTS 20
@@ -12230,7 +12242,7 @@ qboolean RE_XRLoadingFrameDue( void ) {
 qboolean RE_XRRedrawEnvironment( void ) {
 	if ( !tr.registered || vk.frame_count || !VK_XR_Screen() || !vk_screen.image.handle )
 		return qfalse;
-	vk_prepare_xr_models(); // the controllers' poses for this frame's display time
+	vk_prepare_xr_models( qfalse ); // the controllers' poses for this frame's display time
 	vk.repeatScreen = qtrue;
 	vk_begin_frame();
 	vk_end_frame();

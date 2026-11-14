@@ -305,7 +305,7 @@ void RE_BeginFrame( stereoFrame_t stereoFrame ) {
 #ifdef USE_VULKAN
 	backEnd.doneBloom = qfalse;
 	backEnd.doneFlares = qfalse;
-	vk_prepare_xr_models();
+	vk_prepare_xr_models( qtrue );
 #endif
 
 	backEnd.color2D.u32 = ~0U;

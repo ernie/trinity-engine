@@ -995,6 +995,8 @@ void RE_BeginRegistration( glconfig_t *glconfigOut ) {
 	RE_ClearScene();
 
 	tr.registered = qtrue;
+
+	vk_restore_xr_models();
 }
 
 //=============================================================================
