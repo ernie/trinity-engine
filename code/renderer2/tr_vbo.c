@@ -428,7 +428,7 @@ void R_InitVaos(void)
 	vertexesSize += sizeof(tess.lightdir[0]);
 	vertexesSize *= SHADER_MAX_VERTEXES;
 
-	indexesSize = sizeof(tess.indexes[0]) * SHADER_MAX_INDEXES;
+	indexesSize = sizeof(tess.indexes[0]) * SHADER_MAX_INDEXES * 2; // 2x for shadow volumes
 
 	tess.vao = R_CreateVao("tessVertexArray_VAO", NULL, vertexesSize, NULL, indexesSize, VAO_USAGE_DYNAMIC);
 
@@ -593,8 +593,8 @@ void RB_UpdateTessVao(unsigned int attribBits)
 	backEnd.pc.c_dynamicVaoDraws++;
 
 	// update the default VAO
-	// 2x vertex limit accommodates shadow projection which doubles vertex count
-	if(tess.numVertexes > 0 && tess.numVertexes <= SHADER_MAX_VERTEXES * 2 && tess.numIndexes > 0 && tess.numIndexes <= SHADER_MAX_INDEXES)
+	// 2x limits accommodate shadow volumes, which double the vertex count and add edge quads
+	if(tess.numVertexes > 0 && tess.numVertexes <= SHADER_MAX_VERTEXES * 2 && tess.numIndexes > 0 && tess.numIndexes <= SHADER_MAX_INDEXES * 2)
 	{
 		int attribIndex;
 		int attribUpload;

@@ -1527,7 +1527,7 @@ typedef struct stageVars
 typedef struct shaderCommands_s 
 {
 #pragma pack(push,16)
-	glIndex_t	indexes[SHADER_MAX_INDEXES] QALIGN(16);
+	glIndex_t	indexes[SHADER_MAX_INDEXES*2] QALIGN(16); // 2x needed for shadows
 	vec4_t		xyz[SHADER_MAX_VERTEXES*2] QALIGN(16); // 2x needed for shadows
 	vec4_t		normal[SHADER_MAX_VERTEXES] QALIGN(16);
 	vec2_t		texCoords[2][SHADER_MAX_VERTEXES] QALIGN(16);
