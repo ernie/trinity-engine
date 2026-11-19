@@ -641,6 +641,14 @@ static void generate_image_upload_data( image_t *image, byte *data, Image_Upload
 		scaled_height >>= 1;
 	}
 
+	// menus keep every map preview until a renderer restart, and packs ship them thousands of texels wide
+	if ( !Q_stricmpn( image->imgName, "levelshots/", 11 ) ) {
+		while ( scaled_width > LEVELSHOT_MAX_SIZE || scaled_height > LEVELSHOT_MAX_SIZE ) {
+			scaled_width >>= 1;
+			scaled_height >>= 1;
+		}
+	}
+
 	upload_data->buffer = (byte*) ri.Hunk_AllocateTempMemory( 2 * 4 * scaled_width * scaled_height );
 	if ( data == NULL ) {
 		Com_Memset( upload_data->buffer, 0, 2 * 4 * scaled_width * scaled_height );

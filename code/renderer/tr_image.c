@@ -641,6 +641,13 @@ static void Upload32( byte *data, int x, int y, int width, int height, image_t *
 		y >>= 1;
 	}
 
+	if ( !Q_stricmpn( image->imgName, "levelshots/", 11 ) ) {
+		while ( scaled_width > LEVELSHOT_MAX_SIZE || scaled_height > LEVELSHOT_MAX_SIZE ) {
+			scaled_width >>= 1;
+			scaled_height >>= 1;
+		}
+	}
+
 	if ( scaled_width != width || scaled_height != height ) {
 		if ( data ) {
 			resampledBuffer = ri.Hunk_AllocateTempMemory( scaled_width * scaled_height * 4 );

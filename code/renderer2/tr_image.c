@@ -1476,7 +1476,7 @@ RawImage_ScaleToPower2
 
 ===============
 */
-static qboolean RawImage_ScaleToPower2( byte **data, int *inout_width, int *inout_height, imgType_t type, imgFlags_t flags, byte **resampledBuffer)
+static qboolean RawImage_ScaleToPower2( byte **data, int *inout_width, int *inout_height, imgType_t type, imgFlags_t flags, byte **resampledBuffer, int maxSize )
 {
 	int width =         *inout_width;
 	int height =        *inout_height;
@@ -1584,8 +1584,8 @@ static qboolean RawImage_ScaleToPower2( byte **data, int *inout_width, int *inou
 	// scale both axis down equally so we don't have to
 	// deal with a half mip resampling
 	//
-	while ( scaled_width > glConfig.maxTextureSize
-		|| scaled_height > glConfig.maxTextureSize ) {
+	while ( scaled_width > maxSize
+		|| scaled_height > maxSize ) {
 		scaled_width >>= 1;
 		scaled_height >>= 1;
 	}
@@ -2396,7 +2396,8 @@ static image_t *R_CreateImage2( const char *name, byte *pic, int width, int heig
 	if (!cubemap)
 	{
 		if (rgba8)
-			scaled = RawImage_ScaleToPower2(&pic, &width, &height, type, flags, &resampledBuffer);
+			scaled = RawImage_ScaleToPower2(&pic, &width, &height, type, flags, &resampledBuffer,
+				!Q_stricmpn( name, "levelshots/", 11 ) ? MIN( LEVELSHOT_MAX_SIZE, glConfig.maxTextureSize ) : glConfig.maxTextureSize );
 		else if (pic && picmip)
 		{
 			for (miplevel = r_picmip->integer; miplevel > 0 && numMips > 1; miplevel--, numMips--)
