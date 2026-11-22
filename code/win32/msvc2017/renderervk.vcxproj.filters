@@ -108,6 +108,9 @@
     <ClCompile Include="..\..\renderervk\vk_shadowtile_math.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\renderervk\vk_mirror_math.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\renderervk\tr_shadowtiles.c">
       <Filter>Source Files</Filter>
     </ClCompile>

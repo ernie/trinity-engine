@@ -50,6 +50,7 @@ static int VK_GPUTimePercentile( int count, int percent ) {
 #include "vk_xr.h"
 #include "vk.h"
 #include "vk_foveation.h"
+#include "vk_mirror_math.h"
 #if VR_MODEL_KTX2
 #include "../vrcommon/vr_ktx2.h"
 #endif
@@ -374,6 +375,7 @@ static uint64_t vk_foveation_serial;
 static VkCommandBuffer vk_foveation_rate_command;
 static qboolean vk_foveation_rate_attachment;
 static cvar_t *r_foveationDebugCvar, *vr_mirrorEnabled, *vr_desktopContentType, *vr_desktopContentFit, *vr_desktopMenuStyle;
+static cvar_t *vr_mirrorFov, *vr_mirrorStabilize;
 
 /* Density maps: the stereo scene pass carries the map, and offsets slide it onto the gaze as the pass ends. */
 static PFN_vkCmdEndRenderPass2 vk_fdm_end_pass;
@@ -6491,6 +6493,8 @@ void vk_initialize( void )
 	vr_desktopContentType = ri.Cvar_Get( "vr_desktopContentType", "1", 0 );
 	vr_desktopContentFit = ri.Cvar_Get( "vr_desktopContentFit", "1", 0 );
 	vr_desktopMenuStyle = ri.Cvar_Get( "vr_desktopMenuStyle", "0", 0 );
+	vr_mirrorFov = ri.Cvar_Get( "vr_mirrorFov", "70", 0 );
+	vr_mirrorStabilize = ri.Cvar_Get( "vr_mirrorStabilize", "0.1", 0 );
 
 	vk.fboActive = r_fbo->integer ? qtrue : qfalse;
 	vk.xrDirect = ( VK_XR_Enabled() && !vk.fboActive ) ? qtrue : qfalse;
@@ -12026,8 +12030,34 @@ typedef struct {
 	vkMirrorDraw_t draw[2];
 } vkMirrorPlan_t;
 
+/* A one-eye mirror's half span in tangents for fov degrees across. */
+static float VK_MirrorSpan( float fov, const float tangents[4], int width, int height, float *halfW, float *halfH ) {
+	return VKM_Span( fov, tangents, width, height, (int)vk.deviceLimits.maxViewportDimensions[0],
+					 (int)vk.deviceLimits.maxViewportDimensions[1], halfW, halfH );
+}
+
+static qboolean VK_MirrorCrop( float fov, const float tangents[4], const float center[2], int width, int height,
+							   vkMirrorDraw_t *draw ) {
+	double l = tangents[0], r = tangents[1], u = tangents[2], d = tangents[3];
+	float halfW, halfH, held[2];
+	if ( !VK_MirrorSpan( fov, tangents, width, height, &halfW, &halfH ) )
+		return qfalse;
+	held[0] = center[0];
+	held[1] = center[1];
+	VKM_HoldCenter( tangents, halfW, halfH, held );
+	draw->scissor[0] = draw->scissor[1] = 0;
+	draw->scissor[2] = width;
+	draw->scissor[3] = height;
+	draw->viewport[2] = (float)( width * ( r - l ) / ( 2 * halfW ) );
+	draw->viewport[3] = (float)( height * ( u - d ) / ( 2 * halfH ) );
+	draw->viewport[0] = (float)( -( held[0] - halfW - l ) * width / ( 2 * halfW ) );
+	draw->viewport[1] = (float)( -( u - held[1] - halfH ) * height / ( 2 * halfH ) );
+	return qtrue;
+}
+
 static vkMirrorPlan_t VK_MirrorPlan( int enabled, int type, int fill, int flatMenu, int sourceWidth,
-									 int sourceHeight, int width, int height ) {
+									 int sourceHeight, int width, int height, float fov, const float tangents[4],
+									 const float center[2] ) {
 	vkMirrorPlan_t plan = {0};
 	int count, i;
 	if ( !enabled || sourceWidth < 1 || sourceHeight < 1 || width < 1 || height < 1 )
@@ -12044,6 +12074,10 @@ static vkMirrorPlan_t VK_MirrorPlan( int enabled, int type, int fill, int flatMe
 		double sourceAspect = flatMenu ? 4.0 / 3.0 : (double)sourceWidth / sourceHeight;
 		double scaleX = 1, scaleY = 1, destAspect = (double)slotWidth / height;
 		double x = slotX, y = 0, w = slotWidth, h = height;
+		if ( count == 1 && !flatMenu && VK_MirrorCrop( fov, tangents, center, width, height, draw ) ) {
+			draw->layer = eye;
+			continue;
+		}
 		if ( fill && !flatMenu ) {
 			if ( destAspect > sourceAspect )
 				scaleY = sourceAspect / destAspect;
@@ -12080,12 +12114,37 @@ static vkMirrorPlan_t VK_MirrorPlan( int enabled, int type, int fill, int flatMe
 	return plan;
 }
 
+static float mirrorSmoothed[3];
+static int mirrorSmoothedTime;
+
+/* Centers a one-eye mirror where the smoothed view direction falls, so small head turns leave it still. */
+static void VK_MirrorStabilize( int eye, float fov, const float tangents[4], float center[2] ) {
+	float axis[3][3], halfW, halfH;
+	int now = ri.Milliseconds();
+	center[0] = center[1] = 0;
+	if ( vr_mirrorStabilize->value <= 0 ||
+		 !VK_MirrorSpan( fov, tangents, gls.windowWidth, gls.windowHeight, &halfW, &halfH ) ) {
+		mirrorSmoothedTime = 0;
+		return;
+	}
+	VK_XR_EyeAxis( eye, axis );
+	/* a recenter or a fresh start takes the view as it is */
+	if ( !mirrorSmoothedTime || DotProduct( mirrorSmoothed, axis[2] ) < cosf( DEG2RAD( 30 ) ) )
+		VectorCopy( axis[2], mirrorSmoothed );
+	else
+		VKM_Follow( mirrorSmoothed, axis[2], MIN( now - mirrorSmoothedTime, 100 ) * 0.001f, vr_mirrorStabilize->value );
+	mirrorSmoothedTime = now ? now : 1;
+	VKM_CropCenter( (const float (*)[3])axis, mirrorSmoothed, tangents, halfW, halfH, center );
+}
+
 static void vk_draw_desktop_mirror( void ) {
 	VkViewport viewport = {0};
 	VkRect2D scissor;
 	vkMirrorPlan_t plan;
 	const VkPhysicalDeviceLimits *limits = &vk.deviceLimits;
-	int i;
+	float display[4], tangents[4], center[2], fov, halfW, halfH;
+	int i, eye = vr_desktopContentType->integer == 1;
+	qboolean flatMenu = VK_XR_Screen() && (!vr_desktopMenuStyle->integer || r_hdrCalibrate->integer);
 	if ( !VK_XR_Drawing() ) {
 		viewport.x = vk.blitX0;
 		viewport.y = vk.blitY0;
@@ -12112,9 +12171,20 @@ static void vk_draw_desktop_mirror( void ) {
 		/* Keep acquire/submit/present balanced with mirror output disabled. */
 		qvkCmdClearAttachments( vk.cmd->command_buffer, 1, &clear, 1, &rect );
 	}
+	VK_XR_EyeTangents( eye, qfalse, display );
+	VK_XR_EyeTangents( eye, qtrue, tangents );
+	fov = vr_mirrorEnabled->integer && vr_desktopContentType->integer != 2
+			  ? VKM_MirrorFov( vr_mirrorFov->value, display, (float)gls.windowHeight / gls.windowWidth,
+							   vr_mirrorStabilize->value ) : 0;
+	ri.Cvar_Set( "vr_mirrorFovActive",
+				 va( "%g", VK_MirrorSpan( fov, display, gls.windowWidth, gls.windowHeight, &halfW, &halfH ) ) );
+	VK_MirrorStabilize( eye, flatMenu ? 0 : fov, display, center );
+	/* The scope's image looks along the gun's aim. */
+	if ( VK_XR_ScopeNeedsBands() )
+		center[0] = center[1] = 0;
 	plan = VK_MirrorPlan( vr_mirrorEnabled->integer, vr_desktopContentType->integer, vr_desktopContentFit->integer,
-						  VK_XR_Screen() && (!vr_desktopMenuStyle->integer || r_hdrCalibrate->integer),
-						  vk.sceneWidth, vk.sceneHeight, gls.windowWidth, gls.windowHeight );
+						  flatMenu, vk.sceneWidth, vk.sceneHeight, gls.windowWidth, gls.windowHeight, fov, tangents,
+						  center );
 	if ( !plan.count )
 		return;
 	if ( plan.mono ) {

@@ -260,6 +260,7 @@
     <ClCompile Include="..\..\renderervk\vk_foveation.c" />
     <ClCompile Include="..\..\renderervk\vk_foveation_math.c" />
     <ClCompile Include="..\..\renderervk\vk_shadowtile_math.c" />
+    <ClCompile Include="..\..\renderervk\vk_mirror_math.c" />
     <ClCompile Include="..\..\renderervk\tr_shadowtiles.c" />
     <ClCompile Include="..\..\vrcommon\xr_loader.c" />
     <ClCompile Include="..\..\renderervk\vk_xr_live.c" />

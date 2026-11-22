@@ -29,6 +29,8 @@ extern cvar_t *vr_showConsoleMessages;
 extern cvar_t *vr_desktopContentFit;
 extern cvar_t *vr_desktopContentType;
 extern cvar_t *vr_desktopMenuStyle;
+extern cvar_t *vr_mirrorFov;
+extern cvar_t *vr_mirrorStabilize;
 extern cvar_t *vr_mirrorEnabled;
 extern cvar_t *vr_mirrorFullscreen;
 extern cvar_t *vr_mirrorWidth;

@@ -1151,6 +1151,7 @@ Q3RENDVOBJ = \
   $(B)/rendv/vk_xr.o \
   $(B)/rendv/vk_foveation_math.o \
   $(B)/rendv/vk_shadowtile_math.o \
+  $(B)/rendv/vk_mirror_math.o \
   $(B)/rendv/tr_shadowtiles.o \
   $(B)/rendv/vk_foveation.o \
   $(B)/rendv/vk_xr_live.o \

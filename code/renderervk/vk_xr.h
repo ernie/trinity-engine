@@ -45,6 +45,11 @@ uint32_t VK_XR_AcquiredIndex( void );
 void VK_XR_Rendered( void );
 /* eye: 0 left, 1 right. */
 qboolean VK_XR_EyeView( int eye, refdef_t *view, float fov[4] );
+/* The tangents of the eye's edges, left, right, up, down: as its image was rendered, scope and zoom included, or as
+ * the headset shows the eye. */
+void VK_XR_EyeTangents( int eye, qboolean rendered, float tangents[4] );
+/* The eye's right, up and forward in tracking space. */
+void VK_XR_EyeAxis( int eye, float axis[3][3] );
 void VK_XR_SetupView( refdef_t *view, viewParms_t *parms );
 qboolean VK_XR_Drawing( void );
 void VK_XR_SetVirtualScreen( qboolean enabled, qboolean menuYawLocked, refXRFrame_t *frame );

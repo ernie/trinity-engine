@@ -33,6 +33,8 @@ cvar_t *vr_showConsoleMessages = NULL;
 cvar_t *vr_desktopContentFit = NULL;
 cvar_t *vr_desktopContentType = NULL;
 cvar_t *vr_desktopMenuStyle = NULL;
+cvar_t *vr_mirrorFov = NULL;
+cvar_t *vr_mirrorStabilize = NULL;
 cvar_t *vr_mirrorEnabled = NULL;
 cvar_t *vr_mirrorFullscreen = NULL;
 cvar_t *vr_mirrorWidth = NULL;
@@ -101,6 +103,10 @@ void VR_InitCvars( void )
 	vr_desktopContentFit = Cvar_Get( "vr_desktopContentFit", "1", CVAR_ARCHIVE ); // 0 - fit/contain, 1 - fill/crop
 	vr_desktopContentType = Cvar_Get( "vr_desktopContentType", "1", CVAR_ARCHIVE ); // 0 - left eye, 1 - right eye (most people are right-eye dominant), 2 - both eyes
 	vr_desktopMenuStyle = Cvar_Get( "vr_desktopMenuStyle", "0", CVAR_ARCHIVE ); // 0 - desktop view, 1 - VR view
+	vr_mirrorFov = Cvar_Get( "vr_mirrorFov", "70", CVAR_ARCHIVE ); // degrees across a one-eye mirror, 0 - the whole eye; stabilizing can draw it narrower, as vr_mirrorFovActive reports
+	Cvar_CheckRange( vr_mirrorFov, "0", "170", CV_FLOAT );
+	vr_mirrorStabilize = Cvar_Get( "vr_mirrorStabilize", "0.1", CVAR_ARCHIVE ); // seconds a one-eye mirror smooths head turns over; 0 - off
+	Cvar_CheckRange( vr_mirrorStabilize, "0", "2", CV_FLOAT );
 	VR_InitMirrorCvars();
 	vr_virtualScreenMode = Cvar_Get( "vr_virtualScreenMode", "0", CVAR_ARCHIVE ); // 0 - fixed, 1 - follow
 	vr_screenCurvature = Cvar_Get( "vr_screenCurvature", "0.5", CVAR_ARCHIVE ); // 0 - flat, 1 - tightest curve

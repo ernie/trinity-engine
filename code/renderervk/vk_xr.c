@@ -1115,6 +1115,15 @@ void VK_XR_Rendered( void ) {
 	copied = qtrue;
 }
 
+static void VKXR_ScopeFov( float fov[4] ) {
+	float horizontal = atanf( .935f ) / zoomLevel;
+	float aspect = xr.target.width ? (float)xr.target.height / xr.target.width : 1;
+	fov[0] = -horizontal;
+	fov[1] = horizontal;
+	fov[2] = atanf( tanf( horizontal ) * aspect );
+	fov[3] = -fov[2];
+}
+
 /* eye: 0 left, 1 right. */
 qboolean VK_XR_EyeView( int eye, refdef_t *view, float fov[4] ) {
 	int axis;
@@ -1149,12 +1158,7 @@ qboolean VK_XR_EyeView( int eye, refdef_t *view, float fov[4] ) {
 		return qfalse;
 	}
 	if ( xr.scope ) {
-		float horizontal = atanf( .935f ) / zoomLevel;
-		float aspect = xr.target.width ? (float)xr.target.height / xr.target.width : 1;
-		fov[0] = -horizontal;
-		fov[1] = horizontal;
-		fov[2] = atanf( tanf( horizontal ) * aspect );
-		fov[3] = -fov[2];
+		VKXR_ScopeFov( fov );
 		return qtrue;
 	}
 	pose = &xr.views[eye].pose;
@@ -1218,6 +1222,35 @@ qboolean VK_XR_EyeView( int eye, refdef_t *view, float fov[4] ) {
 		fov[axis] /= zoomLevel;
 	}
 	return qtrue;
+}
+
+void VK_XR_EyeAxis( int eye, float axis[3][3] ) {
+	static const float unit[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, -1 } };
+	const XrQuaternionf *q = &xr.views[eye].pose.orientation;
+	float t[3];
+	int i;
+	for ( i = 0; i < 3; i++ ) {
+		const float *v = unit[i];
+		t[0] = 2 * ( q->y * v[2] - q->z * v[1] );
+		t[1] = 2 * ( q->z * v[0] - q->x * v[2] );
+		t[2] = 2 * ( q->x * v[1] - q->y * v[0] );
+		axis[i][0] = v[0] + q->w * t[0] + q->y * t[2] - q->z * t[1];
+		axis[i][1] = v[1] + q->w * t[1] + q->z * t[0] - q->x * t[2];
+		axis[i][2] = v[2] + q->w * t[2] + q->x * t[1] - q->y * t[0];
+	}
+}
+
+void VK_XR_EyeTangents( int eye, qboolean rendered, float tangents[4] ) {
+	float fov[4];
+	int i;
+	fov[0] = xr.views[eye].fov.angleLeft;
+	fov[1] = xr.views[eye].fov.angleRight;
+	fov[2] = xr.views[eye].fov.angleUp;
+	fov[3] = xr.views[eye].fov.angleDown;
+	if ( rendered && xr.scope )
+		VKXR_ScopeFov( fov );
+	for ( i = 0; i < 4; i++ )
+		tangents[i] = tanf( rendered && !xr.scope ? fov[i] / zoomLevel : fov[i] );
 }
 
 /* Capture immutable eye poses on the frontend; deferred commands own a copy. */

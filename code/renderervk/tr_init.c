@@ -1928,6 +1928,9 @@ static void R_Register( void )
 		" ossetting: the display can show HDR but its HDR switch is off in the system display settings\n"
 		" unsupported: no output being shown can display HDR" );
 
+	ri.Cvar_SetDescription( ri.Cvar_Get( "vr_mirrorFovActive", "0", CVAR_ROM ),
+		"Read-only: the degrees across a one-eye desktop mirror draws, which can differ from \\vr_mirrorFov when stabilization needs room to move or the eye image runs out; 0 when the mirror shows whole eyes." );
+
 	r_bloom = ri.Cvar_Get( "r_bloom", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_bloom, "0", "1", CV_INTEGER );
 	ri.Cvar_SetDescription(r_bloom, "Enables bloom post-processing effect. Requires \\r_fbo 1.");
@@ -2120,10 +2123,11 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 	if ( code != REF_KEEP_CONTEXT ) {
 #ifdef USE_VULKAN
 		vk_shutdown( code );
-		// the next renderer may have no HDR output, and this one recomputes both at startup
+		// the next renderer may have no HDR output or VR mirror, and this one recomputes them at startup
 		if ( r_hdrStatus ) {
 			ri.Cvar_Set( "r_hdrActive", "0" );
 			ri.Cvar_Set( "r_hdrStatus", "unsupported" );
+			ri.Cvar_Set( "vr_mirrorFovActive", "0" );
 		}
 		if ( code == REF_KEEP_WINDOW ) {
 			glConfig.vidWidth = gls.captureWidth * (r_ext_supersample->integer ? 2 : 1);
