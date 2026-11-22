@@ -558,14 +558,8 @@ qboolean CL_OpenAVIForWriting( const char *fileName, const char *pipeFormat, qbo
 
 	afd.audioFrameSize = ceil( (float)(afd.a.rate * afd.a.sampleSize) / (float)afd.frameRate );
 
-	if ( Cvar_VariableIntegerValue( "s_initsound" ) == 0 )
-	{
-		afd.audio = qfalse;
-	}
-	else
-	{
-		afd.audio = qtrue;
-	}
+	// audio frames come only from the software mixer, so OpenAL records silent video
+	afd.audio = Cvar_VariableIntegerValue( "s_initsound" ) != 0 && afd.a.sampleSize > 0;
 
 	// This doesn't write a real header, but allocates the
 	// correct amount of space at the beginning of the file
