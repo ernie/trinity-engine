@@ -105,6 +105,12 @@
     <ClCompile Include="..\..\renderervk\vk.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\renderervk\vk_shadowtile_math.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\renderervk\tr_shadowtiles.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\renderercommon\tr_noise.c">
       <Filter>Source Files</Filter>
     </ClCompile>

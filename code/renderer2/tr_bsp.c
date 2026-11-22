@@ -1723,7 +1723,6 @@ static	void R_LoadSurfaces( const lump_t *surfs, const lump_t *verts, const lump
 	s_worldData.numsurfaces = count;
 	s_worldData.surfacesViewCount = ri.Hunk_Alloc ( count * sizeof(*s_worldData.surfacesViewCount), h_low );
 	s_worldData.surfacesDlightBits = ri.Hunk_Alloc ( count * sizeof(*s_worldData.surfacesDlightBits), h_low );
-	s_worldData.surfacesPshadowBits = ri.Hunk_Alloc ( count * sizeof(*s_worldData.surfacesPshadowBits), h_low );
 
 	// load hdr vertex colors
 	if (r_hdr->integer && !qglesMajorVersion)

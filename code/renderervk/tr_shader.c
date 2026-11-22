@@ -4508,6 +4508,14 @@ static void CreateInternalShaders( void ) {
 	shader.sort = SS_STENCIL_SHADOW;
 	tr.shadowShader = FinishShader();
 
+	InitShader( "<shadow tiles>", LIGHTMAP_NONE );
+	stages[0].bundle[0].image[0] = tr.defaultImage;
+	stages[0].bundle[0].tcGen = TCGEN_TEXTURE;
+	stages[0].active = qtrue;
+	stages[0].stateBits = GLS_DEFAULT;
+	shader.sort = SS_STENCIL_SHADOW;
+	tr.shadowTileShader = FinishShader();
+
 	InitShader( "<cinematic>", LIGHTMAP_NONE );
 	stages[0].bundle[0].image[0] = tr.defaultImage; // will be updated by specific cinematic images
 	stages[0].bundle[0].tcGen = TCGEN_TEXTURE;

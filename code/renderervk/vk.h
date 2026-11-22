@@ -34,7 +34,7 @@
 #define USE_DEDICATED_ALLOCATION
 #endif
 #define MAX_ATTACHMENTS_IN_POOL \
-	(11 + VK_NUM_BLOOM_PASSES * 2) // scene/capture attachments + XR SDR output + blur pairs
+	(12 + VK_NUM_BLOOM_PASSES * 2) // scene/capture attachments + XR SDR output + shadow atlas + blur pairs
 
 #define VK_DESC_STORAGE      0
 #define VK_DESC_UNIFORM      0
@@ -64,6 +64,10 @@ typedef enum {
 	TYPE_VR_FLOOR_GRID,
 	TYPE_VR_SCREEN,
 	TYPE_VR_REFLECTION,
+	TYPE_SHADOWTILE_CAST,
+	TYPE_SHADOWTILE_RECEIVE,
+	TYPE_SHADOWTILE_CUT_DEPTH,
+	TYPE_SHADOWTILE_RECEIVE_CUT,
 
 	TYPE_GENERIC_BEGIN, // start of non-env/env shader pairs
 	TYPE_SINGLE_TEXTURE = TYPE_GENERIC_BEGIN,
@@ -181,11 +185,12 @@ typedef enum {
 	RENDER_PASS_MONO_MAIN,
 	RENDER_PASS_MONO_POST_SCENE,
 	RENDER_PASS_VR_SCREEN_EYE,
+	RENDER_PASS_SHADOWTILE,
 	RENDER_PASS_COUNT
 } renderPass_t;
 
 static ID_INLINE unsigned VK_PassViewMask( int multiview, renderPass_t pass ) {
-	if ( !multiview || pass == RENDER_PASS_SCREENMAP ||
+	if ( !multiview || pass == RENDER_PASS_SCREENMAP || pass == RENDER_PASS_SHADOWTILE ||
 		pass == RENDER_PASS_HUD || pass == RENDER_PASS_DESKTOP ) return 0;
 	if ( pass == RENDER_PASS_MONO_MAIN || pass == RENDER_PASS_MONO_POST_SCENE ) return 1;
 	return 3;
@@ -243,6 +248,7 @@ typedef struct {
 	int scene_alpha; // scene image alpha: 0 stays 1, 1 written for a later stage that reads it, 2 written back to 1, 3 lowered by a 2D draw's destination factor
 	int stencil_mark; // mark entity pixels with stencil bit 0x80
 	int acff; // none, rgb, rgba, alpha
+	int shadowtile; // 1: caster depth into R, 2: first world surface into G; both MIN-blended
 	struct {
 		byte rgb;
 		byte alpha;
@@ -363,6 +369,9 @@ qboolean RE_XRRedrawEnvironment( void );
 
 void vk_end_render_pass( void );
 void vk_begin_main_render_pass( void );
+void vk_create_shadow_atlas( void );
+void vk_begin_shadowtile_render_pass( void );
+void vk_set_tile_viewport( const int rect[4] );
 
 void vk_bind_pipeline( uint32_t pipeline );
 void vk_bind_index( void );
@@ -493,6 +502,7 @@ typedef struct {
 		VkRenderPass capture;
 		VkRenderPass blur[VK_NUM_BLOOM_PASSES*2]; // horizontal-vertical pairs
 		VkRenderPass post_scene; // coronas and 2D blend into the resolved scene image before bloom and gamma
+		VkRenderPass shadowtile;
 	} render_pass;
 	vkMonoTargets_t mono;
 
@@ -597,12 +607,19 @@ typedef struct {
 	} capture;
 
 	struct {
+		VkDescriptorSet descriptor;
+		VkImage image;
+		VkImageView image_view;
+	} shadowAtlas;
+
+	struct {
 		VkFramebuffer blur[VK_NUM_BLOOM_PASSES*2];
 		VkFramebuffer main[MAX_SWAPCHAIN_IMAGES];
 		VkFramebuffer post_scene;
 		VkFramebuffer gamma[MAX_SWAPCHAIN_IMAGES];
 		VkFramebuffer screenmap;
 		VkFramebuffer capture;
+		VkFramebuffer shadowtile;
 	} framebuffers;
 
 #ifdef USE_UPLOAD_QUEUE
@@ -680,6 +697,11 @@ typedef struct {
 
 		VkShaderModule dot_fs;
 		VkShaderModule dot_vs;
+
+		VkShaderModule shadowtile_cast_vs, shadowtile_cast_fs;
+		VkShaderModule shadowtile_recv_vs, shadowtile_recv_vs_mv, shadowtile_recv_fs;
+		VkShaderModule shadowtile_cut_vs, shadowtile_cut_fs;
+		VkShaderModule shadowtile_recv_cut_vs, shadowtile_recv_cut_vs_mv, shadowtile_recv_cut_fs;
 	} modules;
 
 	VkPipelineCache pipelineCache;
@@ -700,6 +722,12 @@ typedef struct {
 	// dim 1: 0 - normal view, 1 - mirror view
 	uint32_t shadow_volume_pipelines[2][2];
 	uint32_t shadow_finish_pipeline;
+
+	// cg_shadows 4: index 0 casters into R, 1 receiver depth into G; receivers by mirror view
+	uint32_t shadowtile_cast_pipeline[2];
+	uint32_t shadowtile_recv_pipeline[2];
+	uint32_t shadowtile_cut_depth_pipeline;
+	uint32_t shadowtile_recv_cut_pipeline[2];
 
 	// dim 0 is based on fogPass_t: 0 - corresponds to FP_EQUAL, 1 - corresponds to FP_LE.
 	// dim 1 is directly a cullType_t enum value.
@@ -787,6 +815,7 @@ typedef struct {
 	float renderScaleY;
 
 	renderPass_t renderPassIndex;
+	int tileRect[4]; // viewport and scissor in the shadow atlas while in RENDER_PASS_SHADOWTILE
 
 	uint32_t screenMapWidth;
 	uint32_t screenMapHeight;

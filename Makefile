@@ -1106,8 +1106,6 @@ Q3REND2STROBJ = \
   $(B)/rend2/glsl/generic_vp.o \
   $(B)/rend2/glsl/lightall_fp.o \
   $(B)/rend2/glsl/lightall_vp.o \
-  $(B)/rend2/glsl/pshadow_fp.o \
-  $(B)/rend2/glsl/pshadow_vp.o \
   $(B)/rend2/glsl/shadowfill_fp.o \
   $(B)/rend2/glsl/shadowfill_vp.o \
   $(B)/rend2/glsl/shadowmask_fp.o \
@@ -1152,6 +1150,8 @@ Q3RENDVOBJ = \
   $(B)/rendv/vk.o \
   $(B)/rendv/vk_xr.o \
   $(B)/rendv/vk_foveation_math.o \
+  $(B)/rendv/vk_shadowtile_math.o \
+  $(B)/rendv/tr_shadowtiles.o \
   $(B)/rendv/vk_foveation.o \
   $(B)/rendv/vk_xr_live.o \
   $(B)/rendv/vk_xr_vulkan.o \

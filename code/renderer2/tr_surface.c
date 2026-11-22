@@ -426,7 +426,7 @@ static void RB_SurfacePolychain( const srfPoly_t *p ) {
 	tess.numVertexes = numv;
 }
 
-static void RB_SurfaceVertsAndIndexes( int numVerts, srfVert_t *verts, int numIndexes, glIndex_t *indexes, int dlightBits, int pshadowBits)
+static void RB_SurfaceVertsAndIndexes( int numVerts, srfVert_t *verts, int numIndexes, glIndex_t *indexes, int dlightBits)
 {
 	int             i;
 	glIndex_t      *inIndex;
@@ -512,12 +512,11 @@ static void RB_SurfaceVertsAndIndexes( int numVerts, srfVert_t *verts, int numIn
 #endif
 
 	tess.dlightBits |= dlightBits;
-	tess.pshadowBits |= pshadowBits;
 
 	tess.numVertexes += numVerts;
 }
 
-static qboolean RB_SurfaceVaoCached(int numVerts, srfVert_t *verts, int numIndexes, glIndex_t *indexes, int dlightBits, int pshadowBits)
+static qboolean RB_SurfaceVaoCached(int numVerts, srfVert_t *verts, int numIndexes, glIndex_t *indexes, int dlightBits)
 {
 	qboolean recycleVertexBuffer = qfalse;
 	qboolean recycleIndexBuffer = qfalse;
@@ -532,7 +531,6 @@ static qboolean RB_SurfaceVaoCached(int numVerts, srfVert_t *verts, int numIndex
 	VaoCache_BindVao();
 
 	tess.dlightBits |= dlightBits;
-	tess.pshadowBits |= pshadowBits;
 
 	VaoCache_CheckAdd(&endSurface, &recycleVertexBuffer, &recycleIndexBuffer, numVerts, numIndexes);
 
@@ -568,13 +566,13 @@ RB_SurfaceTriangles
 */
 static void RB_SurfaceTriangles( const srfBspSurface_t *srf ) {
 	if (RB_SurfaceVaoCached(srf->numVerts, srf->verts, srf->numIndexes,
-		srf->indexes, srf->dlightBits, srf->pshadowBits))
+		srf->indexes, srf->dlightBits))
 	{
 		return;
 	}
 
 	RB_SurfaceVertsAndIndexes(srf->numVerts, srf->verts, srf->numIndexes,
-			srf->indexes, srf->dlightBits, srf->pshadowBits);
+			srf->indexes, srf->dlightBits);
 }
 
 
@@ -1004,13 +1002,13 @@ RB_SurfaceFace
 */
 static void RB_SurfaceFace( const srfBspSurface_t *srf ) {
 	if (RB_SurfaceVaoCached(srf->numVerts, srf->verts, srf->numIndexes,
-		srf->indexes, srf->dlightBits, srf->pshadowBits))
+		srf->indexes, srf->dlightBits))
 	{
 		return;
 	}
 
 	RB_SurfaceVertsAndIndexes(srf->numVerts, srf->verts, srf->numIndexes,
-			srf->indexes, srf->dlightBits, srf->pshadowBits);
+			srf->indexes, srf->dlightBits);
 }
 
 
@@ -1068,11 +1066,10 @@ static void RB_SurfaceGrid( srfBspSurface_t *srf ) {
 	int		lodWidth, lodHeight;
 	int		numVertexes;
 	int		dlightBits;
-	int     pshadowBits;
 	//int		*vDlightBits;
 
 	if (RB_SurfaceVaoCached(srf->numVerts, srf->verts, srf->numIndexes,
-		srf->indexes, srf->dlightBits, srf->pshadowBits))
+		srf->indexes, srf->dlightBits))
 	{
 		return;
 	}
@@ -1081,9 +1078,6 @@ static void RB_SurfaceGrid( srfBspSurface_t *srf ) {
 
 	dlightBits = srf->dlightBits;
 	tess.dlightBits |= dlightBits;
-
-	pshadowBits = srf->pshadowBits;
-	tess.pshadowBits |= pshadowBits;
 
 	// determine the allowable discrepance
 	lodError = LodErrorForVolume( srf->lodOrigin, srf->lodRadius );

@@ -134,8 +134,6 @@ cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_fp.glsl .\bu
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_vp.glsl .\build\dynamic\renderer2\generic_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_fp.glsl .\build\dynamic\renderer2\lightall_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_vp.glsl .\build\dynamic\renderer2\lightall_vp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_fp.glsl .\build\dynamic\renderer2\pshadow_fp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_vp.glsl .\build\dynamic\renderer2\pshadow_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_fp.glsl .\build\dynamic\renderer2\shadowfill_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_vp.glsl .\build\dynamic\renderer2\shadowfill_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowmask_fp.glsl .\build\dynamic\renderer2\shadowmask_fp.c
@@ -181,8 +179,6 @@ cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_fp.glsl .\bu
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_vp.glsl .\build\dynamic\renderer2\generic_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_fp.glsl .\build\dynamic\renderer2\lightall_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_vp.glsl .\build\dynamic\renderer2\lightall_vp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_fp.glsl .\build\dynamic\renderer2\pshadow_fp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_vp.glsl .\build\dynamic\renderer2\pshadow_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_fp.glsl .\build\dynamic\renderer2\shadowfill_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_vp.glsl .\build\dynamic\renderer2\shadowfill_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowmask_fp.glsl .\build\dynamic\renderer2\shadowmask_fp.c
@@ -227,8 +223,6 @@ cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_fp.glsl .\bu
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_vp.glsl .\build\dynamic\renderer2\generic_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_fp.glsl .\build\dynamic\renderer2\lightall_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_vp.glsl .\build\dynamic\renderer2\lightall_vp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_fp.glsl .\build\dynamic\renderer2\pshadow_fp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_vp.glsl .\build\dynamic\renderer2\pshadow_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_fp.glsl .\build\dynamic\renderer2\shadowfill_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_vp.glsl .\build\dynamic\renderer2\shadowfill_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowmask_fp.glsl .\build\dynamic\renderer2\shadowmask_fp.c
@@ -273,8 +267,6 @@ cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_fp.glsl .\bu
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_vp.glsl .\build\dynamic\renderer2\generic_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_fp.glsl .\build\dynamic\renderer2\lightall_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_vp.glsl .\build\dynamic\renderer2\lightall_vp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_fp.glsl .\build\dynamic\renderer2\pshadow_fp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_vp.glsl .\build\dynamic\renderer2\pshadow_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_fp.glsl .\build\dynamic\renderer2\shadowfill_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_vp.glsl .\build\dynamic\renderer2\shadowfill_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowmask_fp.glsl .\build\dynamic\renderer2\shadowmask_fp.c
@@ -323,8 +315,6 @@ cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_fp.glsl .\bu
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_vp.glsl .\build\dynamic\renderer2\generic_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_fp.glsl .\build\dynamic\renderer2\lightall_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_vp.glsl .\build\dynamic\renderer2\lightall_vp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_fp.glsl .\build\dynamic\renderer2\pshadow_fp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_vp.glsl .\build\dynamic\renderer2\pshadow_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_fp.glsl .\build\dynamic\renderer2\shadowfill_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_vp.glsl .\build\dynamic\renderer2\shadowfill_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowmask_fp.glsl .\build\dynamic\renderer2\shadowmask_fp.c
@@ -372,8 +362,6 @@ cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_fp.glsl .\bu
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\generic_vp.glsl .\build\dynamic\renderer2\generic_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_fp.glsl .\build\dynamic\renderer2\lightall_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\lightall_vp.glsl .\build\dynamic\renderer2\lightall_vp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_fp.glsl .\build\dynamic\renderer2\pshadow_fp.c
-cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\pshadow_vp.glsl .\build\dynamic\renderer2\pshadow_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_fp.glsl .\build\dynamic\renderer2\shadowfill_fp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowfill_vp.glsl .\build\dynamic\renderer2\shadowfill_vp.c
 cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\shadowmask_fp.glsl .\build\dynamic\renderer2\shadowmask_fp.c
@@ -458,8 +446,6 @@ cscript.exe /nologo glsl_stringify.vbs ..\..\renderer2\glsl\tonemap_vp.glsl .\bu
     <ClCompile Include="build\dynamic\renderer2\generic_vp.c" />
     <ClCompile Include="build\dynamic\renderer2\lightall_fp.c" />
     <ClCompile Include="build\dynamic\renderer2\lightall_vp.c" />
-    <ClCompile Include="build\dynamic\renderer2\pshadow_fp.c" />
-    <ClCompile Include="build\dynamic\renderer2\pshadow_vp.c" />
     <ClCompile Include="build\dynamic\renderer2\shadowfill_fp.c" />
     <ClCompile Include="build\dynamic\renderer2\shadowfill_vp.c" />
     <ClCompile Include="build\dynamic\renderer2\shadowmask_fp.c" />

@@ -231,95 +231,11 @@ static int R_DlightSurface( msurface_t *surf, int dlightBits ) {
 }
 
 /*
-====================
-R_PshadowSurface
-
-Just like R_DlightSurface, cull any we can
-====================
-*/
-static int R_PshadowSurface( msurface_t *surf, int pshadowBits ) {
-	float       d;
-	int         i;
-	pshadow_t    *ps;
-	
-	if ( surf->cullinfo.type & CULLINFO_PLANE )
-	{
-		for ( i = 0 ; i < tr.refdef.num_pshadows ; i++ ) {
-			if ( ! ( pshadowBits & ( 1 << i ) ) ) {
-				continue;
-			}
-			ps = &tr.refdef.pshadows[i];
-			d = DotProduct( ps->lightOrigin, surf->cullinfo.plane.normal ) - surf->cullinfo.plane.dist;
-			if ( d < -ps->lightRadius || d > ps->lightRadius ) {
-				// pshadow doesn't reach the plane
-				pshadowBits &= ~( 1 << i );
-			}
-		}
-	}
-	
-	if ( surf->cullinfo.type & CULLINFO_BOX )
-	{
-		for ( i = 0 ; i < tr.refdef.num_pshadows ; i++ ) {
-			if ( ! ( pshadowBits & ( 1 << i ) ) ) {
-				continue;
-			}
-			ps = &tr.refdef.pshadows[i];
-			if ( ps->lightOrigin[0] - ps->lightRadius > surf->cullinfo.bounds[1][0]
-				|| ps->lightOrigin[0] + ps->lightRadius < surf->cullinfo.bounds[0][0]
-				|| ps->lightOrigin[1] - ps->lightRadius > surf->cullinfo.bounds[1][1]
-				|| ps->lightOrigin[1] + ps->lightRadius < surf->cullinfo.bounds[0][1]
-				|| ps->lightOrigin[2] - ps->lightRadius > surf->cullinfo.bounds[1][2]
-				|| ps->lightOrigin[2] + ps->lightRadius < surf->cullinfo.bounds[0][2] 
-				|| BoxOnPlaneSide(surf->cullinfo.bounds[0], surf->cullinfo.bounds[1], &ps->cullPlane) == 2 ) {
-				// pshadow doesn't reach the bounds
-				pshadowBits &= ~( 1 << i );
-			}
-		}
-	}
-
-	if ( surf->cullinfo.type & CULLINFO_SPHERE )
-	{
-		for ( i = 0 ; i < tr.refdef.num_pshadows ; i++ ) {
-			if ( ! ( pshadowBits & ( 1 << i ) ) ) {
-				continue;
-			}
-			ps = &tr.refdef.pshadows[i];
-			if (!SpheresIntersect(ps->viewOrigin, ps->viewRadius, surf->cullinfo.localOrigin, surf->cullinfo.radius)
-				|| DotProduct( surf->cullinfo.localOrigin, ps->cullPlane.normal ) - ps->cullPlane.dist < -surf->cullinfo.radius)
-			{
-				// pshadow doesn't reach the bounds
-				pshadowBits &= ~( 1 << i );
-			}
-		}
-	}
-
-	switch(*surf->data)
-	{
-		case SF_FACE:
-		case SF_GRID:
-		case SF_TRIANGLES:
-			((srfBspSurface_t *)surf->data)->pshadowBits = pshadowBits;
-			break;
-
-		default:
-			pshadowBits = 0;
-			break;
-	}
-
-	if ( pshadowBits ) {
-		//tr.pc.c_dlightSurfaces++;
-	}
-
-	return pshadowBits;
-}
-
-
-/*
 ======================
 R_AddWorldSurface
 ======================
 */
-static void R_AddWorldSurface( msurface_t *surf, int dlightBits, int pshadowBits ) {
+static void R_AddWorldSurface( msurface_t *surf, int dlightBits ) {
 	// FIXME: bmodel fog?
 
 	// try to cull before dlighting or adding
@@ -333,13 +249,7 @@ static void R_AddWorldSurface( msurface_t *surf, int dlightBits, int pshadowBits
 		dlightBits = ( dlightBits != 0 );
 	}
 
-	// check for pshadows
-	/*if ( pshadowBits ) */{
-		pshadowBits = R_PshadowSurface( surf, pshadowBits);
-		pshadowBits = ( pshadowBits != 0 );
-	}
-
-	R_AddDrawSurf( surf->data, surf->shader, surf->fogIndex, dlightBits, pshadowBits, surf->cubemapIndex );
+	R_AddDrawSurf( surf->data, surf->shader, surf->fogIndex, dlightBits, surf->cubemapIndex );
 }
 
 /*
@@ -381,7 +291,7 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 		if (tr.world->surfacesViewCount[surf] != tr.viewCount)
 		{
 			tr.world->surfacesViewCount[surf] = tr.viewCount;
-			R_AddWorldSurface( tr.world->surfaces + surf, tr.currentEntity->needDlights, 0 );
+			R_AddWorldSurface( tr.world->surfaces + surf, tr.currentEntity->needDlights );
 		}
 	}
 }
@@ -401,11 +311,10 @@ void R_AddBrushModelSurfaces ( trRefEntity_t *ent ) {
 R_RecursiveWorldNode
 ================
 */
-static void R_RecursiveWorldNode( mnode_t *node, uint32_t planeBits, uint32_t dlightBits, uint32_t pshadowBits ) {
+static void R_RecursiveWorldNode( mnode_t *node, uint32_t planeBits, uint32_t dlightBits ) {
 
 	do {
 		uint32_t newDlights[2];
-		uint32_t newPShadows[2];
 
 		// if the node wasn't marked as potentially visible, exit
 		// pvs is skipped for depth shadows
@@ -501,36 +410,12 @@ static void R_RecursiveWorldNode( mnode_t *node, uint32_t planeBits, uint32_t dl
 			}
 		}
 
-		newPShadows[0] = 0;
-		newPShadows[1] = 0;
-		if ( pshadowBits ) {
-			int	i;
-
-			for ( i = 0 ; i < tr.refdef.num_pshadows ; i++ ) {
-				pshadow_t	*shadow;
-				float		dist;
-
-				if ( pshadowBits & ( 1 << i ) ) {
-					shadow = &tr.refdef.pshadows[i];
-					dist = DotProduct( shadow->lightOrigin, node->plane->normal ) - node->plane->dist;
-					
-					if ( dist > -shadow->lightRadius ) {
-						newPShadows[0] |= ( 1 << i );
-					}
-					if ( dist < shadow->lightRadius ) {
-						newPShadows[1] |= ( 1 << i );
-					}
-				}
-			}
-		}
-
 		// recurse down the children, front side first
-		R_RecursiveWorldNode (node->children[0], planeBits, newDlights[0], newPShadows[0] );
+		R_RecursiveWorldNode (node->children[0], planeBits, newDlights[0] );
 
 		// tail recurse
 		node = node->children[1];
 		dlightBits = newDlights[1];
-		pshadowBits = newPShadows[1];
 	} while ( 1 );
 
 	{
@@ -572,12 +457,10 @@ static void R_RecursiveWorldNode( mnode_t *node, uint32_t planeBits, uint32_t dl
 			{
 				tr.world->surfacesViewCount[surf] = tr.viewCount;
 				tr.world->surfacesDlightBits[surf] = dlightBits;
-				tr.world->surfacesPshadowBits[surf] = pshadowBits;
 			}
 			else
 			{
 				tr.world->surfacesDlightBits[surf] |= dlightBits;
-				tr.world->surfacesPshadowBits[surf] |= pshadowBits;
 			}
 			view++;
 		}
@@ -741,7 +624,7 @@ R_AddWorldSurfaces
 =============
 */
 void R_AddWorldSurfaces (void) {
-	uint32_t planeBits, dlightBits, pshadowBits;
+	uint32_t planeBits, dlightBits;
 
 	if ( !r_drawworld->integer ) {
 		return;
@@ -766,29 +649,18 @@ void R_AddWorldSurfaces (void) {
 		tr.refdef.num_dlights = MAX_DLIGHTS ;
 	}
 
-	if ( tr.refdef.num_pshadows > MAX_DRAWN_PSHADOWS ) {
-		tr.refdef.num_pshadows = MAX_DRAWN_PSHADOWS;
-	}
-
 	planeBits = (tr.viewParms.flags & VPF_FARPLANEFRUSTUM) ? 31 : 15;
 
 	if ( tr.viewParms.flags & VPF_DEPTHSHADOW )
 	{
 		dlightBits = 0;
-		pshadowBits = 0;
-	}
-	else if ( !(tr.viewParms.flags & VPF_SHADOWMAP) )
-	{
-		dlightBits = ( 1ULL << tr.refdef.num_dlights ) - 1;
-		pshadowBits = ( 1ULL << tr.refdef.num_pshadows ) - 1;
 	}
 	else
 	{
 		dlightBits = ( 1ULL << tr.refdef.num_dlights ) - 1;
-		pshadowBits = 0;
 	}
 
-	R_RecursiveWorldNode( tr.world->nodes, planeBits, dlightBits, pshadowBits);
+	R_RecursiveWorldNode( tr.world->nodes, planeBits, dlightBits );
 
 	// now add all the potentially visible surfaces
 	// also mask invisible dlights for next frame
@@ -802,7 +674,7 @@ void R_AddWorldSurfaces (void) {
 			if (tr.world->surfacesViewCount[i] != tr.viewCount)
 				continue;
 
-			R_AddWorldSurface( tr.world->surfaces + i, tr.world->surfacesDlightBits[i], tr.world->surfacesPshadowBits[i] );
+			R_AddWorldSurface( tr.world->surfaces + i, tr.world->surfacesDlightBits[i] );
 			tr.refdef.dlightMask |= tr.world->surfacesDlightBits[i];
 		}
 

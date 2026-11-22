@@ -372,7 +372,7 @@ static void R_AddDecalSurface( decal_t *d ) {
 	}
 
 	sh = R_GetShaderByHandle( d->srf.hShader );
-	R_AddDrawSurf( (surfaceType_t *)&d->srf, sh, d->srf.fogIndex, 0, 0, 0 );
+	R_AddDrawSurf( (surfaceType_t *)&d->srf, sh, d->srf.fogIndex, 0, 0 );
 }
 
 void R_AddDecalSurfaces( void ) {

@@ -1216,7 +1216,6 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, vec4_t clipDest[128
 	shader_t *shader;
 	int		fogNum;
 	int dlighted;
-	int pshadowed;
 	vec4_t clip, eye;
 	int i;
 	unsigned int pointOr = 0;
@@ -1224,7 +1223,7 @@ static qboolean SurfIsOffscreen( const drawSurf_t *drawSurf, vec4_t clipDest[128
 
 	R_RotateForViewer();
 
-	R_DecomposeSort( drawSurf->sort, &entityNum, &shader, &fogNum, &dlighted, &pshadowed );
+	R_DecomposeSort( drawSurf->sort, &entityNum, &shader, &fogNum, &dlighted );
 	RB_BeginSurface( shader, fogNum, drawSurf->cubemapIndex);
 	rb_surfaceTable[ *drawSurf->surface ]( drawSurf->surface );
 
@@ -1471,8 +1470,8 @@ static void R_RadixSort( drawSurf_t *source, int size )
 R_AddDrawSurf
 =================
 */
-void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader, 
-				   int fogIndex, int dlightMap, int pshadowMap, int cubemap ) {
+void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader,
+				   int fogIndex, int dlightMap, int cubemap ) {
 	int			index;
 
 	// instead of checking for overflow, we just mask the index
@@ -1480,9 +1479,8 @@ void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader,
 	index = tr.refdef.numDrawSurfs & DRAWSURF_MASK;
 	// the sort data is packed into a single 32 bit value so it can be
 	// compared quickly during the qsorting process
-	tr.refdef.drawSurfs[index].sort = (shader->sortedIndex << QSORT_SHADERNUM_SHIFT) 
-		| tr.shiftedEntityNum | ( fogIndex << QSORT_FOGNUM_SHIFT ) 
-		| ((int)pshadowMap << QSORT_PSHADOW_SHIFT) | (int)dlightMap;
+	tr.refdef.drawSurfs[index].sort = (shader->sortedIndex << QSORT_SHADERNUM_SHIFT)
+		| tr.shiftedEntityNum | ( fogIndex << QSORT_FOGNUM_SHIFT ) | (int)dlightMap;
 	tr.refdef.drawSurfs[index].cubemapIndex = cubemap;
 	tr.refdef.drawSurfs[index].surface = surface;
 	tr.refdef.numDrawSurfs++;
@@ -1494,11 +1492,10 @@ R_DecomposeSort
 =================
 */
 void R_DecomposeSort( unsigned sort, int *entityNum, shader_t **shader, 
-					 int *fogNum, int *dlightMap, int *pshadowMap ) {
+					 int *fogNum, int *dlightMap ) {
 	*fogNum = ( sort >> QSORT_FOGNUM_SHIFT ) & 31;
 	*shader = tr.sortedShaders[ ( sort >> QSORT_SHADERNUM_SHIFT ) & (MAX_SHADERS-1) ];
 	*entityNum = ( sort >> QSORT_REFENTITYNUM_SHIFT ) & REFENTITYNUM_MASK;
-	*pshadowMap = (sort >> QSORT_PSHADOW_SHIFT ) & 1;
 	*dlightMap = sort & 1;
 }
 
@@ -1512,7 +1509,6 @@ static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	int				fogNum;
 	int				entityNum;
 	int				dlighted;
-	int             pshadowed;
 	int				i;
 
 	//ri.Printf(PRINT_ALL, "firstDrawSurf %d numDrawSurfs %d\n", (int)(drawSurfs - tr.refdef.drawSurfs), numDrawSurfs);
@@ -1537,7 +1533,7 @@ static void R_SortDrawSurfs( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	// check for any pass through drawing, which
 	// may cause another view to be rendered first
 	for ( i = 0 ; i < numDrawSurfs ; i++ ) {
-		R_DecomposeSort( (drawSurfs+i)->sort, &entityNum, &shader, &fogNum, &dlighted, &pshadowed );
+		R_DecomposeSort( (drawSurfs+i)->sort, &entityNum, &shader, &fogNum, &dlighted );
 
 		if ( shader->sort > SS_PORTAL ) {
 			break;
@@ -1601,7 +1597,7 @@ static void R_AddEntitySurface (int entityNum)
 			return;
 		}
 		shader = R_GetShaderByHandle( ent->e.customShader );
-		R_AddDrawSurf( &entitySurface, shader, R_SpriteFogNum( ent ), 0, 0, 0 /*cubeMap*/ );
+		R_AddDrawSurf( &entitySurface, shader, R_SpriteFogNum( ent ), 0, 0 /*cubeMap*/ );
 		break;
 
 	case RT_MODEL:
@@ -1610,7 +1606,7 @@ static void R_AddEntitySurface (int entityNum)
 
 		tr.currentModel = R_GetModelByHandle( ent->e.hModel );
 		if (!tr.currentModel) {
-			R_AddDrawSurf( &entitySurface, tr.defaultShader, 0, 0, 0, 0 /*cubeMap*/  );
+			R_AddDrawSurf( &entitySurface, tr.defaultShader, 0, 0, 0 /*cubeMap*/  );
 		} else {
 			switch ( tr.currentModel->type ) {
 			case MOD_MESH:
@@ -1629,7 +1625,7 @@ static void R_AddEntitySurface (int entityNum)
 				if ( (ent->e.renderfx & RF_THIRD_PERSON) && !tr.viewParms.isPortal) {
 					break;
 				}
-				R_AddDrawSurf( &entitySurface, tr.defaultShader, 0, 0, 0, 0 );
+				R_AddDrawSurf( &entitySurface, tr.defaultShader, 0, 0, 0 );
 				break;
 			default:
 				ri.Error( ERR_DROP, "R_AddEntitySurfaces: Bad modeltype" );
@@ -1902,345 +1898,6 @@ void R_RenderDlightCubemaps(const refdef_t *fd)
 	}
 }
 
-
-void R_RenderPshadowMaps(const refdef_t *fd)
-{
-	viewParms_t		shadowParms;
-	int i;
-
-	// first, make a list of shadows
-	for ( i = 0; i < tr.refdef.num_entities; i++)
-	{
-		trRefEntity_t *ent = &tr.refdef.entities[i];
-
-		if((ent->e.renderfx & (RF_FIRST_PERSON | RF_NOSHADOW)))
-			continue;
-
-		//if((ent->e.renderfx & RF_THIRD_PERSON))
-			//continue;
-
-		if (ent->e.reType == RT_MODEL)
-		{
-			model_t *model = R_GetModelByHandle( ent->e.hModel );
-			pshadow_t shadow;
-			float radius = 0.0f;
-			float scale = 1.0f;
-			vec3_t diff;
-			int j;
-
-			if (!model)
-				continue;
-
-			if (ent->e.nonNormalizedAxes)
-			{
-				scale = VectorLength( ent->e.axis[0] );
-			}
-
-			switch (model->type)
-			{
-				case MOD_MESH:
-				{
-					mdvFrame_t *frame = &model->mdv[0]->frames[ent->e.frame];
-
-					radius = frame->radius * scale;
-				}
-				break;
-
-				case MOD_MDR:
-				{
-					// FIXME: never actually tested this
-					mdrHeader_t *header = model->modelData;
-					int frameSize = (size_t)( &((mdrFrame_t *)0)->bones[ header->numBones ] );
-					mdrFrame_t *frame = ( mdrFrame_t * ) ( ( byte * ) header + header->ofsFrames + frameSize * ent->e.frame);
-
-					radius = frame->radius;
-				}
-				break;
-				case MOD_IQM:
-				{
-					// FIXME: never actually tested this
-					iqmData_t *data = model->modelData;
-					vec3_t diag;
-					float *framebounds;
-
-					framebounds = data->bounds + 6*ent->e.frame;
-					VectorSubtract( framebounds+3, framebounds, diag );
-					radius = 0.5f * VectorLength( diag );
-				}
-				break;
-
-				default:
-					break;
-			}
-
-			if (!radius)
-				continue;
-
-			// Cull entities that are behind the viewer by more than lightRadius
-			VectorSubtract(ent->e.origin, fd->vieworg, diff);
-			if (DotProduct(diff, fd->viewaxis[0]) < -r_pshadowDist->value)
-				continue;
-
-			memset(&shadow, 0, sizeof(shadow));
-
-			shadow.numEntities = 1;
-			shadow.entityNums[0] = i;
-			shadow.viewRadius = radius;
-			shadow.lightRadius = r_pshadowDist->value;
-			VectorCopy(ent->e.origin, shadow.viewOrigin);
-			shadow.sort = DotProduct(diff, diff) / (radius * radius);
-			VectorCopy(ent->e.origin, shadow.entityOrigins[0]);
-			shadow.entityRadiuses[0] = radius;
-
-			for (j = 0; j < MAX_CALC_PSHADOWS; j++)
-			{
-				pshadow_t swap;
-
-				if (j + 1 > tr.refdef.num_pshadows)
-				{
-					tr.refdef.num_pshadows = j + 1;
-					tr.refdef.pshadows[j] = shadow;
-					break;
-				}
-
-				// sort shadows by distance from camera divided by radius
-				// FIXME: sort better
-				if (tr.refdef.pshadows[j].sort <= shadow.sort)
-					continue;
-
-				swap = tr.refdef.pshadows[j];
-				tr.refdef.pshadows[j] = shadow;
-				shadow = swap;
-			}
-		}
-	}
-
-	// next, merge touching pshadows
-	for ( i = 0; i < tr.refdef.num_pshadows; i++)
-	{
-		pshadow_t *ps1 = &tr.refdef.pshadows[i];
-		int j;
-
-		for (j = i + 1; j < tr.refdef.num_pshadows; j++)
-		{
-			pshadow_t *ps2 = &tr.refdef.pshadows[j];
-			int k;
-			qboolean touch;
-
-			if (ps1->numEntities == 8)
-				break;
-
-			touch = qfalse;
-			if (SpheresIntersect(ps1->viewOrigin, ps1->viewRadius, ps2->viewOrigin, ps2->viewRadius))
-			{
-				for (k = 0; k < ps1->numEntities; k++)
-				{
-					if (SpheresIntersect(ps1->entityOrigins[k], ps1->entityRadiuses[k], ps2->viewOrigin, ps2->viewRadius))
-					{
-						touch = qtrue;
-						break;
-					}
-				}
-			}
-
-			if (touch)
-			{
-				vec3_t newOrigin;
-				float newRadius;
-
-				BoundingSphereOfSpheres(ps1->viewOrigin, ps1->viewRadius, ps2->viewOrigin, ps2->viewRadius, newOrigin, &newRadius);
-				VectorCopy(newOrigin, ps1->viewOrigin);
-				ps1->viewRadius = newRadius;
-
-				ps1->entityNums[ps1->numEntities] = ps2->entityNums[0];
-				VectorCopy(ps2->viewOrigin, ps1->entityOrigins[ps1->numEntities]);
-				ps1->entityRadiuses[ps1->numEntities] = ps2->viewRadius;
-
-				ps1->numEntities++;
-
-				for (k = j; k < tr.refdef.num_pshadows - 1; k++)
-				{
-					tr.refdef.pshadows[k] = tr.refdef.pshadows[k + 1];
-				}
-
-				j--;
-				tr.refdef.num_pshadows--;
-			}
-		}
-	}
-
-	// cap number of drawn pshadows
-	if (tr.refdef.num_pshadows > MAX_DRAWN_PSHADOWS)
-	{
-		tr.refdef.num_pshadows = MAX_DRAWN_PSHADOWS;
-	}
-
-	// next, fill up the rest of the shadow info
-	for ( i = 0; i < tr.refdef.num_pshadows; i++)
-	{
-		pshadow_t *shadow = &tr.refdef.pshadows[i];
-		vec3_t up;
-		vec3_t ambientLight, directedLight, lightDir;
-
-		VectorSet(lightDir, 0.57735f, 0.57735f, 0.57735f);
-#if 1
-		R_LightForPoint(shadow->viewOrigin, ambientLight, directedLight, lightDir);
-
-		// sometimes there's no light
-		if (DotProduct(lightDir, lightDir) < 0.9f)
-			VectorSet(lightDir, 0.0f, 0.0f, 1.0f);
-#endif
-
-		if (shadow->viewRadius * 3.0f > shadow->lightRadius)
-		{
-			shadow->lightRadius = shadow->viewRadius * 3.0f;
-		}
-
-		VectorMA(shadow->viewOrigin, shadow->viewRadius, lightDir, shadow->lightOrigin);
-
-		// make up a projection, up doesn't matter
-		VectorScale(lightDir, -1.0f, shadow->lightViewAxis[0]);
-		VectorSet(up, 0, 0, -1);
-
-		if ( fabsf(DotProduct(up, shadow->lightViewAxis[0])) > 0.9f )
-		{
-			VectorSet(up, -1, 0, 0);
-		}
-
-		CrossProduct(shadow->lightViewAxis[0], up, shadow->lightViewAxis[1]);
-		VectorNormalize(shadow->lightViewAxis[1]);
-		CrossProduct(shadow->lightViewAxis[0], shadow->lightViewAxis[1], shadow->lightViewAxis[2]);
-
-		VectorCopy(shadow->lightViewAxis[0], shadow->cullPlane.normal);
-		shadow->cullPlane.dist = DotProduct(shadow->cullPlane.normal, shadow->lightOrigin);
-		shadow->cullPlane.type = PLANE_NON_AXIAL;
-		SetPlaneSignbits(&shadow->cullPlane);
-	}
-
-	// next, render shadowmaps
-	for ( i = 0; i < tr.refdef.num_pshadows; i++)
-	{
-		int firstDrawSurf;
-		pshadow_t *shadow = &tr.refdef.pshadows[i];
-		int j;
-
-		Com_Memset( &shadowParms, 0, sizeof( shadowParms ) );
-
-		if (glRefConfig.framebufferObject)
-		{
-			shadowParms.viewportX = 0;
-			shadowParms.viewportY = 0;
-		}
-		else
-		{
-			shadowParms.viewportX = tr.refdef.x;
-			shadowParms.viewportY = glConfig.vidHeight - ( tr.refdef.y + PSHADOW_MAP_SIZE );
-		}
-		shadowParms.viewportWidth = PSHADOW_MAP_SIZE;
-		shadowParms.viewportHeight = PSHADOW_MAP_SIZE;
-		shadowParms.isPortal = qfalse;
-		shadowParms.isMirror = qfalse;
-
-		shadowParms.fovX = 90;
-		shadowParms.fovY = 90;
-
-		if (glRefConfig.framebufferObject)
-			shadowParms.targetFbo = tr.pshadowFbos[i];
-
-		shadowParms.flags = VPF_DEPTHSHADOW | VPF_NOVIEWMODEL;
-		shadowParms.zFar = shadow->lightRadius;
-
-		VectorCopy(shadow->lightOrigin, shadowParms.or.origin);
-		
-		VectorCopy(shadow->lightViewAxis[0], shadowParms.or.axis[0]);
-		VectorCopy(shadow->lightViewAxis[1], shadowParms.or.axis[1]);
-		VectorCopy(shadow->lightViewAxis[2], shadowParms.or.axis[2]);
-
-		{
-			tr.viewCount++;
-
-			tr.viewParms = shadowParms;
-			tr.viewParms.frameSceneNum = tr.frameSceneNum;
-			tr.viewParms.frameCount = tr.frameCount;
-
-			firstDrawSurf = tr.refdef.numDrawSurfs;
-
-			tr.viewCount++;
-
-			// set viewParms.world
-			R_RotateForViewer ();
-
-			{
-				float xmin, xmax, ymin, ymax, znear, zfar;
-				viewParms_t *dest = &tr.viewParms;
-				vec3_t pop;
-
-				xmin = ymin = -shadow->viewRadius;
-				xmax = ymax = shadow->viewRadius;
-				znear = 0;
-				zfar = shadow->lightRadius;
-
-				dest->projectionMatrix[0] = 2 / (xmax - xmin);
-				dest->projectionMatrix[4] = 0;
-				dest->projectionMatrix[8] = (xmax + xmin) / (xmax - xmin);
-				dest->projectionMatrix[12] =0;
-
-				dest->projectionMatrix[1] = 0;
-				dest->projectionMatrix[5] = 2 / (ymax - ymin);
-				dest->projectionMatrix[9] = ( ymax + ymin ) / (ymax - ymin);	// normally 0
-				dest->projectionMatrix[13] = 0;
-
-				dest->projectionMatrix[2] = 0;
-				dest->projectionMatrix[6] = 0;
-				dest->projectionMatrix[10] = 2 / (zfar - znear);
-				dest->projectionMatrix[14] = 0;
-
-				dest->projectionMatrix[3] = 0;
-				dest->projectionMatrix[7] = 0;
-				dest->projectionMatrix[11] = 0;
-				dest->projectionMatrix[15] = 1;
-
-				VectorScale(dest->or.axis[1],  1.0f, dest->frustum[0].normal);
-				VectorMA(dest->or.origin, -shadow->viewRadius, dest->frustum[0].normal, pop);
-				dest->frustum[0].dist = DotProduct(pop, dest->frustum[0].normal);
-
-				VectorScale(dest->or.axis[1], -1.0f, dest->frustum[1].normal);
-				VectorMA(dest->or.origin, -shadow->viewRadius, dest->frustum[1].normal, pop);
-				dest->frustum[1].dist = DotProduct(pop, dest->frustum[1].normal);
-
-				VectorScale(dest->or.axis[2],  1.0f, dest->frustum[2].normal);
-				VectorMA(dest->or.origin, -shadow->viewRadius, dest->frustum[2].normal, pop);
-				dest->frustum[2].dist = DotProduct(pop, dest->frustum[2].normal);
-
-				VectorScale(dest->or.axis[2], -1.0f, dest->frustum[3].normal);
-				VectorMA(dest->or.origin, -shadow->viewRadius, dest->frustum[3].normal, pop);
-				dest->frustum[3].dist = DotProduct(pop, dest->frustum[3].normal);
-
-				VectorScale(dest->or.axis[0], -1.0f, dest->frustum[4].normal);
-				VectorMA(dest->or.origin, -shadow->lightRadius, dest->frustum[4].normal, pop);
-				dest->frustum[4].dist = DotProduct(pop, dest->frustum[4].normal);
-
-				for (j = 0; j < 5; j++)
-				{
-					dest->frustum[j].type = PLANE_NON_AXIAL;
-					SetPlaneSignbits (&dest->frustum[j]);
-				}
-
-				dest->flags |= VPF_FARPLANEFRUSTUM;
-			}
-
-			for (j = 0; j < shadow->numEntities; j++)
-			{
-				R_AddEntitySurface(shadow->entityNums[j]);
-			}
-
-			R_SortDrawSurfs( tr.refdef.drawSurfs + firstDrawSurf, tr.refdef.numDrawSurfs - firstDrawSurf );
-
-			if (!glRefConfig.framebufferObject)
-				R_AddCapShadowmapCmd( i, -1 );
-		}
-	}
-}
 
 static float CalcSplit(float n, float f, float i, float m)
 {

@@ -99,7 +99,7 @@ void R_AddSpritePolySurfaces( void ) {
 
 	for ( i = 0, sp = tr.refdef.spritePolys; i < tr.refdef.numSpritePolys; i++, sp++ ) {
 		sh = R_GetShaderByHandle( sp->hShader );
-		R_AddDrawSurf( (void *)sp, sh, sp->fogIndex, 0, 0, 0 );
+		R_AddDrawSurf( (void *)sp, sh, sp->fogIndex, 0, 0 );
 	}
 }
 
@@ -196,7 +196,7 @@ void R_AddPolygonSurfaces( void ) {
 			continue;
 		}
 		sh = R_GetShaderByHandle( poly->hShader );
-		R_AddDrawSurf( ( void * )poly, sh, poly->fogIndex & fogMask, qfalse, qfalse, 0 /*cubeMap*/  );
+		R_AddDrawSurf( ( void * )poly, sh, poly->fogIndex & fogMask, qfalse, 0 /*cubeMap*/  );
 	}
 }
 
@@ -527,9 +527,6 @@ void RE_BeginScene(const refdef_t *fd)
 	tr.refdef.numSpritePolys = r_numspritepolys - r_firstSceneSpritePoly;
 	tr.refdef.spritePolys = &backEndData->spritePolys[r_firstSceneSpritePoly];
 
-	tr.refdef.num_pshadows = 0;
-	tr.refdef.pshadows = &backEndData->pshadows[0];
-
 	// turn off dynamic lighting globally by clearing all the
 	// dlights if it needs to be disabled or if vertex lighting is enabled
 	if ( r_dynamiclight->integer == 0 ||
@@ -593,12 +590,6 @@ void RE_RenderScene( const refdef_t *fd ) {
 	if (!( fd->rdflags & RDF_NOWORLDMODEL ) && tr.refdef.num_dlights && r_dlightMode->integer >= 2)
 	{
 		R_RenderDlightCubemaps(fd);
-	}
-
-	/* playing with more shadows */
-	if(glRefConfig.framebufferObject && !( fd->rdflags & RDF_NOWORLDMODEL ) && r_shadows->integer == 4)
-	{
-		R_RenderPshadowMaps(fd);
 	}
 
 	// playing with even more shadows

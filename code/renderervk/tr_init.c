@@ -149,6 +149,7 @@ cvar_t	*r_vertexLight;
 cvar_t	*r_shadows;
 cvar_t	*r_shadowDistance;
 cvar_t	*r_shadowClip;
+cvar_t	*r_shadowFadeLength;
 cvar_t	*r_shadowClipPenetration;
 cvar_t	*r_shadowClipExtension;
 cvar_t	*r_flares;
@@ -1758,6 +1759,9 @@ static void R_Register( void )
 	r_noportals = ri.Cvar_Get( "r_noportals", "0", 0 );
 	ri.Cvar_SetDescription(r_noportals, "Disables in-game portals, valid values: 0: Portals enabled\n 1: Portals disabled\n 2: Portals and mirrors disabled" );
 	r_shadows = ri.Cvar_Get( "cg_shadows", "1", 0 );
+	// the mod reads this to know cg_shadows 4 draws in the loaded renderer
+	ri.Cvar_Get( "r_shadowTiles", "0", 0 );
+	ri.Cvar_Set( "r_shadowTiles", "1" );
 	r_shadowDistance = ri.Cvar_Get( "r_shadowDistance", "256", CVAR_ARCHIVE_ND );
 	ri.Cvar_SetDescription( r_shadowDistance, "Stencil shadow (cg_shadows 2) extrusion distance" );
 	r_shadowClip = ri.Cvar_Get( "r_shadowClip", "1", CVAR_ARCHIVE_ND );
@@ -1768,6 +1772,9 @@ static void R_Register( void )
 	r_shadowClipExtension = ri.Cvar_Get( "r_shadowClipExtension", "16", CVAR_ARCHIVE_ND );
 	ri.Cvar_SetDescription( r_shadowClipExtension, "Max distance (in game units) a shadow vertex can be extended to match its neighbors. "
 		"Higher values produce smoother long shadows but may bleed through thin walls near corners. Default: 20" );
+	r_shadowFadeLength = ri.Cvar_Get( "r_shadowFadeLength", "256", CVAR_ARCHIVE_ND );
+	ri.Cvar_CheckRange( r_shadowFadeLength, "16", "512", CV_FLOAT );
+	ri.Cvar_SetDescription( r_shadowFadeLength, "How far (in game units) a soft shadow (cg_shadows 4) stretches from its caster before it has faded out. Default: 256" );
 
 	r_marksOnTriangleMeshes = ri.Cvar_Get("r_marksOnTriangleMeshes", "0", CVAR_ARCHIVE_ND );
 	ri.Cvar_SetDescription( r_marksOnTriangleMeshes, "Enables impact marks on triangle mesh surfaces (ie: MD3 models.) Requires impact marks to be enabled in the game code." );
@@ -2077,6 +2084,7 @@ static void RE_Shutdown( refShutdownCode_t code ) {
 #endif
 	ri.Printf( PRINT_ALL, "RE_Shutdown( %i )\n", code );
 
+	ri.Cvar_Set( "r_shadowTiles", "0" );
 	ri.Cmd_RemoveCommand( "modellist" );
 	ri.Cmd_RemoveCommand( "screenshotBMP" );
 	ri.Cmd_RemoveCommand( "screenshotJPEG" );

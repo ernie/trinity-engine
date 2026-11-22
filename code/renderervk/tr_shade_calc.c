@@ -832,8 +832,12 @@ doesn't fit our shader data.
 ========================
 */
 void RB_CalcFogTexCoords( float *st ) {
+	RB_CalcFogTexCoordsFor( tess.fogNum, tess.xyz[0], 4, tess.numVertexes, st );
+}
+
+void RB_CalcFogTexCoordsFor( int fogNum, const float *xyz, int stride, int count, float *st ) {
 	int			i;
-	float		*v;
+	const float	*v;
 	float		s, t;
 	float		eyeT;
 	qboolean	eyeOutside;
@@ -841,7 +845,7 @@ void RB_CalcFogTexCoords( float *st ) {
 	vec3_t		local;
 	vec4_t		fogDistanceVector, fogDepthVector = {0, 0, 0, 0};
 
-	fog = tr.world->fogs + tess.fogNum;
+	fog = tr.world->fogs + fogNum;
 
 	// all fogging distance is based on world Z units
 	VectorSubtract( backEnd.or.origin, backEnd.viewParms.or.origin, local );
@@ -883,7 +887,7 @@ void RB_CalcFogTexCoords( float *st ) {
 	fogDistanceVector[3] += 1.0/512;
 
 	// calculate density for each point
-	for (i = 0, v = tess.xyz[0] ; i < tess.numVertexes ; i++, v += 4) {
+	for (i = 0, v = xyz ; i < count ; i++, v += stride) {
 		// calculate the length in fog
 		s = DotProduct( v, fogDistanceVector ) + fogDistanceVector[3];
 		t = DotProduct( v, fogDepthVector ) + fogDepthVector[3];

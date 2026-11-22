@@ -181,7 +181,7 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 	const model_t	*mod;
 	vec3_t			center, delta;
 	vec3_t			mins, maxs;
-	surfaceType_t	*surfaces[64];
+	const msurface_t	*surfaces[64];
 	vec3_t			zeroDir = { 0, 0, 0 };
 	vec3_t			axis[3], tri[3], normal;
 	byte			color[4];
@@ -217,16 +217,16 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 
 	numSurfaces = 0;
 	if ( mod ) {
-		R_BmodelSurfaces( mod->bmodel, mins, maxs, surfaces, 64, &numSurfaces, zeroDir, qtrue );
+		R_BmodelSurfaces( mod->bmodel, mins, maxs, surfaces, 64, &numSurfaces, zeroDir, BOXSURF_RADIAL, 0, NULL, NULL );
 	} else {
 		tr.viewCount++;
-		R_BoxSurfaces_r( tr.world->nodes, mins, maxs, surfaces, 64, &numSurfaces, zeroDir, qtrue );
+		R_BoxSurfaces_r( tr.world->nodes, mins, maxs, surfaces, 64, &numSurfaces, zeroDir, BOXSURF_RADIAL, 0, NULL, NULL );
 	}
 
 	for ( i = 0; i < numSurfaces; i++ ) {
 
-		if ( *surfaces[i] == SF_FACE ) {
-			srfSurfaceFace_t *face = (srfSurfaceFace_t *)surfaces[i];
+		if ( *surfaces[i]->data == SF_FACE ) {
+			srfSurfaceFace_t *face = (srfSurfaceFace_t *)surfaces[i]->data;
 			int *indexes = (int *)( (byte *)face + face->ofsIndices );
 
 			// flat face: build the frame from the face's outward normal; back
@@ -241,8 +241,8 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 				R_DecalClipTriangle( center, size, reach, axis, texScale, hShader, color, lifeTime, owner, tri );
 			}
 		}
-		else if ( *surfaces[i] == SF_GRID ) {
-			srfGridMesh_t *grid = (srfGridMesh_t *)surfaces[i];
+		else if ( *surfaces[i]->data == SF_GRID ) {
+			srfGridMesh_t *grid = (srfGridMesh_t *)surfaces[i]->data;
 			vec3_t	sumNormal = { 0, 0, 0 };
 			vec3_t	sharedNormal, cen;
 			int		t;
@@ -307,8 +307,8 @@ void RE_ProjectDecal( const vec3_t origin, float size, float reach, float orient
 				}
 			}
 		}
-		else if ( *surfaces[i] == SF_TRIANGLES && r_marksOnTriangleMeshes->integer ) {
-			srfTriangles_t *cts = (srfTriangles_t *)surfaces[i];
+		else if ( *surfaces[i]->data == SF_TRIANGLES && r_marksOnTriangleMeshes->integer ) {
+			srfTriangles_t *cts = (srfTriangles_t *)surfaces[i]->data;
 			vec3_t	sumNormal = { 0, 0, 0 };
 			vec3_t	sharedNormal, cen;
 

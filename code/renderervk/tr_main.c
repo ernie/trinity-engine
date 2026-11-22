@@ -1960,6 +1960,7 @@ static void R_GenerateDrawSurfs( void ) {
 	R_AddPolygonSurfaces();
 	R_AddSpritePolySurfaces();
 	R_AddDecalSurfaces();
+	R_AddShadowReceiverSurfaces();
 
 	// set the projection matrix with the minimum zfar
 	// now that we have the world bounded

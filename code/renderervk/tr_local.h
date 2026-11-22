@@ -52,6 +52,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../renderercommon/tr_public.h"
 #include "tr_common.h"
 #include "iqm.h"
+#include "vk_shadowtile_math.h"
 
 
 #ifdef USE_VULKAN
@@ -696,6 +697,7 @@ typedef enum {
 	SF_FLARE,
 	SF_ENTITY,				// beams, rails, lightning, etc that can be determined by entity
 	SF_SPRITE_POLY,			// engine-oriented billboard quad (trap_R_AddSpritePolyToScene)
+	SF_SHADOW_RECEIVER,
 
 	SF_NUM_SURFACE_TYPES,
 	SF_MAX = 0x7fffffff			// ensures that sizeof( surfaceType_t ) == sizeof( int )
@@ -1190,6 +1192,8 @@ typedef struct {
 	qboolean doneShadows;
 
 	qboolean screenMapDone;
+	qboolean shadowTilePass;
+	qboolean shadowTilesReady;
 	qboolean doneBloom;
 	qboolean doneFlares; // deferred main-view flare draw done this frame
 
@@ -1239,6 +1243,7 @@ typedef struct {
 	shader_t				*cinematicShader;
 	shader_t				*shadowShader;
 	shader_t				*projectionShadowShader;
+	shader_t				*shadowTileShader;
 
 	shader_t				*flareShader;
 	shader_t				*sunShader;
@@ -1463,6 +1468,7 @@ extern	cvar_t	*r_clear;						// force screen clear every frame
 extern	cvar_t	*r_shadows;						// controls shadows: 0 = none, 1 = blur, 2 = stencil, 3 = black planar projection
 extern	cvar_t	*r_shadowDistance;				// shadow volume extrusion distance in game units
 extern	cvar_t	*r_shadowClip;					// clip stencil shadows against BSP walls
+extern	cvar_t	*r_shadowFadeLength;
 extern	cvar_t	*r_shadowClipPenetration;		// how far shadow back faces extend past a wall surface
 extern	cvar_t	*r_shadowClipExtension;			// max distance a shadow vertex can be extended to match neighbors
 extern	cvar_t	*r_flares;						// light flares
@@ -1877,10 +1883,14 @@ MARKERS, POLYGON PROJECTION ON WORLD POLYGONS
 ============================================================
 */
 
-void R_BoxSurfaces_r(mnode_t *node, vec3_t mins, vec3_t maxs, surfaceType_t **list,
-		int listsize, int *listlength, vec3_t dir, qboolean radial);
-void R_BmodelSurfaces( const bmodel_t *bmodel, vec3_t mins, vec3_t maxs, surfaceType_t **list,
-		int listsize, int *listlength, const vec3_t dir, qboolean radial );
+#define BOXSURF_RADIAL		1
+#define BOXSURF_RECEIVERS	2
+
+// surfaces wholly behind any of the optional planes are left out
+void R_BoxSurfaces_r(mnode_t *node, vec3_t mins, vec3_t maxs, const msurface_t **list,
+		int listsize, int *listlength, vec3_t dir, int flags, int numPlanes, vec3_t *normals, const float *dists);
+void R_BmodelSurfaces( const bmodel_t *bmodel, vec3_t mins, vec3_t maxs, const msurface_t **list,
+		int listsize, int *listlength, const vec3_t dir, int flags, int numPlanes, vec3_t *normals, const float *dists );
 
 #ifndef MAX_VERTS_ON_POLY
 #define MAX_VERTS_ON_POLY 64
@@ -1894,6 +1904,10 @@ int R_MarkFragments( int numPoints, const vec3_t *points, const vec3_t projectio
 int R_MarkFragments2( int numPoints, const vec3_t *points, const vec3_t projection,
 				   int maxPoints, vec3_t pointBuffer, int maxFragments, markFragment_t *fragmentBuffer,
 				   qhandle_t model, const vec3_t modelOrigin, const vec3_t modelAxis[3] );
+int R_ShadowReceiverFragments( const vec3_t points[4], const vec3_t travel, float length,
+		qhandle_t bmodel, const vec3_t bmodelOrigin, const vec3_t bmodelAxis[3],
+		int maxPoints, vec3_t pointBuffer, int maxFragments, markFragment_t *fragmentBuffer,
+		const msurface_t **fragmentSurfaces, float (*pointST)[2] );
 
 
 /*
@@ -1981,6 +1995,7 @@ void	RB_DeformTessGeometry( void );
 void	RB_CalcEnvironmentTexCoords( float *dstTexCoords );
 void	RB_CalcEnvironmentTexCoordsFP( float *dstTexCoords, int screenMap );
 void	RB_CalcFogTexCoords( float *dstTexCoords );
+void	RB_CalcFogTexCoordsFor( int fogNum, const float *xyz, int stride, int count, float *st );
 const fogProgramParms_t *RB_CalcFogProgramParms( void );
 void	RB_CalcScrollTexCoords( const float scroll[2], float *srcTexCoords, float *dstTexCoords );
 void	RB_CalcRotateTexCoords( float rotSpeed, float *srcTexCoords, float *dstTexCoords );
@@ -2103,6 +2118,68 @@ typedef enum {
 	RC_HUD_BUFFER
 } renderCommand_t;
 
+#define MAX_SHADOW_TILES		( SHADOWTILE_MAX_LARGE + 256 )
+#define MAX_SHADOW_CASTERS		1024
+#define MAX_SHADOW_RECV_VERTS	16384
+#define MAX_SHADOW_RECV_INDEXES	( MAX_SHADOW_RECV_VERTS * 3 )
+#define MAX_SHADOW_RECV_RUNS	1024
+
+typedef struct {
+	trRefEntity_t	*ent;
+	surfaceType_t	*surface;
+} shadowCaster_t;
+
+typedef struct {
+	vec3_t	xyz;
+	float	uvz[3];		// atlas u, v and depth along the light, normalized over the tile's range
+	float	st[2];		// texture coordinates on the receiving surface
+	int		fogNum;
+} shadowRecvVert_t;
+
+typedef struct {
+	int		firstIndex, numIndexes;
+	image_t	*cutout;	// alpha-tested receiver texture whose holes pass light
+	int		alphaTest;	// GLS_ATEST_* of the cutout
+} shadowRecvRun_t;
+
+typedef struct {
+	shadowTileFit_t	fit;
+	int			rect[4];
+	qboolean	large;
+	float		darkness;
+	float		uvPerUnit;
+	int			firstCaster, numCasters;
+	int			firstVert, numVerts;
+	int			firstIndex, numIndexes;
+	int			firstRun, numRuns;
+} shadowTile_t;
+
+typedef struct {
+	surfaceType_t	surfaceType;
+	int				tile;
+} srfShadowReceiver_t;
+
+typedef struct {
+	int					frame;		// tr.frameCount the tiles were built for
+	int					numTiles, numCasters, numVerts, numIndexes, numRuns;
+	shadowTile_t		tiles[MAX_SHADOW_TILES];
+	srfShadowReceiver_t	surfaces[MAX_SHADOW_TILES];
+	shadowCaster_t		casters[MAX_SHADOW_CASTERS];
+	shadowRecvVert_t	verts[MAX_SHADOW_RECV_VERTS];
+	glIndex_t			indexes[MAX_SHADOW_RECV_INDEXES];
+	shadowRecvRun_t		runs[MAX_SHADOW_RECV_RUNS];
+} shadowTileFrame_t;
+
+shader_t *R_MD3SurfaceShader( const trRefEntity_t *ent, const md3Surface_t *surface );
+void R_ShadowTiles_BuildScene( const viewParms_t *parms );
+void R_ClearShadowReceiverCache( void );
+void R_AddShadowReceiverSurfaces( void );
+void RB_ShadowTiles( void );
+void RB_SurfaceShadowReceiver( srfShadowReceiver_t *surf );
+void RB_ShadowTileCasterEnd( void );
+void RB_SurfaceMeshPositions( const md3Surface_t *surface );
+void RB_ShadowTileReceiveEnd( void );
+
 // these are sort of arbitrary limits.
 // the limits apply to the sum of all scenes in a frame --
 // the main view, all the 3D icons, etc
@@ -2136,6 +2213,7 @@ typedef struct {
 	srfPoly_t	*polys;//[MAX_POLYS];
 	polyVert_t	*polyVerts;//[MAX_POLYVERTS];
 	srfSpritePoly_t	spritePolys[MAX_SPRITEPOLYS];
+	shadowTileFrame_t	*shadowTiles;	// allocated on cg_shadows 4's first scene
 	renderCommandList_t	commands;
 } backEndData_t;
 

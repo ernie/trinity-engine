@@ -185,12 +185,6 @@
     <ClCompile Include="build\dynamic\renderer2\lightall_vp.c">
       <Filter>GLSL</Filter>
     </ClCompile>
-    <ClCompile Include="build\dynamic\renderer2\pshadow_fp.c">
-      <Filter>GLSL</Filter>
-    </ClCompile>
-    <ClCompile Include="build\dynamic\renderer2\pshadow_vp.c">
-      <Filter>GLSL</Filter>
-    </ClCompile>
     <ClCompile Include="build\dynamic\renderer2\shadowfill_fp.c">
       <Filter>GLSL</Filter>
     </ClCompile>

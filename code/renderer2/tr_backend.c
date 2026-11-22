@@ -437,7 +437,6 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	int				fogNum, oldFogNum;
 	int				entityNum, oldEntityNum;
 	int				dlighted, oldDlighted;
-	int				pshadowed, oldPshadowed;
 	int             cubemapIndex, oldCubemapIndex;
 	qboolean		depthRange, oldDepthRange, isCrosshair, wasCrosshair;
 	qboolean		batchDepthRange;
@@ -462,7 +461,6 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	oldDepthRange = qfalse;
 	wasCrosshair = qfalse;
 	oldDlighted = qfalse;
-	oldPshadowed = qfalse;
 	oldCubemapIndex = -1;
 	oldSort = ~0U;
 	shader = NULL;
@@ -480,14 +478,14 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			continue;
 		}
 		oldSort = drawSurf->sort;
-		R_DecomposeSort( drawSurf->sort, &entityNum, &shader, &fogNum, &dlighted, &pshadowed );
+		R_DecomposeSort( drawSurf->sort, &entityNum, &shader, &fogNum, &dlighted );
 		cubemapIndex = drawSurf->cubemapIndex;
 
 		//
 		// change the tess parameters if needed
 		// a "entityMergable" shader is a shader that can have surfaces from separate
 		// entities merged into a single batch, like smoke and blood puff sprites
-		if ( shader != NULL && ( shader != oldShader || fogNum != oldFogNum || dlighted != oldDlighted || pshadowed != oldPshadowed || cubemapIndex != oldCubemapIndex
+		if ( shader != NULL && ( shader != oldShader || fogNum != oldFogNum || dlighted != oldDlighted || cubemapIndex != oldCubemapIndex
 			|| ( entityNum != oldEntityNum && !shader->entityMergable ) ) ) {
 			if (oldShader != NULL) {
 				RB_EndSurface();
@@ -502,7 +500,6 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 			oldShader = shader;
 			oldFogNum = fogNum;
 			oldDlighted = dlighted;
-			oldPshadowed = pshadowed;
 			oldCubemapIndex = cubemapIndex;
 		}
 
@@ -1481,19 +1478,9 @@ static const void *RB_CapShadowMap(const void *data)
 	{
 #ifndef __EMSCRIPTEN__
 		// WebGL2 does not support glCopyTexSubImage2D on depth textures
-		if (cmd->cubeSide != -1)
+		if (tr.shadowCubemaps[cmd->map])
 		{
-			if (tr.shadowCubemaps[cmd->map])
-			{
-				qglCopyTextureSubImage2DEXT(tr.shadowCubemaps[cmd->map]->texnum, GL_TEXTURE_CUBE_MAP_POSITIVE_X + cmd->cubeSide, 0, 0, 0, backEnd.refdef.x, glConfig.vidHeight - ( backEnd.refdef.y + PSHADOW_MAP_SIZE ), PSHADOW_MAP_SIZE, PSHADOW_MAP_SIZE);
-			}
-		}
-		else
-		{
-			if (tr.pshadowMaps[cmd->map])
-			{
-				qglCopyTextureSubImage2DEXT(tr.pshadowMaps[cmd->map]->texnum, GL_TEXTURE_2D, 0, 0, 0, backEnd.refdef.x, glConfig.vidHeight - (backEnd.refdef.y + PSHADOW_MAP_SIZE), PSHADOW_MAP_SIZE, PSHADOW_MAP_SIZE);
-			}
+			qglCopyTextureSubImage2DEXT(tr.shadowCubemaps[cmd->map]->texnum, GL_TEXTURE_CUBE_MAP_POSITIVE_X + cmd->cubeSide, 0, 0, 0, backEnd.refdef.x, glConfig.vidHeight - ( backEnd.refdef.y + PSHADOW_MAP_SIZE ), PSHADOW_MAP_SIZE, PSHADOW_MAP_SIZE);
 		}
 #endif
 	}
@@ -1668,19 +1655,6 @@ static const void *RB_PostProcess(const void *data)
 		FBO_BlitFromTexture(tr.sunShadowDepthImage[2], NULL, NULL, NULL, dstBox, NULL, NULL, 0);
 		VectorSet4(dstBox, 384, glConfig.vidHeight - 128, 128, 128);
 		FBO_BlitFromTexture(tr.sunShadowDepthImage[3], NULL, NULL, NULL, dstBox, NULL, NULL, 0);
-	}
-
-	if (0 && r_shadows->integer == 4)
-	{
-		ivec4_t dstBox;
-		VectorSet4(dstBox, 512 + 0, glConfig.vidHeight - 128, 128, 128);
-		FBO_BlitFromTexture(tr.pshadowMaps[0], NULL, NULL, NULL, dstBox, NULL, NULL, 0);
-		VectorSet4(dstBox, 512 + 128, glConfig.vidHeight - 128, 128, 128);
-		FBO_BlitFromTexture(tr.pshadowMaps[1], NULL, NULL, NULL, dstBox, NULL, NULL, 0);
-		VectorSet4(dstBox, 512 + 256, glConfig.vidHeight - 128, 128, 128);
-		FBO_BlitFromTexture(tr.pshadowMaps[2], NULL, NULL, NULL, dstBox, NULL, NULL, 0);
-		VectorSet4(dstBox, 512 + 384, glConfig.vidHeight - 128, 128, 128);
-		FBO_BlitFromTexture(tr.pshadowMaps[3], NULL, NULL, NULL, dstBox, NULL, NULL, 0);
 	}
 
 	if (0)

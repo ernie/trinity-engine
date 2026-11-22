@@ -637,6 +637,7 @@ void RE_RenderScene( const refdef_t *fd ) {
 	lastRenderCommand = tr.lastRenderCommand;
 	tr.drawSurfCmd = NULL;
 	tr.numDrawSurfCmds = 0;
+	R_ShadowTiles_BuildScene( &parms );
 #endif
 
 	R_RenderView( &parms );

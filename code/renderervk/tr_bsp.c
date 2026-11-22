@@ -2472,6 +2472,7 @@ void RE_LoadWorldMap( const char *name ) {
 	// clear stale decals from the previous map; also binds each slot's vertex
 	// window for use by RE_ProjectDecal, which must not run before this
 	RE_ClearDecals();
+	R_ClearShadowReceiverCache();
 
 	ri.FS_FreeFile( buffer.v );
 }

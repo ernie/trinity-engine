@@ -217,6 +217,7 @@ static PFN_vkDebugMarkerSetObjectNameEXT				qvkDebugMarkerSetObjectNameEXT;
 // forward declaration
 static PFN_vkCmdClearColorImage qvkCmdClearColorImage;
 VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassIndex, uint32_t def_index );
+static VkPipeline vk_gen_pipeline_for( uint32_t index, renderPass_t pass );
 
 static uint32_t find_memory_type( uint32_t memory_type_bits, VkMemoryPropertyFlags properties ) {
 	VkPhysicalDeviceMemoryProperties memory_properties;
@@ -1226,6 +1227,60 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 			vk.swapchain_images_inited[i] = qtrue; // assume undefined layout
 		}
 	}
+}
+
+
+static void vk_create_shadowtile_render_pass( void )
+{
+	VkAttachmentDescription attachment;
+	VkAttachmentReference colorRef;
+	VkSubpassDescription subpass;
+	VkSubpassDependency deps[2];
+	VkRenderPassCreateInfo desc;
+
+	Com_Memset( &attachment, 0, sizeof( attachment ) );
+	attachment.format = VK_FORMAT_R16G16_SFLOAT;
+	attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachment.initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	colorRef.attachment = 0;
+	colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	Com_Memset( &subpass, 0, sizeof( subpass ) );
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorRef;
+
+	Com_Memset( deps, 0, sizeof( deps ) );
+	deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+	deps[0].dstSubpass = 0;
+	deps[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	deps[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	deps[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	deps[1].srcSubpass = 0;
+	deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+	deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+	Com_Memset( &desc, 0, sizeof( desc ) );
+	desc.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	desc.attachmentCount = 1;
+	desc.pAttachments = &attachment;
+	desc.subpassCount = 1;
+	desc.pSubpasses = &subpass;
+	desc.dependencyCount = 2;
+	desc.pDependencies = deps;
+
+	VK_CHECK( qvkCreateRenderPass( vk.device, &desc, NULL, &vk.render_pass.shadowtile ) );
+	SET_OBJECT_NAME( vk.render_pass.shadowtile, "render pass - shadow tiles", VK_DEBUG_REPORT_OBJECT_TYPE_RENDER_PASS_EXT );
 }
 
 
@@ -3568,7 +3623,38 @@ void vk_destroy_samplers( void )
 }
 
 
+static void vk_update_shadow_atlas_descriptor( void ) {
+
+	if ( vk.shadowAtlas.descriptor && vk.shadowAtlas.image_view )
+	{
+		VkDescriptorImageInfo info;
+		VkWriteDescriptorSet desc;
+		Vk_Sampler_Def sd;
+
+		Com_Memset( &sd, 0, sizeof( sd ) );
+		sd.gl_mag_filter = sd.gl_min_filter = GL_NEAREST;
+		sd.address_mode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		sd.max_lod_1_0 = qtrue;
+		sd.noAnisotropy = qtrue;
+
+		info.sampler = vk_find_sampler( &sd );
+		info.imageView = vk.shadowAtlas.image_view;
+		info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		Com_Memset( &desc, 0, sizeof( desc ) );
+		desc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		desc.dstSet = vk.shadowAtlas.descriptor;
+		desc.descriptorCount = 1;
+		desc.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		desc.pImageInfo = &info;
+
+		qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
+	}
+}
+
+
 void vk_update_attachment_descriptors( void ) {
+
+	vk_update_shadow_atlas_descriptor();
 
 	if ( vk.color_image_view )
 	{
@@ -4247,6 +4333,15 @@ static void vk_create_shader_modules( void )
 	vk.modules.dot_vs = SHADER_MODULE( dot_vert_spv );
 	vk.modules.dot_fs = SHADER_MODULE( dot_frag_spv );
 
+	vk.modules.shadowtile_cast_vs = SHADER_MODULE( shadowtile_cast_vert_spv );
+	vk.modules.shadowtile_cast_fs = SHADER_MODULE( shadowtile_cast_frag_spv );
+	vk.modules.shadowtile_recv_vs = SHADER_MODULE( shadowtile_recv_vert_spv );
+	vk.modules.shadowtile_recv_fs = SHADER_MODULE( shadowtile_recv_frag_spv );
+	vk.modules.shadowtile_cut_vs = SHADER_MODULE( shadowtile_cut_vert_spv );
+	vk.modules.shadowtile_cut_fs = SHADER_MODULE( shadowtile_cut_frag_spv );
+	vk.modules.shadowtile_recv_cut_vs = SHADER_MODULE( shadowtile_recv_cut_vert_spv );
+	vk.modules.shadowtile_recv_cut_fs = SHADER_MODULE( shadowtile_recv_cut_frag_spv );
+
 	SET_OBJECT_NAME( vk.modules.dot_vs, "dot vertex module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 	SET_OBJECT_NAME( vk.modules.dot_fs, "dot fragment module", VK_DEBUG_REPORT_OBJECT_TYPE_SHADER_MODULE_EXT );
 
@@ -4312,6 +4407,8 @@ static void vk_create_shader_modules( void )
 		vk.modules.blur_fs_mv = SHADER_MODULE( blur_frag_spv_mv );
 		vk.modules.gamma_fs_array = SHADER_MODULE( gamma_frag_spv_array );
 		vk.modules.gamma_composite_fs_mv = SHADER_MODULE( gamma_composite_frag_spv_mv );
+		vk.modules.shadowtile_recv_vs_mv = SHADER_MODULE( shadowtile_recv_vert_spv_mv );
+		vk.modules.shadowtile_recv_cut_vs_mv = SHADER_MODULE( shadowtile_recv_cut_vert_spv_mv );
 	}
 }
 
@@ -4363,6 +4460,38 @@ static void vk_alloc_persistent_pipelines( void )
 		def.shadow_phase = SHADOW_FS_QUAD;
 		def.primitives = TRIANGLE_STRIP;
 		vk.shadow_finish_pipeline = vk_find_pipeline_ext( 0, &def, r_shadows->integer ? qtrue: qfalse );
+	}
+
+	// shadow tiles
+	{
+		int i;
+
+		Com_Memset( &def, 0, sizeof( def ) );
+		def.shader_type = TYPE_SHADOWTILE_CAST;
+		def.face_culling = CT_TWO_SIDED;
+		def.state_bits = GLS_DEPTHTEST_DISABLE;
+		for ( i = 0; i < 2; i++ ) {
+			def.shadowtile = i + 1;
+			vk.shadowtile_cast_pipeline[i] = vk_find_pipeline_ext( 0, &def, qfalse );
+		}
+		def.shader_type = TYPE_SHADOWTILE_CUT_DEPTH;
+		def.shadowtile = 2;
+		vk.shadowtile_cut_depth_pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
+
+		Com_Memset( &def, 0, sizeof( def ) );
+		def.shader_type = TYPE_SHADOWTILE_RECEIVE;
+		def.face_culling = CT_FRONT_SIDED;
+		def.polygon_offset = qtrue;
+		def.state_bits = GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO;
+		for ( i = 0; i < 2; i++ ) {
+			def.mirror = i ? qtrue : qfalse;
+			vk.shadowtile_recv_pipeline[i] = vk_find_pipeline_ext( 0, &def, r_shadows->integer == 4 ? qtrue : qfalse );
+		}
+		def.shader_type = TYPE_SHADOWTILE_RECEIVE_CUT;
+		for ( i = 0; i < 2; i++ ) {
+			def.mirror = i ? qtrue : qfalse;
+			vk.shadowtile_recv_cut_pipeline[i] = vk_find_pipeline_ext( 0, &def, r_shadows->integer == 4 ? qtrue : qfalse );
+		}
 	}
 
 	// fog and dlights
@@ -5289,6 +5418,42 @@ static void vk_destroy_sync_primitives( void  ) {
 }
 
 
+// restarts tear the atlas down with the other attachments, and the next scene that needs it makes it again
+void vk_create_shadow_atlas( void )
+{
+	VkFramebufferCreateInfo desc;
+
+	if ( vk.shadowAtlas.image ) {
+		return;
+	}
+
+	create_color_attachment( SHADOWTILE_ATLAS_WIDTH, SHADOWTILE_ATLAS_HEIGHT, VK_SAMPLE_COUNT_1_BIT,
+							 VK_FORMAT_R16G16_SFLOAT, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+							 &vk.shadowAtlas.image, &vk.shadowAtlas.image_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+							 qfalse, 1 );
+
+	Com_Memset( &desc, 0, sizeof( desc ) );
+	desc.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+	desc.renderPass = vk.render_pass.shadowtile;
+	desc.attachmentCount = 1;
+	desc.pAttachments = &vk.shadowAtlas.image_view;
+	desc.width = SHADOWTILE_ATLAS_WIDTH;
+	desc.height = SHADOWTILE_ATLAS_HEIGHT;
+	desc.layers = 1;
+	VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.framebuffers.shadowtile ) );
+	SET_OBJECT_NAME( vk.framebuffers.shadowtile, "framebuffer - shadow tiles", VK_DEBUG_REPORT_OBJECT_TYPE_FRAMEBUFFER_EXT );
+
+	if ( !vk.shadowAtlas.descriptor ) {
+		vk_alloc_target_descriptor( &vk.shadowAtlas.descriptor );
+	}
+	vk_update_shadow_atlas_descriptor();
+
+	vk_gen_pipeline_for( vk.shadowtile_cast_pipeline[0], RENDER_PASS_SHADOWTILE );
+	vk_gen_pipeline_for( vk.shadowtile_cast_pipeline[1], RENDER_PASS_SHADOWTILE );
+	vk_gen_pipeline_for( vk.shadowtile_cut_depth_pipeline, RENDER_PASS_SHADOWTILE );
+}
+
+
 static void vk_destroy_framebuffers( void ) {
 	uint32_t n;
 
@@ -5338,6 +5503,11 @@ static void vk_destroy_framebuffers( void ) {
 	if ( vk.framebuffers.screenmap != VK_NULL_HANDLE ) {
 		qvkDestroyFramebuffer( vk.device, vk.framebuffers.screenmap, NULL );
 		vk.framebuffers.screenmap = VK_NULL_HANDLE;
+	}
+
+	if ( vk.framebuffers.shadowtile != VK_NULL_HANDLE ) {
+		qvkDestroyFramebuffer( vk.device, vk.framebuffers.shadowtile, NULL );
+		vk.framebuffers.shadowtile = VK_NULL_HANDLE;
 	}
 
 	if ( vk.framebuffers.capture != VK_NULL_HANDLE ) {
@@ -5426,6 +5596,7 @@ static void vk_restart_swapchain( const char *funcname, VkResult res )
 	vk_create_attachments();
 	vk_foveation_create();
 	vk_create_render_passes();
+	vk_create_shadowtile_render_pass();
 	vk_create_framebuffers();
 
 	vk_update_attachment_descriptors();
@@ -6722,6 +6893,7 @@ void vk_initialize( void )
 	// renderpasses
 	vk_foveation_create();
 	vk_create_render_passes();
+	vk_create_shadowtile_render_pass();
 
 	// framebuffers for each swapchain image
 	vk_create_framebuffers();
@@ -6794,6 +6966,13 @@ static void vk_destroy_attachments( void )
 		qvkDestroyImageView( vk.device, vk.screenMap.color_image_view, NULL );
 		vk.screenMap.color_image = VK_NULL_HANDLE;
 		vk.screenMap.color_image_view = VK_NULL_HANDLE;
+	}
+
+	if ( vk.shadowAtlas.image ) {
+		qvkDestroyImage( vk.device, vk.shadowAtlas.image, NULL );
+		qvkDestroyImageView( vk.device, vk.shadowAtlas.image_view, NULL );
+		vk.shadowAtlas.image = VK_NULL_HANDLE;
+		vk.shadowAtlas.image_view = VK_NULL_HANDLE;
 	}
 
 	if ( vk.screenMap.color_image_msaa ) {
@@ -6872,6 +7051,11 @@ static void vk_destroy_render_passes( void )
 	if ( vk.render_pass.screenmap != VK_NULL_HANDLE ) {
 		qvkDestroyRenderPass( vk.device, vk.render_pass.screenmap, NULL );
 		vk.render_pass.screenmap = VK_NULL_HANDLE;
+	}
+
+	if ( vk.render_pass.shadowtile != VK_NULL_HANDLE ) {
+		qvkDestroyRenderPass( vk.device, vk.render_pass.shadowtile, NULL );
+		vk.render_pass.shadowtile = VK_NULL_HANDLE;
 	}
 
 	if ( vk.render_pass.gamma != VK_NULL_HANDLE ) {
@@ -7142,6 +7326,15 @@ void vk_shutdown( refShutdownCode_t code )
 	qvkDestroyShaderModule(vk.device, vk.modules.dot_vs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.dot_fs, NULL);
 
+	qvkDestroyShaderModule( vk.device, vk.modules.shadowtile_cast_vs, NULL );
+	qvkDestroyShaderModule( vk.device, vk.modules.shadowtile_cast_fs, NULL );
+	qvkDestroyShaderModule( vk.device, vk.modules.shadowtile_recv_vs, NULL );
+	qvkDestroyShaderModule( vk.device, vk.modules.shadowtile_recv_fs, NULL );
+	qvkDestroyShaderModule( vk.device, vk.modules.shadowtile_cut_vs, NULL );
+	qvkDestroyShaderModule( vk.device, vk.modules.shadowtile_cut_fs, NULL );
+	qvkDestroyShaderModule( vk.device, vk.modules.shadowtile_recv_cut_vs, NULL );
+	qvkDestroyShaderModule( vk.device, vk.modules.shadowtile_recv_cut_fs, NULL );
+
 	qvkDestroyShaderModule(vk.device, vk.modules.blur_extract_fs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.blur_fs, NULL);
 
@@ -7162,6 +7355,8 @@ void vk_shutdown( refShutdownCode_t code )
 		qvkDestroyShaderModule( vk.device, vk.modules.blur_fs_mv, NULL );
 		qvkDestroyShaderModule( vk.device, vk.modules.gamma_fs_array, NULL );
 		qvkDestroyShaderModule( vk.device, vk.modules.gamma_composite_fs_mv, NULL );
+		qvkDestroyShaderModule( vk.device, vk.modules.shadowtile_recv_vs_mv, NULL );
+		qvkDestroyShaderModule( vk.device, vk.modules.shadowtile_recv_cut_vs_mv, NULL );
 	}
 
 __cleanup:
@@ -8627,6 +8822,26 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 			fs_module = &vk.modules.fog_fs;
 			break;
 
+		case TYPE_SHADOWTILE_CAST:
+			vs_module = &vk.modules.shadowtile_cast_vs;
+			fs_module = &vk.modules.shadowtile_cast_fs;
+			break;
+
+		case TYPE_SHADOWTILE_RECEIVE:
+			vs_module = (multiview ? &vk.modules.shadowtile_recv_vs_mv : &vk.modules.shadowtile_recv_vs);
+			fs_module = &vk.modules.shadowtile_recv_fs;
+			break;
+
+		case TYPE_SHADOWTILE_CUT_DEPTH:
+			vs_module = &vk.modules.shadowtile_cut_vs;
+			fs_module = &vk.modules.shadowtile_cut_fs;
+			break;
+
+		case TYPE_SHADOWTILE_RECEIVE_CUT:
+			vs_module = (multiview ? &vk.modules.shadowtile_recv_cut_vs_mv : &vk.modules.shadowtile_recv_cut_vs);
+			fs_module = &vk.modules.shadowtile_recv_cut_fs;
+			break;
+
 		case TYPE_DOT:
 			vs_module = (multiview ? &vk.modules.dot_vs_mv : &vk.modules.dot_vs);
 			if ( !multiview )
@@ -8898,8 +9113,34 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 
 		case TYPE_FOG_ONLY:
 		case TYPE_DOT:
+		case TYPE_SHADOWTILE_CAST:
 			push_bind( 0, sizeof( vec4_t ) );					// xyz array
 			push_attr( 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT );
+			break;
+
+		case TYPE_SHADOWTILE_CUT_DEPTH:
+			push_bind( 0, sizeof( vec4_t ) );					// xyz array
+			push_bind( 5, sizeof( vec4_t ) );					// cutout st, alpha test
+			push_attr( 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT );
+			push_attr( 1, 5, VK_FORMAT_R32G32B32A32_SFLOAT );
+			break;
+
+		case TYPE_SHADOWTILE_RECEIVE:
+		case TYPE_SHADOWTILE_RECEIVE_CUT:
+			push_bind( 0, sizeof( vec4_t ) );					// xyz array
+			push_bind( 1, sizeof( color4ub_t ) );				// darkness, tile size
+			push_bind( 2, sizeof( vec2_t ) );					// atlas uv
+			push_bind( 3, sizeof( vec2_t ) );					// receiver depth, uv per unit
+			push_bind( 4, sizeof( vec2_t ) );					// tile min uv
+			push_attr( 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT );
+			push_attr( 1, 1, VK_FORMAT_R8G8B8A8_UNORM );
+			push_attr( 2, 2, VK_FORMAT_R32G32_SFLOAT );
+			push_attr( 3, 3, VK_FORMAT_R32G32_SFLOAT );
+			push_attr( 4, 4, VK_FORMAT_R32G32_SFLOAT );
+			if ( def->shader_type == TYPE_SHADOWTILE_RECEIVE_CUT ) {
+				push_bind( 5, sizeof( vec4_t ) );				// cutout st, alpha test
+				push_attr( 5, 5, VK_FORMAT_R32G32B32A32_SFLOAT );
+			}
 			break;
 
 		case TYPE_COLOR_BLACK:
@@ -9248,7 +9489,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 
 	multisample_state.rasterizationSamples = (renderPassIndex == RENDER_PASS_SCREENMAP) ? vk.screenMapSamples : vkSamples;
 	if ( renderPassIndex == RENDER_PASS_HUD || VK_PassIsVRScreen( renderPassIndex ) ||
-		renderPassIndex == RENDER_PASS_DESKTOP || VK_PassIsPostScene( renderPassIndex ) ) {
+		renderPassIndex == RENDER_PASS_DESKTOP || VK_PassIsPostScene( renderPassIndex ) ||
+		renderPassIndex == RENDER_PASS_SHADOWTILE ) {
 		multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 	}
 
@@ -9438,6 +9680,15 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		}
 	}
 
+	if ( def->shadowtile ) {
+		// each texel keeps the nearest depth along the light
+		attachment_blend_state.blendEnable = VK_TRUE;
+		attachment_blend_state.srcColorBlendFactor = attachment_blend_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		attachment_blend_state.dstColorBlendFactor = attachment_blend_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		attachment_blend_state.colorBlendOp = attachment_blend_state.alphaBlendOp = VK_BLEND_OP_MIN;
+		attachment_blend_state.colorWriteMask = def->shadowtile == 1 ? VK_COLOR_COMPONENT_R_BIT : VK_COLOR_COMPONENT_G_BIT;
+	}
+
 	blend_attachments[0] = attachment_blend_state;
 
 	if ( emissiveActive ) {
@@ -9506,6 +9757,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		create_info.renderPass = vk_hud.pass;
 	else if ( renderPassIndex == RENDER_PASS_SCREENMAP )
 		create_info.renderPass = vk.render_pass.screenmap;
+	else if ( renderPassIndex == RENDER_PASS_SHADOWTILE )
+		create_info.renderPass = vk.render_pass.shadowtile;
 	else if ( renderPassIndex == RENDER_PASS_VR_SCREEN_EYE )
 		create_info.renderPass = vk.xr_output.screen_pass;
 	else if ( renderPassIndex == RENDER_PASS_POST_SCENE && vk.render_pass.post_scene )
@@ -9561,10 +9814,9 @@ static uint32_t vk_alloc_pipeline( const Vk_Pipeline_Def *def ) {
 }
 
 
-VkPipeline vk_gen_pipeline( uint32_t index ) {
+static VkPipeline vk_gen_pipeline_for( uint32_t index, renderPass_t pass ) {
 	if ( index < vk.pipelines_count ) {
 		VK_Pipeline_t *pipeline = vk.pipelines + index;
-		const renderPass_t pass = vk.renderPassIndex;
 		if ( pipeline->handle[ pass ] == VK_NULL_HANDLE ) {
 			pipeline->handle[ pass ] = create_pipeline( &pipeline->def, pass, index );
 		}
@@ -9573,6 +9825,11 @@ VkPipeline vk_gen_pipeline( uint32_t index ) {
 		ri.Error( ERR_FATAL, "%s(%i): NULL pipeline", __func__, index );
 		return VK_NULL_HANDLE;
 	}
+}
+
+
+VkPipeline vk_gen_pipeline( uint32_t index ) {
+	return vk_gen_pipeline_for( index, vk.renderPassIndex );
 }
 
 
@@ -9621,6 +9878,13 @@ static void vk_frame_rect( float rect[4] ) {
 
 static void get_viewport_rect(VkRect2D *r)
 {
+	if ( vk.renderPassIndex == RENDER_PASS_SHADOWTILE ) {
+		r->offset.x = vk.tileRect[0];
+		r->offset.y = vk.tileRect[1];
+		r->extent.width = vk.tileRect[2];
+		r->extent.height = vk.tileRect[3];
+		return;
+	}
 	if ( vk_hud_direct ) {
 		r->offset.x = 0;
 		r->offset.y = 0;
@@ -9729,6 +9993,10 @@ static void VK_ClampScissor( VkRect2D *r, int width, int height ) {
 
 static void get_scissor_rect(VkRect2D *r) {
 
+	if ( vk.renderPassIndex == RENDER_PASS_SHADOWTILE ) {
+		get_viewport_rect( r );
+		return;
+	}
 	if ( backEnd.viewParms.portalView != PV_NONE )
 	{
 		r->offset.x = backEnd.viewParms.scissorX * vk.renderScaleX;
@@ -10701,6 +10969,53 @@ static void vk_begin_screenmap_render_pass( void )
 }
 
 
+void vk_begin_shadowtile_render_pass( void )
+{
+	const shadowTileFrame_t *f = backEndData->shadowTiles;
+	VkRenderPassBeginInfo info;
+	VkClearValue clear;
+	int i, width = 0, height = 0;
+
+	vk.renderPassIndex = RENDER_PASS_SHADOWTILE;
+	vk.renderWidth = SHADOWTILE_ATLAS_WIDTH;
+	vk.renderHeight = SHADOWTILE_ATLAS_HEIGHT;
+	vk.renderScaleX = vk.renderScaleY = 1.0f;
+
+	// a tiler clears and stores only the bins inside the render area
+	for ( i = 0; i < f->numTiles; i++ ) {
+		width = MAX( width, f->tiles[i].rect[0] + f->tiles[i].rect[2] );
+		height = MAX( height, f->tiles[i].rect[1] + f->tiles[i].rect[3] );
+	}
+
+	// no caster and no receiver read as the far end of every tile
+	clear.color.float32[0] = clear.color.float32[1] = 1.0f;
+	clear.color.float32[2] = clear.color.float32[3] = 0.0f;
+
+	Com_Memset( &info, 0, sizeof( info ) );
+	info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	info.renderPass = vk.render_pass.shadowtile;
+	info.framebuffer = vk.framebuffers.shadowtile;
+	info.renderArea.extent.width = width;
+	info.renderArea.extent.height = height;
+	info.clearValueCount = 1;
+	info.pClearValues = &clear;
+
+	qvkCmdBeginRenderPass( vk.cmd->command_buffer, &info, VK_SUBPASS_CONTENTS_INLINE );
+	vk_fdm.passOpen = qfalse;
+	vk_foveation_invalidate_rate();
+
+	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+}
+
+
+void vk_set_tile_viewport( const int rect[4] )
+{
+	Com_Memcpy( vk.tileRect, rect, sizeof( vk.tileRect ) );
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+}
+
+
 void vk_end_render_pass( void )
 {
 	// the stereo scene pass ends sliding each eye's density map onto its gaze
@@ -10746,6 +11061,16 @@ static qboolean vk_find_screenmap_drawsurfs( void )
 			default:
 				return qfalse;
 		}
+	}
+}
+
+
+static void vk_begin_scene_first_pass( void )
+{
+	if ( vk_find_screenmap_drawsurfs() ) {
+		vk_begin_screenmap_render_pass();
+	} else {
+		vk_begin_main_render_pass();
 	}
 }
 
@@ -10977,16 +11302,11 @@ _retry:
 	vk.cmd->last_pipeline = VK_NULL_HANDLE;
 
 	backEnd.screenMapDone = qfalse;
+	backEnd.shadowTilesReady = qfalse;
 	vk.mono.sourceActive = vk.multiview && VK_XR_Screen() != NULL;
 	vk.postFlow = ( !vk.fboActive || !vk.multiview || !vk.xr_output.pass ) ? VK_POST_FLOW_LEGACY
 				  : vk.mono.sourceActive ? VK_POST_FLOW_SCREEN : VK_POST_FLOW_WORLD;
 	vk.postOpen = qfalse;
-
-	if ( vk_find_screenmap_drawsurfs() ) {
-		vk_begin_screenmap_render_pass();
-	} else {
-		vk_begin_main_render_pass();
-	}
 
 	// dynamic vertex buffer layout
 	vk.cmd->uniform_read_offset = 0;
@@ -11005,6 +11325,12 @@ _retry:
 
 	// other stats
 	vk.stats.push_size = 0;
+
+	// tiles go ahead of any 2D so the scene pass opens once; a recomposed frame draws no scene
+	if ( !vk.repeatScreen ) {
+		RB_ShadowTiles();
+	}
+	vk_begin_scene_first_pass();
 }
 
 

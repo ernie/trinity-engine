@@ -944,6 +944,52 @@ static void LerpMeshVertexes(md3Surface_t *surf, float backlerp)
 
 /*
 =============
+RB_SurfaceMeshPositions
+=============
+*/
+void RB_SurfaceMeshPositions( const md3Surface_t *surface ) {
+	const trRefEntity_t	*ent = backEnd.currentEntity;
+	const float			backlerp = ent->e.oldframe == ent->e.frame ? 0.0f : ent->e.backlerp;
+	const short			*xyz = (const short *)( (const byte *)surface + surface->ofsXyzNormals );
+	const short			*newXyz = xyz + ent->e.frame * surface->numVerts * 4;
+	const short			*oldXyz = xyz + ent->e.oldframe * surface->numVerts * 4;
+	const int			*triangles = (const int *)( (const byte *)surface + surface->ofsTriangles );
+	const float			newScale = MD3_XYZ_SCALE * ( 1.0f - backlerp ), oldScale = MD3_XYZ_SCALE * backlerp;
+	int					i, base;
+
+#ifdef USE_VBO
+	VBO_Flush();
+#endif
+
+	RB_CHECKOVERFLOW( surface->numVerts, surface->numTriangles * 3 );
+
+#ifdef USE_VBO
+	tess.surfType = SF_MD3;
+#endif
+
+	base = tess.numVertexes;
+	if ( backlerp == 0.0f ) {
+		for ( i = 0; i < surface->numVerts; i++, newXyz += 4 ) {
+			tess.xyz[base + i][0] = newXyz[0] * newScale;
+			tess.xyz[base + i][1] = newXyz[1] * newScale;
+			tess.xyz[base + i][2] = newXyz[2] * newScale;
+		}
+	} else {
+		for ( i = 0; i < surface->numVerts; i++, newXyz += 4, oldXyz += 4 ) {
+			tess.xyz[base + i][0] = newXyz[0] * newScale + oldXyz[0] * oldScale;
+			tess.xyz[base + i][1] = newXyz[1] * newScale + oldXyz[1] * oldScale;
+			tess.xyz[base + i][2] = newXyz[2] * newScale + oldXyz[2] * oldScale;
+		}
+	}
+	for ( i = 0; i < surface->numTriangles * 3; i++ ) {
+		tess.indexes[tess.numIndexes + i] = base + triangles[i];
+	}
+	tess.numIndexes += surface->numTriangles * 3;
+	tess.numVertexes += surface->numVerts;
+}
+
+/*
+=============
 RB_SurfaceMesh
 =============
 */
@@ -1575,5 +1621,6 @@ void (*rb_surfaceTable[SF_NUM_SURFACE_TYPES])( void *) = {
 	(void(*)(void*))RB_IQMSurfaceAnim,		// SF_IQM,
 	(void(*)(void*))RB_SurfaceFlare,		// SF_FLARE,
 	(void(*)(void*))RB_SurfaceEntity,		// SF_ENTITY
-	(void(*)(void*))RB_SurfaceSpritePoly	// SF_SPRITE_POLY
+	(void(*)(void*))RB_SurfaceSpritePoly,	// SF_SPRITE_POLY
+	(void(*)(void*))RB_SurfaceShadowReceiver	// SF_SHADOW_RECEIVER
 };

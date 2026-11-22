@@ -78,7 +78,6 @@ void VectorLerp( vec3_t a, vec3_t b, float lerp, vec3_t c);
 
 
 qboolean SpheresIntersect(vec3_t origin1, float radius1, vec3_t origin2, float radius2);
-void BoundingSphereOfSpheres(vec3_t origin1, float radius1, vec3_t origin2, float radius2, vec3_t origin3, float *radius3);
 
 #ifndef SGN
 #define SGN(x) (((x) >= 0) ? !!(x) : -1)

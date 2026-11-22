@@ -15,6 +15,14 @@ frag gamma_frag_spv  gamma.frag array
 frag gamma_composite_frag_spv gamma.frag mv -DUSE_BLOOM_COMPOSITE
 frag foveationdebug_frag_spv foveationdebug.frag -
 frag foveationdensity_frag_spv foveationdensity.frag -
+vert shadowtile_cast_vert_spv shadowtile_cast.vert -
+frag shadowtile_cast_frag_spv shadowtile_cast.frag -
+vert shadowtile_cut_vert_spv shadowtile_cast.vert - -DUSE_CUTOUT
+frag shadowtile_cut_frag_spv shadowtile_cast.frag - -DUSE_CUTOUT
+vert shadowtile_recv_vert_spv shadowtile_recv.vert mv
+frag shadowtile_recv_frag_spv shadowtile_recv.frag -
+vert shadowtile_recv_cut_vert_spv shadowtile_recv.vert mv -DUSE_CUTOUT
+frag shadowtile_recv_cut_frag_spv shadowtile_recv.frag - -DUSE_CUTOUT
 vert vert_light          light_vert.tmpl mv
 vert vert_light_fog      light_vert.tmpl mv -DUSE_FOG
 frag frag_light          light_frag.tmpl - -DUSE_EMISSIVE

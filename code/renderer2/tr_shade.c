@@ -169,7 +169,6 @@ void RB_BeginSurface( shader_t *shader, int fogNum, int cubemapIndex ) {
 	tess.fogNum = fogNum;
 	tess.cubemapIndex = cubemapIndex;
 	tess.dlightBits = 0;		// will be OR'd in by surface functions
-	tess.pshadowBits = 0;       // will be OR'd in by surface functions
 	tess.xstages = state->stages;
 	tess.numPasses = state->numUnfoggedPasses;
 	tess.currentStageIteratorFunc = state->optimalStageIteratorFunc;
@@ -821,76 +820,6 @@ static void ForwardDlight( void ) {
 		backEnd.pc.c_dlightVertexes += tess.numVertexes;
 	}
 }
-
-
-static void ProjectPshadowVBOGLSL( void ) {
-	int		l;
-	vec3_t	origin;
-	float	radius;
-
-	int deformGen;
-	vec5_t deformParams;
-
-	const shaderCommands_t *input = &tess;
-
-	if ( !backEnd.refdef.num_pshadows ) {
-		return;
-	}
-	
-	ComputeDeformValues(&deformGen, deformParams);
-
-	for ( l = 0 ; l < backEnd.refdef.num_pshadows ; l++ ) {
-		pshadow_t	*ps;
-		shaderProgram_t *sp;
-		vec4_t vector;
-
-		if ( !( tess.pshadowBits & ( 1 << l ) ) ) {
-			continue;	// this surface definitely doesn't have any of this shadow
-		}
-
-		ps = &backEnd.refdef.pshadows[l];
-		VectorCopy( ps->lightOrigin, origin );
-		radius = ps->lightRadius;
-
-		sp = &tr.pshadowShader;
-
-		GLSL_BindProgram(sp);
-
-		GLSL_SetUniformMat4(sp, UNIFORM_MODELVIEWPROJECTIONMATRIX, glState.modelviewProjection);
-
-		VectorCopy(origin, vector);
-		vector[3] = 1.0f;
-		GLSL_SetUniformVec4(sp, UNIFORM_LIGHTORIGIN, vector);
-
-		VectorScale(ps->lightViewAxis[0], 1.0f / ps->viewRadius, vector);
-		GLSL_SetUniformVec3(sp, UNIFORM_LIGHTFORWARD, vector);
-
-		VectorScale(ps->lightViewAxis[1], 1.0f / ps->viewRadius, vector);
-		GLSL_SetUniformVec3(sp, UNIFORM_LIGHTRIGHT, vector);
-
-		VectorScale(ps->lightViewAxis[2], 1.0f / ps->viewRadius, vector);
-		GLSL_SetUniformVec3(sp, UNIFORM_LIGHTUP, vector);
-
-		GLSL_SetUniformFloat(sp, UNIFORM_LIGHTRADIUS, radius);
-	  
-		// include GLS_DEPTHFUNC_EQUAL so alpha tested surfaces don't add light
-		// where they aren't rendered
-		GL_State( GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA | GLS_DEPTHFUNC_EQUAL );
-		GLSL_SetUniformInt(sp, UNIFORM_ALPHATEST, 0);
-
-		GL_BindToTMU( tr.pshadowMaps[l], TB_DIFFUSEMAP );
-
-		//
-		// draw
-		//
-
-		R_DrawElements(input->numIndexes, input->firstIndex);
-
-		backEnd.pc.c_totalIndexes += tess.numIndexes;
-		//backEnd.pc.c_dlightIndexes += tess.numIndexes;
-	}
-}
-
 
 
 /*
@@ -1585,15 +1514,6 @@ void RB_StageIteratorGeneric( void )
 	RB_IterateStagesGeneric( input );
 
 	//
-	// pshadows!
-	//
-	if (glRefConfig.framebufferObject && r_shadows->integer == 4 && tess.pshadowBits
-		&& tess.shader->sort <= SS_OPAQUE && !(tess.shader->surfaceFlags & (SURF_NODLIGHT | SURF_SKY) ) ) {
-		ProjectPshadowVBOGLSL();
-	}
-
-
-	// 
 	// now do any dynamic lighting needed
 	//
 	if ( tess.dlightBits && tess.shader->lightingStage >= 0 ) {

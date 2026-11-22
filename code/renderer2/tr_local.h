@@ -57,8 +57,6 @@ typedef unsigned int glIndex_t;
 #define MAX_VISCOUNTS 5
 #define MAX_VAOS      4096
 
-#define MAX_CALC_PSHADOWS    64
-#define MAX_DRAWN_PSHADOWS    16 // do not increase past 32, because bit flags are used on surfaces
 #define PSHADOW_MAP_SIZE      512
 
 typedef struct cubemap_s {
@@ -656,9 +654,6 @@ typedef enum
 	UNIFORM_VERTCOLOR,
 
 	UNIFORM_DLIGHTINFO,
-	UNIFORM_LIGHTFORWARD,
-	UNIFORM_LIGHTUP,
-	UNIFORM_LIGHTRIGHT,
 	UNIFORM_LIGHTORIGIN,
 	UNIFORM_MODELLIGHTDIR,
 	UNIFORM_LIGHTRADIUS,
@@ -762,8 +757,6 @@ typedef struct {
 	struct drawSurf_s	*drawSurfs;
 
 	unsigned int dlightMask;
-	int         num_pshadows;
-	struct pshadow_s *pshadows;
 
 	float       sunShadowMvp[4][16];
 	float       sunDir[4];
@@ -945,7 +938,6 @@ typedef struct srfBspSurface_s
 
 	// dynamic lighting information
 	int				dlightBits;
-	int             pshadowBits;
 
 	// culling information
 	vec3_t			cullBounds[2];
@@ -1069,32 +1061,6 @@ typedef struct srfVaoMdvMesh_s
 
 extern	void (*rb_surfaceTable[SF_NUM_SURFACE_TYPES])(void *);
 
-/*
-==============================================================================
-
-SHADOWS
-
-==============================================================================
-*/
-
-typedef struct pshadow_s
-{
-	float sort;
-	
-	int    numEntities;
-	int    entityNums[8];
-	vec3_t entityOrigins[8];
-	float  entityRadiuses[8];
-
-	float viewRadius;
-	vec3_t viewOrigin;
-
-	vec3_t lightViewAxis[3];
-	vec3_t lightOrigin;
-	float  lightRadius;
-	cplane_t cullPlane;
-} pshadow_t;
-
 
 /*
 ==============================================================================
@@ -1187,7 +1153,6 @@ typedef struct {
 	msurface_t	*surfaces;
 	int         *surfacesViewCount;
 	int         *surfacesDlightBits;
-	int			*surfacesPshadowBits;
 
 	int			nummarksurfaces;
 	int         *marksurfaces;
@@ -1353,7 +1318,6 @@ the bits are allocated as follows:
 17-31 : sorted shader index
 7-16  : entity index
 2-6   : fog index
-1     : pshadow flag
 0     : dlight flag
 */
 #define	QSORT_FOGNUM_SHIFT	2
@@ -1362,7 +1326,6 @@ the bits are allocated as follows:
 #if (QSORT_SHADERNUM_SHIFT+SHADERNUM_BITS) > 32
 	#error "Need to update sorting, too many bits."
 #endif
-#define QSORT_PSHADOW_SHIFT     1
 
 extern	int			gl_filter_min, gl_filter_max;
 
@@ -1545,7 +1508,6 @@ typedef struct {
 	image_t					*renderImage;
 	image_t					*sunRaysImage;
 	image_t					*renderDepthImage;
-	image_t					*pshadowMaps[MAX_DRAWN_PSHADOWS];
 	image_t					*screenScratchImage;
 	image_t					*textureScratchImage[2];
 	image_t                 *quarterImage[2];
@@ -1564,7 +1526,6 @@ typedef struct {
 	FBO_t					*msaaResolveFbo;
 	FBO_t					*sunRaysFbo;
 	FBO_t					*depthFbo;
-	FBO_t					*pshadowFbos[MAX_DRAWN_PSHADOWS];
 	FBO_t					*screenScratchFbo;
 	FBO_t					*textureScratchFbo[2];
 	FBO_t                   *quarterFbo[2];
@@ -1610,7 +1571,6 @@ typedef struct {
 	shaderProgram_t dlightShader[DLIGHTDEF_COUNT];
 	shaderProgram_t lightallShader[LIGHTDEF_COUNT];
 	shaderProgram_t shadowmapShader[SHADOWMAPDEF_COUNT];
-	shaderProgram_t pshadowShader;
 	shaderProgram_t down4xShader;
 	shaderProgram_t bokehShader;
 	shaderProgram_t tonemapShader;
@@ -1818,7 +1778,6 @@ extern  cvar_t  *r_baseSpecular;
 extern  cvar_t  *r_baseGloss;
 extern  cvar_t  *r_glossType;
 extern  cvar_t  *r_dlightMode;
-extern  cvar_t  *r_pshadowDist;
 extern  cvar_t  *r_mergeLightmaps;
 extern  cvar_t  *r_imageUpsample;
 extern  cvar_t  *r_imageUpsampleMaxSize;
@@ -1888,7 +1847,6 @@ void R_SwapBuffers( int );
 
 void R_RenderView( const viewParms_t *parms );
 void R_RenderDlightCubemaps(const refdef_t *fd);
-void R_RenderPshadowMaps(const refdef_t *fd);
 void R_RenderSunShadowMaps(const refdef_t *fd, int level);
 void R_RenderCubemapSide( int cubemapIndex, int cubemapSide, qboolean subscene );
 
@@ -1901,10 +1859,10 @@ void R_AddLightningBoltSurfaces( trRefEntity_t *e );
 void R_AddPolygonSurfaces( void );
 
 void R_DecomposeSort( unsigned sort, int *entityNum, shader_t **shader, 
-					 int *fogNum, int *dlightMap, int *pshadowMap );
+					 int *fogNum, int *dlightMap );
 
-void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader, 
-				   int fogIndex, int dlightMap, int pshadowMap, int cubemap );
+void R_AddDrawSurf( surfaceType_t *surface, shader_t *shader,
+				   int fogIndex, int dlightMap, int cubemap );
 
 void R_CalcTexDirs(vec3_t sdir, vec3_t tdir, const vec3_t v1, const vec3_t v2,
 				   const vec3_t v3, const vec2_t w1, const vec2_t w2, const vec2_t w3);
@@ -2075,7 +2033,6 @@ typedef struct shaderCommands_s
 	int         cubemapIndex;
 
 	int			dlightBits;	// or together of all vertexDlightBits
-	int         pshadowBits;
 
 	int			firstIndex;
 	int			numIndexes;
@@ -2528,7 +2485,6 @@ typedef struct {
 	srfPoly_t	*polys;//[MAX_POLYS];
 	polyVert_t	*polyVerts;//[MAX_POLYVERTS];
 	srfSpritePoly_t	spritePolys[MAX_SPRITEPOLYS];
-	pshadow_t pshadows[MAX_CALC_PSHADOWS];
 	renderCommandList_t	commands;
 } backEndData_t;
 

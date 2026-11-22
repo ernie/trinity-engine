@@ -1346,7 +1346,7 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 			&& fogNum == 0
 			&& !(ent->e.renderfx & ( RF_NOSHADOW | RF_DEPTHHACK | RF_FIRST_PERSON ) )
 			&& shader->sort == SS_OPAQUE ) {
-			R_AddDrawSurf( drawSurf, tr.shadowShader, 0, 0, 0, 0 );
+			R_AddDrawSurf( drawSurf, tr.shadowShader, 0, 0, 0 );
 		}
 
 		// projection shadows work fine with personal models
@@ -1354,11 +1354,11 @@ void R_AddIQMSurfaces( trRefEntity_t *ent ) {
 			&& fogNum == 0
 			&& (ent->e.renderfx & RF_SHADOW_PLANE )
 			&& shader->sort == SS_OPAQUE ) {
-			R_AddDrawSurf( drawSurf, tr.projectionShadowShader, 0, 0, 0, 0 );
+			R_AddDrawSurf( drawSurf, tr.projectionShadowShader, 0, 0, 0 );
 		}
 
 		if( !personalModel && !shadowOnly ) {
-			R_AddDrawSurf( drawSurf, shader, fogNum, 0, 0, cubemapIndex );
+			R_AddDrawSurf( drawSurf, shader, fogNum, 0, cubemapIndex );
 		}
 
 		surface++;
