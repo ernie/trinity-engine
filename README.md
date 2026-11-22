@@ -43,30 +43,14 @@ describes the wire format, and the
 [VR mod template](https://github.com/ernie/quake3-vr-mod-template) shows how
 to add VR support to a mod.
 
-### Improved Stencil Shadows
+### Soft Shadows
 
-Stencil shadow volumes (`cg_shadows 2`) are reworked across all three renderers — OpenGL,
-Vulkan, and OpenGL2 (the renderer the WebAssembly demo player uses) — built on a z-fail
-("Carmack's reverse") approach so shadows stay correct even when the camera is inside a
-shadow volume:
-
-- **Sealed silhouettes** — Model edges are welded by position so the silhouette forms
-  closed loops, sealing the light leaks and cracks that plain edge-matching left on
-  Quake III's models.
-- **Capped volumes** — Volumes are closed at both ends, eliminating the "ghost shadow"
-  silhouettes that floated in mid-air when players jumped.
-- **Configurable distance** — `r_shadowDistance` (default `256`) sets the extrusion and cull
-  distance, replacing the old hardcoded 512-unit extrusion and greatly reducing wall bleed.
-- **Raw light direction** — Extrusion follows the actual light direction instead of clamping
-  to straight down, producing correct shadows from all light angles.
-- **Expanded entity culling** — Shadows don't disappear the moment their caster leaves the
-  screen.
-- **BSP clipping** — `r_shadowClip 1` clips shadow volumes against world geometry to curb
-  floor/wall bleed; `r_shadowClipPenetration` (default `4`) and `r_shadowClipExtension`
-  (default `16`) tune how far a clipped volume may pass through and extend past a surface.
-  Some bleed can still occur where a shadow spills across stairs or through a gap.
-
-The defaults are tuned for normal play; just set `cg_shadows 2`.
+On the Vulkan renderer, player models, items and other models cast soft-edged shadows
+onto the floors and walls behind them. The shadows follow nearby lights such as muzzle
+flashes and rockets, and fade with distance. Pick High under Setup > Graphics > Shadows,
+or set `cg_shadows 4`. `r_shadowFadeLength` (default `256`, from `16` to `512` units) sets
+how far a shadow stretches from its caster before it fades out. Other renderers draw the
+blob shadow instead.
 
 ### HDR Display Output
 
