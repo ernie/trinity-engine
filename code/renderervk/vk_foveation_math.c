@@ -517,3 +517,18 @@ int VK_FdmTurnipTile( uint32_t width, uint32_t height, const uint32_t *cpp, uint
 	*tileHeight = bestH;
 	return 1;
 }
+uint16_t VK_FdmHalf( uint8_t b ) {
+	int exponent;
+	long mantissa;
+	const float fraction = frexpf( b / 255.0f, &exponent );
+	if ( !b )
+		return 0;
+	/* every nonzero byte's density is a normal half */
+	mantissa = lrintf( ( 2.0f * fraction - 1.0f ) * 1024.0f );
+	exponent += 14;
+	if ( mantissa == 1024 ) {
+		mantissa = 0;
+		exponent++;
+	}
+	return (uint16_t)( ( exponent << 10 ) | mantissa );
+}

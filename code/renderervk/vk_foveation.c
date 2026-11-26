@@ -6,6 +6,7 @@ typedef struct {
 	PFN_vkGetPhysicalDeviceProperties2 properties;
 	PFN_vkGetPhysicalDeviceFormatProperties formats;
 	PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR rates;
+	PFN_vkGetPhysicalDeviceImageFormatProperties imageFormats;
 	int hasRate, hasPass, hasFdm, hasFdm2, hasOffsetExt, hasOffsetQcom, hasTile, hasResolve, hasDynamic;
 } vkFovProbe_t;
 /* Returns NULL when attachment shading rate is usable, else why not. */
@@ -70,6 +71,41 @@ static const char *shadingRate( vkFovCaps_t *caps, VkPhysicalDevice physical, co
 		caps->extensions[caps->extensionCount++] = VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME;
 	caps->backend = VK_FOV_BACKEND_SHADING_RATE;
 	return NULL;
+}
+/* Shrinks extent to what the image query allows. */
+static int linearMap( VkPhysicalDevice physical, const vkFovProbe_t *p, VkFormat format, VkImageCreateFlags flags,
+					  VkExtent2D *extent ) {
+	VkImageFormatProperties props;
+	VkFormatProperties features;
+	/* linear maps have no required support, so the format must list them as well as pass the image query */
+	p->formats( physical, format, &features );
+	if ( !( features.linearTilingFeatures & VK_FORMAT_FEATURE_FRAGMENT_DENSITY_MAP_BIT_EXT ) ||
+		 p->imageFormats( physical, format, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_LINEAR,
+						  VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT, flags, &props ) != VK_SUCCESS ||
+		 props.maxArrayLayers < 2 )
+		return 0;
+	if ( props.maxExtent.width < extent->width )
+		extent->width = props.maxExtent.width;
+	if ( props.maxExtent.height < extent->height )
+		extent->height = props.maxExtent.height;
+	return 1;
+}
+/* The first format the host can write a map in, for every create flag the map may carry. */
+static void linearMapFormat( vkFovCaps_t *caps, VkPhysicalDevice physical, const vkFovProbe_t *p ) {
+	static const VkFormat formats[] = {VK_FORMAT_R8G8_UNORM, VK_FORMAT_R16G16_SFLOAT};
+	size_t i;
+	if ( !p->imageFormats )
+		return;
+	for ( i = 0; i < sizeof( formats ) / sizeof( formats[0] ); i++ ) {
+		VkExtent2D extent = {UINT32_MAX, UINT32_MAX};
+		if ( linearMap( physical, p, formats[i], 0, &extent ) &&
+			 ( !caps->fdmOffset ||
+			   linearMap( physical, p, formats[i], VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_QCOM, &extent ) ) ) {
+			caps->fdmLinearFormat = formats[i];
+			caps->fdmLinearExtent = extent;
+			return;
+		}
+	}
 }
 /* Returns NULL when a non-subsampled density map is usable, else why not. */
 static const char *densityMap( vkFovCaps_t *caps, VkPhysicalDevice physical, const vkFovProbe_t *p, uint32_t api ) {
@@ -148,6 +184,7 @@ static const char *densityMap( vkFovCaps_t *caps, VkPhysicalDevice physical, con
 		if ( offsetExt && api < VK_API_VERSION_1_3 )
 			caps->extensions[caps->extensionCount++] = VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME;
 	}
+	linearMapFormat( caps, physical, p );
 	caps->backend = VK_FOV_BACKEND_FDM;
 	return NULL;
 }
@@ -184,6 +221,8 @@ VkResult VK_FovQuery( vkFovCaps_t *caps, VkInstance instance, VkPhysicalDevice p
 #undef LOAD
 	p.rates = (PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR)proc( instance,
 																	  "vkGetPhysicalDeviceFragmentShadingRatesKHR" );
+	p.imageFormats = (PFN_vkGetPhysicalDeviceImageFormatProperties)proc( instance,
+																		 "vkGetPhysicalDeviceImageFormatProperties" );
 	result = extensions( physical, NULL, &count, NULL );
 	if ( result != VK_SUCCESS ) {
 		caps->reason = "device extension count query failed";
@@ -272,6 +311,38 @@ static int memoryType( const VkPhysicalDeviceMemoryProperties *p, uint32_t mask,
 		}
 	return 0;
 }
+int VK_FovHostMemoryType( const VkPhysicalDeviceMemoryProperties *p, uint32_t typeBits, uint32_t *index ) {
+	static const VkMemoryPropertyFlags preferred[] = {
+		VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		0,
+	};
+	const VkMemoryPropertyFlags host = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	size_t i;
+	for ( i = 0; i < sizeof( preferred ) / sizeof( preferred[0] ); i++ )
+		if ( memoryType( p, typeBits, host | preferred[i], index ) )
+			return 1;
+	return 0;
+}
+void VK_FdmWriteImage( uint8_t *image, const VkSubresourceLayout layers[2], const uint8_t *map, uint32_t width,
+					   uint32_t height, const uint16_t *half ) {
+	const size_t rowBytes = (size_t)width * 2;
+	uint32_t layer, y, i;
+	for ( layer = 0; layer < 2; layer++ )
+		for ( y = 0; y < height; y++ ) {
+			const uint8_t *src = map + ( (size_t)layer * height + y ) * rowBytes;
+			uint8_t *dst = image + layers[layer].offset + y * layers[layer].rowPitch;
+			if ( !half ) {
+				memcpy( dst, src, rowBytes );
+				continue;
+			}
+			for ( i = 0; i < rowBytes; i++ ) {
+				dst[i * 2] = (uint8_t)( half[src[i]] & 0xFF );
+				dst[i * 2 + 1] = (uint8_t)( half[src[i]] >> 8 );
+			}
+		}
+}
 void VK_FovDestroy( vkFovResources_t *r ) {
 	uint32_t i;
 	if ( !r )
@@ -288,17 +359,77 @@ void VK_FovDestroy( vkFovResources_t *r ) {
 		r->vk.DestroyImageView( r->device, r->view, NULL );
 	if ( r->image )
 		r->vk.DestroyImage( r->device, r->image, NULL );
+	if ( r->imageMapped )
+		r->vk.UnmapMemory( r->device, r->memory );
 	if ( r->memory )
 		r->vk.FreeMemory( r->device, r->memory, NULL );
 	free( r->scratch );
 	free( r->current );
 	memset( r, 0, sizeof( *r ) );
 }
+/* A linear map the host writes in place; a failure leaves nothing behind. */
+static VkResult hostImage( vkFovResources_t *r, const VkPhysicalDeviceMemoryProperties *memory,
+						   VkImageCreateFlags flags ) {
+	VkImageCreateInfo image;
+	VkMemoryRequirements req;
+	VkMemoryAllocateInfo alloc;
+	VkImageSubresource sub;
+	VkResult result;
+	uint32_t i;
+	memset( &image, 0, sizeof( image ) );
+	image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	image.flags = flags;
+	image.imageType = VK_IMAGE_TYPE_2D;
+	image.format = r->caps.fdmLinearFormat;
+	image.extent.width = r->width;
+	image.extent.height = r->height;
+	image.extent.depth = 1;
+	image.mipLevels = 1;
+	image.arrayLayers = r->layers;
+	image.samples = VK_SAMPLE_COUNT_1_BIT;
+	image.tiling = VK_IMAGE_TILING_LINEAR;
+	image.usage = VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT;
+	image.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+	result = r->vk.CreateImage( r->device, &image, NULL, &r->image );
+	if ( result != VK_SUCCESS ) {
+		r->image = VK_NULL_HANDLE;
+		return result;
+	}
+	r->vk.GetImageMemoryRequirements( r->device, r->image, &req );
+	memset( &alloc, 0, sizeof( alloc ) );
+	alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	alloc.allocationSize = req.size;
+	if ( !VK_FovHostMemoryType( memory, req.memoryTypeBits, &alloc.memoryTypeIndex ) )
+		result = VK_ERROR_FEATURE_NOT_PRESENT;
+	else if ( ( result = r->vk.AllocateMemory( r->device, &alloc, NULL, &r->memory ) ) == VK_SUCCESS &&
+			  ( result = r->vk.BindImageMemory( r->device, r->image, r->memory, 0 ) ) == VK_SUCCESS )
+		result = r->vk.MapMemory( r->device, r->memory, 0, VK_WHOLE_SIZE, 0, &r->imageMapped );
+	if ( result != VK_SUCCESS ) {
+		if ( r->memory )
+			r->vk.FreeMemory( r->device, r->memory, NULL );
+		r->vk.DestroyImage( r->device, r->image, NULL );
+		r->image = VK_NULL_HANDLE;
+		r->memory = VK_NULL_HANDLE;
+		r->imageMapped = NULL;
+		return result;
+	}
+	memset( &sub, 0, sizeof( sub ) );
+	sub.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	for ( i = 0; i < 2; i++ ) {
+		sub.arrayLayer = i;
+		r->vk.GetImageSubresourceLayout( r->device, r->image, &sub, &r->layerLayout[i] );
+	}
+	if ( r->caps.fdmLinearFormat == VK_FORMAT_R16G16_SFLOAT )
+		for ( i = 0; i < 256; i++ )
+			r->half[i] = VK_FdmHalf( (uint8_t)i );
+	r->hostWritten = 1;
+	return VK_SUCCESS;
+}
 VkResult VK_FovCreate( vkFovResources_t *r, VkDevice device, PFN_vkGetDeviceProcAddr proc,
 					   const VkPhysicalDeviceMemoryProperties *memory, const vkFovCaps_t *caps,
 					   uint32_t width, uint32_t height, uint32_t slots, VkImageCreateFlags flags ) {
 	const int fdm = caps && caps->backend == VK_FOV_BACKEND_FDM;
-	const VkFormat format = fdm ? VK_FORMAT_R8G8_UNORM : VK_FORMAT_R8_UINT;
+	VkFormat format = fdm ? VK_FORMAT_R8G8_UNORM : VK_FORMAT_R8_UINT;
 	VkImageCreateInfo image;
 	VkImageViewCreateInfo view;
 	VkMemoryRequirements req;
@@ -342,38 +473,43 @@ VkResult VK_FovCreate( vkFovResources_t *r, VkDevice device, PFN_vkGetDeviceProc
 			goto fail;
 		}
 	}
-	memset( &image, 0, sizeof( image ) );
-	image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	image.flags = flags;
-	image.imageType = VK_IMAGE_TYPE_2D;
-	image.format = format;
-	image.extent.width = r->width;
-	image.extent.height = r->height;
-	image.extent.depth = 1;
-	image.mipLevels = 1;
-	image.arrayLayers = r->layers;
-	image.samples = VK_SAMPLE_COUNT_1_BIT;
-	image.tiling = VK_IMAGE_TILING_OPTIMAL;
-	image.usage = (fdm ? VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT : VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) |
-				  VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 #define CHECK(call) \
 	do { \
 		result = (call); \
 		if ( result != VK_SUCCESS ) \
 			goto fail; \
 	} while ( 0 )
-	CHECK( r->vk.CreateImage( device, &image, NULL, &r->image ) );
-	r->vk.GetImageMemoryRequirements( device, r->image, &req );
 	memset( &alloc, 0, sizeof( alloc ) );
 	alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	alloc.allocationSize = req.size;
-	if ( !memoryType( memory, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-					 &alloc.memoryTypeIndex ) ) {
-		result = VK_ERROR_FEATURE_NOT_PRESENT;
-		goto fail;
+	if ( fdm && caps->fdmLinearFormat != VK_FORMAT_UNDEFINED && r->width <= caps->fdmLinearExtent.width &&
+		 r->height <= caps->fdmLinearExtent.height && hostImage( r, memory, flags ) == VK_SUCCESS ) {
+		format = caps->fdmLinearFormat;
+	} else {
+		memset( &image, 0, sizeof( image ) );
+		image.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+		image.flags = flags;
+		image.imageType = VK_IMAGE_TYPE_2D;
+		image.format = format;
+		image.extent.width = r->width;
+		image.extent.height = r->height;
+		image.extent.depth = 1;
+		image.mipLevels = 1;
+		image.arrayLayers = r->layers;
+		image.samples = VK_SAMPLE_COUNT_1_BIT;
+		image.tiling = VK_IMAGE_TILING_OPTIMAL;
+		image.usage = (fdm ? VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT : VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) |
+					  VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		CHECK( r->vk.CreateImage( device, &image, NULL, &r->image ) );
+		r->vk.GetImageMemoryRequirements( device, r->image, &req );
+		alloc.allocationSize = req.size;
+		if ( !memoryType( memory, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+						 &alloc.memoryTypeIndex ) ) {
+			result = VK_ERROR_FEATURE_NOT_PRESENT;
+			goto fail;
+		}
+		CHECK( r->vk.AllocateMemory( device, &alloc, NULL, &r->memory ) );
+		CHECK( r->vk.BindImageMemory( device, r->image, r->memory, 0 ) );
 	}
-	CHECK( r->vk.AllocateMemory( device, &alloc, NULL, &r->memory ) );
-	CHECK( r->vk.BindImageMemory( device, r->image, r->memory, 0 ) );
 	memset( &view, 0, sizeof( view ) );
 	view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	view.image = r->image;
@@ -383,6 +519,8 @@ VkResult VK_FovCreate( vkFovResources_t *r, VkDevice device, PFN_vkGetDeviceProc
 	view.subresourceRange.levelCount = 1;
 	view.subresourceRange.layerCount = r->layers;
 	CHECK( r->vk.CreateImageView( device, &view, NULL, &r->view ) );
+	if ( r->hostWritten )
+		return VK_SUCCESS;
 	memset( &buffer, 0, sizeof( buffer ) );
 	buffer.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	buffer.size = r->bytes;
@@ -593,10 +731,10 @@ VkResult VK_FovCreateRenderPass( const vkFovResources_t *r, const VkRenderPassCr
 	return create( r->device, &info, NULL, out );
 }
 
-void VK_FovCopyDensity( vkFovResources_t *r, VkCommandBuffer cmd, uint32_t slot ) {
+void VK_FovCopyDensity( vkFovResources_t *r, VkCommandBuffer cmd ) {
 	VkImageMemoryBarrier barrier;
 	VkBufferImageCopy copy;
-	memcpy( r->mapped[slot], r->current, r->bytes );
+	memcpy( r->mapped[0], r->current, r->bytes );
 	memset( &barrier, 0, sizeof( barrier ) );
 	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -616,7 +754,7 @@ void VK_FovCopyDensity( vkFovResources_t *r, VkCommandBuffer cmd, uint32_t slot 
 	copy.imageExtent.width = r->width;
 	copy.imageExtent.height = r->height;
 	copy.imageExtent.depth = 1;
-	r->vk.CmdCopyBufferToImage( cmd, r->staging[slot], r->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy );
+	r->vk.CmdCopyBufferToImage( cmd, r->staging[0], r->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy );
 	barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 	barrier.newLayout = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
 	barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -626,22 +764,52 @@ void VK_FovCopyDensity( vkFovResources_t *r, VkCommandBuffer cmd, uint32_t slot 
 	r->uploaded = 1;
 }
 
-void VK_FovDensityAttachment( VkRenderPassCreateInfo *desc, VkAttachmentDescription *attachments,
-							  VkRenderPassFragmentDensityMapCreateInfoEXT *info ) {
+void VK_FovWriteDensity( vkFovResources_t *r ) {
+	VK_FdmWriteImage( r->imageMapped, r->layerLayout, r->current, r->width, r->height,
+					  r->caps.fdmLinearFormat == VK_FORMAT_R16G16_SFLOAT ? r->half : NULL );
+	r->uploaded = 1;
+}
+
+void VK_FovInitDensity( vkFovResources_t *r, VkCommandBuffer cmd ) {
+	VkImageMemoryBarrier barrier;
+	if ( !r->hostWritten ) {
+		VK_FovCopyDensity( r, cmd );
+		return;
+	}
+	VK_FovWriteDensity( r );
+	memset( &barrier, 0, sizeof( barrier ) );
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image = r->image;
+	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barrier.subresourceRange.levelCount = 1;
+	barrier.subresourceRange.layerCount = r->layers;
+	barrier.oldLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+	barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+	barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+	barrier.dstAccessMask = VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT;
+	r->vk.CmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT, 0, 0,
+							  NULL, 0, NULL, 1, &barrier );
+}
+
+void VK_FovDensityAttachment( const vkFovResources_t *r, VkRenderPassCreateInfo *desc,
+							  VkAttachmentDescription *attachments, VkRenderPassFragmentDensityMapCreateInfoEXT *info ) {
 	VkAttachmentDescription *a = &attachments[desc->attachmentCount];
+	const VkImageLayout layout =
+		r->hostWritten ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
 	memset( a, 0, sizeof( *a ) );
-	a->format = VK_FORMAT_R8G8_UNORM;
+	a->format = r->hostWritten ? r->caps.fdmLinearFormat : VK_FORMAT_R8G8_UNORM;
 	a->samples = VK_SAMPLE_COUNT_1_BIT;
 	a->loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 	a->storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 	a->stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	a->stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	a->initialLayout = a->finalLayout = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+	a->initialLayout = a->finalLayout = layout;
 	memset( info, 0, sizeof( *info ) );
 	info->sType = VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT;
 	info->pNext = desc->pNext;
 	info->fragmentDensityMapAttachment.attachment = desc->attachmentCount;
-	info->fragmentDensityMapAttachment.layout = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+	info->fragmentDensityMapAttachment.layout = layout;
 	desc->pNext = info;
 	desc->attachmentCount++;
 }

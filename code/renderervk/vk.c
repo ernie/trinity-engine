@@ -462,7 +462,7 @@ static void vk_fdm_create( void ) {
 	VkResult result;
 	qvkGetPhysicalDeviceMemoryProperties( vk.physical_device, &memory );
 	result = VK_FovCreate( &vk_foveation, vk.device, qvkGetDeviceProcAddr, &memory, &vk_foveation_caps,
-						   vk.sceneWidth, vk.sceneHeight, NUM_COMMAND_BUFFERS, vk_fdm_attachment_flags() );
+						   vk.sceneWidth, vk.sceneHeight, 1, vk_fdm_attachment_flags() );
 	if ( result != VK_SUCCESS ) {
 		ri.Printf( PRINT_WARNING, "Vulkan density map allocation unavailable (%d); using full density\n", result );
 		return;
@@ -478,10 +478,13 @@ static void vk_fdm_create( void ) {
 	// the pass loads the map, so it starts at full density
 	Com_Memset( vk_foveation.current, 0xFF, vk_foveation.bytes );
 	command = begin_command_buffer();
-	VK_FovCopyDensity( &vk_foveation, command, 0 );
+	VK_FovInitDensity( &vk_foveation, command );
 	end_command_buffer( command, "density map" );
-	ri.Printf( PRINT_ALL, "Vulkan density map: %ux%u x 2 eye layers, texels %ux%u, %s\n", vk_foveation.width,
+	ri.Printf( PRINT_ALL, "Vulkan density map: %ux%u x 2 eye layers, texels %ux%u, %s, %s\n", vk_foveation.width,
 			   vk_foveation.height, vk_foveation_caps.texelWidth, vk_foveation_caps.texelHeight,
+			   !vk_foveation.hostWritten ? "optimal R8G8_UNORM, uploaded"
+			   : vk_foveation_caps.fdmLinearFormat == VK_FORMAT_R16G16_SFLOAT ? "linear R16G16_SFLOAT, host-written"
+																			  : "linear R8G8_UNORM, host-written",
 			   vk_fdm_offsets() ? "held still and offset onto the gaze" : "redrawn around the gaze" );
 }
 
@@ -610,8 +613,7 @@ static qboolean vk_fdm_scope( float *radiusX, float *radiusY ) {
 	return qtrue;
 }
 
-/* With offsets the map is fixed and slid onto the gaze; without them it is redrawn around the gaze each frame.
- * A map that rides the frame shows a frame late on a host-reading driver; an image holding no map is filled out of band. */
+/* With offsets the map is fixed and slid onto the gaze; without them it is redrawn around the gaze each frame. */
 static void vk_fdm_update( void ) {
 	vkFovMap_t map;
 	const vkFdmGeometry_t *g = &vk_fdm.geometry;
@@ -657,12 +659,13 @@ static void vk_fdm_update( void ) {
 	}
 	if ( !vk_foveation.uploaded || memcmp( vk_foveation.scratch, vk_foveation.current, vk_foveation.bytes ) ) {
 		Com_Memcpy( vk_foveation.current, vk_foveation.scratch, vk_foveation.bytes );
-		if ( offsets && !vk_foveation.uploaded ) {
-			VkCommandBuffer command = begin_command_buffer();
-			VK_FovCopyDensity( &vk_foveation, command, vk.cmd_index );
-			end_command_buffer( command, "density map" );
+		// the driver reads the map while recording each pass begin, so passes already recorded keep their densities
+		if ( vk_foveation.hostWritten ) {
+			VK_FovWriteDensity( &vk_foveation );
 		} else {
-			VK_FovCopyDensity( &vk_foveation, vk.cmd->command_buffer, vk.cmd_index );
+			VkCommandBuffer command = begin_command_buffer();
+			VK_FovCopyDensity( &vk_foveation, command );
+			end_command_buffer( command, "density map" );
 		}
 	}
 }
@@ -1553,7 +1556,7 @@ static void vk_create_render_passes( void )
 	if ( vk_fdm_active() ) {
 		// only the stereo scene pass carries the density map
 		VkRenderPassCreateInfo scene = desc;
-		VK_FovDensityAttachment( &scene, attachments, &density );
+		VK_FovDensityAttachment( &vk_foveation, &scene, attachments, &density );
 		VK_CHECK( qvkCreateRenderPass( device, &scene, NULL, &vk.render_pass.main ) );
 	} else {
 		VK_CHECK( vk_foveation_render_pass( &desc, &vk.render_pass.main ) );
@@ -2873,13 +2876,16 @@ static qboolean vk_create_device( VkPhysicalDevice physical_device, int device_i
 			if ( vk_foveation_caps.fdmReason )
 				ri.Printf( PRINT_ALL, "Vulkan foveation: no density map: %s\n", vk_foveation_caps.fdmReason );
 			if ( vk_foveation_caps.backend == VK_FOV_BACKEND_FDM ) {
-				ri.Printf( PRINT_ALL, "Vulkan foveation: FDM (texel %ux%u..%ux%u, density map 2 %s, offsets %s granularity %ux%u, tile properties %s)\n",
+				ri.Printf( PRINT_ALL, "Vulkan foveation: FDM (texel %ux%u..%ux%u, density map 2 %s, offsets %s granularity %ux%u, tile properties %s, %s)\n",
 						   vk_foveation_caps.texelWidth, vk_foveation_caps.texelHeight,
 						   vk_foveation_caps.fdmTexelMaxWidth, vk_foveation_caps.fdmTexelMaxHeight,
 						   vk_foveation_caps.fdm2 ? "yes" : "no",
 						   vk_foveation_caps.fdmOffset ? vk_foveation_caps.fdmOffsetExtension : "none",
 						   vk_foveation_caps.fdmOffsetGranularity.width, vk_foveation_caps.fdmOffsetGranularity.height,
-						   vk_foveation_caps.tileProperties ? "yes" : "no" );
+						   vk_foveation_caps.tileProperties ? "yes" : "no",
+						   vk_foveation_caps.fdmLinearFormat == VK_FORMAT_R8G8_UNORM	 ? "linear map R8G8_UNORM"
+						   : vk_foveation_caps.fdmLinearFormat == VK_FORMAT_R16G16_SFLOAT ? "linear map R16G16_SFLOAT"
+																						  : "no linear map" );
 			}
 			for ( i = 0; i < vk_foveation_caps.extensionCount; i++ ) {
 				device_extension_list[device_extension_count++] = vk_foveation_caps.extensions[i];

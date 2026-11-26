@@ -23,6 +23,8 @@ typedef struct {
 	uint32_t fdmTexelMaxWidth, fdmTexelMaxHeight;
 	const char *fdmOffsetExtension;
 	VkExtent2D fdmOffsetGranularity;
+	VkFormat fdmLinearFormat; /* VK_FORMAT_UNDEFINED when the host cannot write a linear map. */
+	VkExtent2D fdmLinearExtent;
 	VkPhysicalDeviceFragmentDensityMapFeaturesEXT fdmFeature;
 	VkPhysicalDeviceFragmentDensityMapOffsetFeaturesQCOM offsetFeature;
 	VkPhysicalDeviceTilePropertiesFeaturesQCOM tileFeature;
@@ -37,7 +39,7 @@ void *VK_FovFeatures( vkFovCaps_t *, void *next );
 	X( DestroyImage ) X( GetImageMemoryRequirements ) X( AllocateMemory ) X( FreeMemory ) X( BindImageMemory ) \
 	X( CreateImageView ) X( DestroyImageView ) X( CreateBuffer ) X( DestroyBuffer ) \
 	X( GetBufferMemoryRequirements ) X( BindBufferMemory ) X( MapMemory ) X( UnmapMemory ) \
-	X( CmdPipelineBarrier ) X( CmdCopyBufferToImage )
+	X( CmdPipelineBarrier ) X( CmdCopyBufferToImage ) X( GetImageSubresourceLayout )
 typedef struct {
 #define FOV_PROC(n) PFN_vk##n n;
 	VK_FOV_PROCS( FOV_PROC )
@@ -62,15 +64,29 @@ typedef struct {
 	vkFovMap_t uploadedMap;
 	/* Density maps: the next map is written to scratch; current is what the image holds. */
 	uint8_t *scratch, *current;
+	/* A host-written map is linear and mapped, and stays in GENERAL. */
+	int hostWritten;
+	VkSubresourceLayout layerLayout[2];
+	void *imageMapped;
+	uint16_t half[256];
 } vkFovResources_t;
 /* Extents are per eye; the image always has two layers. Failure fully rolls back. */
 VkResult VK_FovCreate( vkFovResources_t *, VkDevice, PFN_vkGetDeviceProcAddr,
 					   const VkPhysicalDeviceMemoryProperties *, const vkFovCaps_t *, uint32_t eyeWidth,
 					   uint32_t eyeHeight, uint32_t slots, VkImageCreateFlags flags );
-/* Density maps: copies current through the slot's staging buffer, leaving the image ready for a pass. */
-void VK_FovCopyDensity( vkFovResources_t *, VkCommandBuffer, uint32_t slot );
+/* The memory a host-written map lives in: host visible and coherent, cached and device local where offered. */
+int VK_FovHostMemoryType( const VkPhysicalDeviceMemoryProperties *, uint32_t typeBits, uint32_t *index );
+/* Writes a byte map's eye layers into a linear image through each layer's layout; a half table makes it R16G16. */
+void VK_FdmWriteImage( uint8_t *image, const VkSubresourceLayout layers[2], const uint8_t *map, uint32_t width,
+					   uint32_t height, const uint16_t *half );
+/* Density maps: copies current through the staging buffer, leaving the image ready for a pass. */
+void VK_FovCopyDensity( vkFovResources_t *, VkCommandBuffer );
+/* Density maps: writes current into a host-written map. */
+void VK_FovWriteDensity( vkFovResources_t * );
+/* Density maps, once after creation: fills the image with current and leaves it in its pass layout. */
+void VK_FovInitDensity( vkFovResources_t *, VkCommandBuffer );
 /* Appends the density map as the pass's last attachment; attachments must have room for it. */
-void VK_FovDensityAttachment( VkRenderPassCreateInfo *, VkAttachmentDescription *attachments,
+void VK_FovDensityAttachment( const vkFovResources_t *, VkRenderPassCreateInfo *, VkAttachmentDescription *attachments,
 							  VkRenderPassFragmentDensityMapCreateInfoEXT * );
 /* After the slot fence, before any scene pass; one monotonically increasing serial across map loads. */
 VkResult VK_FovUpload( vkFovResources_t *, VkCommandBuffer, uint32_t slot, uint64_t serial,

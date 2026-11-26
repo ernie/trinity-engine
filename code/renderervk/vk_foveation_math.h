@@ -75,4 +75,6 @@ int VK_FdmTurnipTile( uint32_t width, uint32_t height, const uint32_t *cpp, uint
 /* Largest bin Turnip allows once the depth image is made for density map offsets. */
 void VK_FdmTurnipOffsetLimit( uint32_t width, uint32_t height, uint32_t samples, uint32_t *maxWidth,
 							  uint32_t *maxHeight );
+/* The half-float nearest a map byte's density, b / 255. */
+uint16_t VK_FdmHalf( uint8_t b );
 #endif
