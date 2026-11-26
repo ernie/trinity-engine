@@ -15,7 +15,7 @@ typedef struct {
 	uint32_t availableExtensions;
 	vkFovRate_t rates[VK_FOV_MAX_RATES];
 	uint32_t rateCount;
-	const char *extensions[6];
+	const char *extensions[8];
 	uint32_t extensionCount;
 	VkPhysicalDeviceFragmentShadingRateFeaturesKHR feature;
 	/* Fragment density map backend. */

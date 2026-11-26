@@ -6,7 +6,7 @@ typedef struct {
 	PFN_vkGetPhysicalDeviceProperties2 properties;
 	PFN_vkGetPhysicalDeviceFormatProperties formats;
 	PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR rates;
-	int hasRate, hasPass, hasFdm, hasFdm2, hasOffsetExt, hasOffsetQcom, hasTile;
+	int hasRate, hasPass, hasFdm, hasFdm2, hasOffsetExt, hasOffsetQcom, hasTile, hasResolve, hasDynamic;
 } vkFovProbe_t;
 /* Returns NULL when attachment shading rate is usable, else why not. */
 static const char *shadingRate( vkFovCaps_t *caps, VkPhysicalDevice physical, const vkFovProbe_t *p, uint32_t api,
@@ -77,6 +77,7 @@ static const char *densityMap( vkFovCaps_t *caps, VkPhysicalDevice physical, con
 	VkPhysicalDeviceProperties2 props;
 	VkPhysicalDeviceFragmentDensityMapPropertiesEXT fp;
 	VkPhysicalDeviceFragmentDensityMapOffsetPropertiesQCOM op;
+	int offsetExt;
 	/* R8G8_UNORM density maps are required with the feature; Turnip leaves the format bit unset. */
 	if ( !p->hasFdm )
 		return "VK_EXT_fragment_density_map is not advertised";
@@ -115,8 +116,11 @@ static const char *densityMap( vkFovCaps_t *caps, VkPhysicalDevice physical, con
 	}
 	if ( caps->tileProperties )
 		caps->extensions[caps->extensionCount++] = VK_QCOM_TILE_PROPERTIES_EXTENSION_NAME;
-	/* The EXT promoted the QCOM offsets unchanged, so the QCOM structs describe either. */
-	caps->fdmOffsetExtension = p->hasOffsetExt ? VK_FOV_EXT_FDM_OFFSET_EXTENSION_NAME
+	/* The EXT promoted the QCOM offsets unchanged, so the QCOM structs describe either. The EXT alone
+	 * also requires dynamic rendering, core in 1.3, which requires depth stencil resolve, core in 1.2. */
+	offsetExt = p->hasOffsetExt && ( api >= VK_API_VERSION_1_3 ||
+									 ( p->hasDynamic && ( api >= VK_API_VERSION_1_2 || p->hasResolve ) ) );
+	caps->fdmOffsetExtension = offsetExt		  ? VK_FOV_EXT_FDM_OFFSET_EXTENSION_NAME
 							   : p->hasOffsetQcom ? VK_QCOM_FRAGMENT_DENSITY_MAP_OFFSET_EXTENSION_NAME
 												  : NULL;
 	if ( caps->fdmOffsetExtension && p->hasPass ) {
@@ -139,6 +143,10 @@ static const char *densityMap( vkFovCaps_t *caps, VkPhysicalDevice physical, con
 		caps->extensions[caps->extensionCount++] = caps->fdmOffsetExtension;
 		if ( api < VK_API_VERSION_1_2 )
 			caps->extensions[caps->extensionCount++] = VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME;
+		if ( offsetExt && api < VK_API_VERSION_1_2 )
+			caps->extensions[caps->extensionCount++] = VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME;
+		if ( offsetExt && api < VK_API_VERSION_1_3 )
+			caps->extensions[caps->extensionCount++] = VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME;
 	}
 	caps->backend = VK_FOV_BACKEND_FDM;
 	return NULL;
@@ -207,6 +215,8 @@ VkResult VK_FovQuery( vkFovCaps_t *caps, VkInstance instance, VkPhysicalDevice p
 		p.hasOffsetExt |= !strcmp( name, VK_FOV_EXT_FDM_OFFSET_EXTENSION_NAME );
 		p.hasOffsetQcom |= !strcmp( name, VK_QCOM_FRAGMENT_DENSITY_MAP_OFFSET_EXTENSION_NAME );
 		p.hasTile |= !strcmp( name, VK_QCOM_TILE_PROPERTIES_EXTENSION_NAME );
+		p.hasResolve |= !strcmp( name, VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME );
+		p.hasDynamic |= !strcmp( name, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME );
 	}
 	free( ext );
 	result = VK_SUCCESS;
