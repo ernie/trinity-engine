@@ -54,11 +54,10 @@ static float VRInput_Cvar( const cvar_t *cv, float fallback ) {
 
 /* cgame's eye fold subtracts PLAYER_HEIGHT 48, so this lift maps the head's height at the last recenter to the flatscreen eye. */
 static float VRInput_HeightLift( const refXRFrame_t *frame ) {
-	float lift = VRInput_Cvar( vr_heightAdjust, 0 );
 	float worldscale = VRInput_Cvar( vr_worldscale, 32 );
 	if ( frame->standHeight > 0 && worldscale > 0 )
-		lift += 48 / worldscale - frame->standHeight;
-	return lift;
+		return 48 / worldscale - frame->standHeight;
+	return 0;
 }
 
 static void CL_VRInput_QuaternionAngles( const float quaternion[4], float pitch, vec3_t angles ) {
