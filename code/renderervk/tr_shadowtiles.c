@@ -615,7 +615,7 @@ void RB_ShadowTiles( void ) {
 	}
 	backEnd.shadowTilePass = qfalse;
 
-	vk_end_render_pass();
+	vk_end_shadowtile_render_pass();
 	backEnd.shadowTilesReady = qtrue;
 }
 

@@ -371,6 +371,7 @@ void vk_end_render_pass( void );
 void vk_begin_main_render_pass( void );
 void vk_create_shadow_atlas( void );
 void vk_begin_shadowtile_render_pass( void );
+void vk_end_shadowtile_render_pass( void );
 void vk_set_tile_viewport( const int rect[4] );
 
 void vk_bind_pipeline( uint32_t pipeline );
@@ -420,6 +421,8 @@ typedef struct vk_tess_s {
 	VkCommandBuffer command_buffer;
 	VkCommandBuffer hud_command_buffer;
 	qboolean hud_begun;
+	VkCommandBuffer shadow_command_buffer;
+	qboolean shadow_recorded;
 	qboolean gpu_time_armed, gpu_time_pending, gpu_time_mirror;
 	unsigned gpu_time_generation;
 

@@ -19,8 +19,8 @@ static uint64_t VK_GPUTimeDelta( uint64_t start, uint64_t end, unsigned bits ) {
 	uint64_t mask = bits == 64 ? UINT64_MAX : (((uint64_t)1 << bits) - 1);
 	return (end - start) & mask;
 }
-static int VK_GPUTimeTicks( const uint64_t *q, unsigned bits, int mirror, int hud, double *ticks ) {
-	double mainTicks, mirrorTicks = 0, hudTicks = 0;
+static int VK_GPUTimeTicks( const uint64_t *q, unsigned bits, int mirror, int hud, int shadow, double *ticks ) {
+	double mainTicks, mirrorTicks = 0, hudTicks = 0, shadowTicks = 0;
 	if ( !bits || bits > 64 || !q[1] || !q[3] )
 		return 0;
 	mainTicks = (double)VK_GPUTimeDelta( q[0], q[2], bits );
@@ -36,7 +36,12 @@ static int VK_GPUTimeTicks( const uint64_t *q, unsigned bits, int mirror, int hu
 			return 0;
 		hudTicks = (double)VK_GPUTimeDelta( q[8], q[10], bits );
 	}
-	*ticks = mainTicks - mirrorTicks + hudTicks;
+	if ( shadow ) {
+		if ( !q[13] || !q[15] )
+			return 0;
+		shadowTicks = (double)VK_GPUTimeDelta( q[12], q[14], bits );
+	}
+	*ticks = mainTicks - mirrorTicks + hudTicks + shadowTicks;
 	return 1;
 }
 static int VK_GPUTimeCompare( const void *a, const void *b ) {
@@ -64,7 +69,7 @@ static VkQueryPool gpuTimePool;
 static float gpuTimeSamples[1024];
 static int gpuTimeCount, gpuTimeWindow;
 static unsigned gpuTimeGeneration;
-#define VK_GPU_TIME_QUERIES 10
+#define VK_GPU_TIME_QUERIES 12
 /* Frame-order stamps after frame top; each segment ends at its query. */
 static const struct { unsigned query; const char *name; } gpuSegments[] = {
 	{ 6, "scene" }, { 8, "bloom blur" }, { 2, "post" },
@@ -6729,6 +6734,7 @@ void vk_initialize( void )
 		alloc_info.commandBufferCount = 1;
 
 		VK_CHECK( qvkAllocateCommandBuffers( vk.device, &alloc_info, &vk.tess[i].command_buffer ) );
+		VK_CHECK( qvkAllocateCommandBuffers( vk.device, &alloc_info, &vk.tess[i].shadow_command_buffer ) );
 
 		//SET_OBJECT_NAME( vk.tess[i].command_buffer, va( "command buffer %i", i ), VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_BUFFER_EXT );
 	}
@@ -10973,9 +10979,12 @@ static void vk_begin_screenmap_render_pass( void )
 }
 
 
+static VkCommandBuffer vk_shadow_main; // the frame's main buffer while the shadow pass records into its own
+
 void vk_begin_shadowtile_render_pass( void )
 {
 	const shadowTileFrame_t *f = backEndData->shadowTiles;
+	VkCommandBufferBeginInfo begin;
 	VkRenderPassBeginInfo info;
 	VkClearValue clear;
 	int i, width = 0, height = 0;
@@ -11004,10 +11013,30 @@ void vk_begin_shadowtile_render_pass( void )
 	info.clearValueCount = 1;
 	info.pClearValues = &clear;
 
+	// A Qualcomm driver with density map offsets enabled corrupts later passes recorded
+	// into the same command buffer as this one, so the shadow pass gets a buffer of its own
+	Com_Memset( &begin, 0, sizeof( begin ) );
+	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	VK_CHECK( qvkBeginCommandBuffer( vk.cmd->shadow_command_buffer, &begin ) );
+	vk_gpu_time_stamp( vk.cmd->shadow_command_buffer, 10 );
+	vk_shadow_main = vk.cmd->command_buffer;
+	vk.cmd->command_buffer = vk.cmd->shadow_command_buffer;
+
 	qvkCmdBeginRenderPass( vk.cmd->command_buffer, &info, VK_SUBPASS_CONTENTS_INLINE );
 	vk_fdm.passOpen = qfalse;
 	vk_foveation_invalidate_rate();
 	vk_invalidate_bindings();
+}
+
+
+void vk_end_shadowtile_render_pass( void )
+{
+	qvkCmdEndRenderPass( vk.cmd->command_buffer );
+	vk_gpu_time_stamp( vk.cmd->command_buffer, 11 );
+	VK_CHECK( qvkEndCommandBuffer( vk.cmd->command_buffer ) );
+	vk.cmd->command_buffer = vk_shadow_main;
+	vk.cmd->shadow_recorded = qtrue;
 }
 
 
@@ -11122,7 +11151,7 @@ static void vk_gpu_segments_print( int window ) {
 
 /* Stamps sit outside render passes (multiview replicates in-pass queries) and are read after the slot's fence. */
 static void vk_gpu_time_collect( qboolean completed ) {
-	uint64_t queries[12], marks[8];
+	uint64_t queries[16], marks[8];
 	VkResult res;
 	double ticks;
 	int window = r_gpuTimeLog->integer;
@@ -11160,7 +11189,13 @@ static void vk_gpu_time_collect( qboolean completed ) {
 								queries + 8, 2 * sizeof( uint64_t ),
 								VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT ) != VK_SUCCESS )
 		return;
-	if ( !VK_GPUTimeTicks( queries, vk.timestampValidBits, vk.cmd->gpu_time_mirror, vk.cmd->hud_begun, &ticks ) )
+	if ( vk.cmd->shadow_recorded &&
+		qvkGetQueryPoolResults( vk.device, gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES + 10, 2, 4 * sizeof( uint64_t ),
+								queries + 12, 2 * sizeof( uint64_t ),
+								VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT ) != VK_SUCCESS )
+		return;
+	if ( !VK_GPUTimeTicks( queries, vk.timestampValidBits, vk.cmd->gpu_time_mirror, vk.cmd->hud_begun,
+						   vk.cmd->shadow_recorded, &ticks ) )
 		return;
 	gpuTimeSamples[gpuTimeCount++] = (float)(ticks * vk.deviceLimits.timestampPeriod * 1e-6);
 	vk_gpu_segments_add( queries, marks, window );
@@ -11190,7 +11225,7 @@ static void vk_gpu_time_begin( void ) {
 	}
 	vk.cmd->gpu_time_armed = qtrue;
 	vk.cmd->gpu_time_generation = gpuTimeGeneration;
-	/* The HUD reset belongs in its own buffer: HUD executes before main. */
+	/* The HUD and shadow buffers execute before main, so each resets its own stamps. */
 	qvkCmdResetQueryPool( vk.cmd->command_buffer, gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES, 4 );
 	qvkCmdResetQueryPool( vk.cmd->command_buffer, gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES + 6, 4 );
 	qvkCmdWriteTimestamp( vk.cmd->command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, gpuTimePool,
@@ -11200,11 +11235,11 @@ static void vk_gpu_time_begin( void ) {
 static void vk_gpu_time_stamp( VkCommandBuffer command, unsigned query ) {
 	if ( !vk.cmd->gpu_time_armed )
 		return;
-	if ( query == 4 ) {
-		qvkCmdResetQueryPool( command, gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES + 4, 2 );
+	if ( query == 4 || query == 10 ) {
+		qvkCmdResetQueryPool( command, gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES + query, 2 );
 	}
 	qvkCmdWriteTimestamp(
-		command, query == 4 ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+		command, query == 4 || query == 10 ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
 		gpuTimePool, vk.cmd_index * VK_GPU_TIME_QUERIES + query );
 }
 
@@ -11242,6 +11277,7 @@ void vk_begin_frame( void )
 	RB_BeginFlareFrame( flareResultsCompleted );
 	vk_gpu_time_collect( flareResultsCompleted );
 	vk.cmd->hud_begun = qfalse;
+	vk.cmd->shadow_recorded = qfalse;
 
 	if ( !ri.CL_IsMinimized() && !vk.cmd->swapchain_image_acquired ) {
 		qboolean retry = qfalse;
@@ -11350,6 +11386,10 @@ static void vk_resize_geometry_buffer( void )
 		VK_CHECK( qvkEndCommandBuffer( vk.cmd->hud_command_buffer ) );
 		VK_CHECK( qvkResetCommandBuffer( vk.cmd->hud_command_buffer, 0 ) );
 		vk.cmd->hud_begun = qfalse;
+	}
+	if ( vk.cmd->shadow_recorded ) {
+		VK_CHECK( qvkResetCommandBuffer( vk.cmd->shadow_command_buffer, 0 ) );
+		vk.cmd->shadow_recorded = qfalse;
 	}
 	vk_end_render_pass();
 
@@ -12329,7 +12369,7 @@ static void vk_finish_eye_frame( qboolean world )
 
 void vk_end_frame( void )
 {
-	VkCommandBuffer commands[2];
+	VkCommandBuffer commands[3];
 	uint32_t commandCount = 0;
 #ifdef USE_UPLOAD_QUEUE
 	VkSemaphore waits[2], signals[2];
@@ -12558,6 +12598,8 @@ void vk_end_frame( void )
 
 	submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	submit_info.pNext = NULL;
+	if ( vk.cmd->shadow_recorded )
+		commands[commandCount++] = vk.cmd->shadow_command_buffer;
 	if ( vk.cmd->hud_begun ) {
 		vk_gpu_time_stamp( vk.cmd->hud_command_buffer, 5 );
 		VK_CHECK( qvkEndCommandBuffer( vk.cmd->hud_command_buffer ) );
