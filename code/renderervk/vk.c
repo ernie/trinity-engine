@@ -6141,7 +6141,7 @@ void vk_update_screen_hud_descriptors( void ) {
 	}
 }
 
-static void vk_hud_invalidate_caches( void ) {
+static void vk_invalidate_bindings( void ) {
 	vk.cmd->last_pipeline = VK_NULL_HANDLE;
 	vk.cmd->curr_index_buffer = VK_NULL_HANDLE;
 	Com_Memset( vk.cmd->buf_offset, 0, sizeof( vk.cmd->buf_offset ) );
@@ -6197,7 +6197,7 @@ void vk_hud_begin( qboolean clear ) {
 	pass.clearValueCount = 2;
 	pass.pClearValues = values;
 	qvkCmdBeginRenderPass( vk.cmd->command_buffer, &pass, VK_SUBPASS_CONTENTS_INLINE );
-	vk_hud_invalidate_caches();
+	vk_invalidate_bindings();
 }
 
 void vk_hud_end( void ) {
@@ -6212,7 +6212,7 @@ void vk_hud_end( void ) {
 	vk.renderScaleX = vk_hud.scaleX;
 	vk.renderScaleY = vk_hud.scaleY;
 	vk_hud.recording = qfalse;
-	vk_hud_invalidate_caches();
+	vk_invalidate_bindings();
 }
 
 /* Shader stages keep this address across a flat map load; its black fallback needs no HUD attachment. */
@@ -10887,8 +10887,8 @@ static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBu
 	/* Postprocess passes bind static-rate pipelines, so scene draw state must not carry over. */
 	vk_foveation_invalidate_rate();
 
-	vk.cmd->last_pipeline = VK_NULL_HANDLE;
-	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+	// a multiview pass begins with every binding undefined
+	vk_invalidate_bindings();
 }
 
 
@@ -11007,9 +11007,7 @@ void vk_begin_shadowtile_render_pass( void )
 	qvkCmdBeginRenderPass( vk.cmd->command_buffer, &info, VK_SUBPASS_CONTENTS_INLINE );
 	vk_fdm.passOpen = qfalse;
 	vk_foveation_invalidate_rate();
-
-	vk.cmd->last_pipeline = VK_NULL_HANDLE;
-	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
+	vk_invalidate_bindings();
 }
 
 
@@ -11989,7 +11987,7 @@ static void vk_render_virtual_screen( vkMonoTargets_t *source ) {
 		tess.shader = NULL;
 	}
 	vk_end_render_pass();
-	vk_hud_invalidate_caches();
+	vk_invalidate_bindings();
 	properties = vk.xr_direct.imageFormatProperties;
 	if ( !(properties.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) ) {
 		ri.Error( ERR_DROP, "XR swapchain format cannot be a blit source" );
@@ -12250,7 +12248,7 @@ static void vk_draw_tracking_status( void ) {
 #endif
 	/* Use normal material pipelines against the desktop attachment. */
 	vk.renderPassIndex = RENDER_PASS_DESKTOP;
-	vk_hud_invalidate_caches();
+	vk_invalidate_bindings();
 	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 68,
 						 sizeof( outputScale ), outputScale );
 	RB_DrawTrackingStatus( desktopTrackingFont, desktopTrackingIcon,
@@ -12372,7 +12370,7 @@ void vk_end_frame( void )
 		RB_DrawDeferredHud();
 		vk_render_scope_bands();
 		vk_end_render_pass();
-		vk_hud_invalidate_caches();
+		vk_invalidate_bindings();
 
 		if ( !screen || !tr.virtualScreenShader || !tr.virtualReflectionShader || !vk_screen.image.handle ) {
 			ri.Error( ERR_DROP, "Virtual screen requires the Vulkan scene and HUD targets" );
@@ -12406,7 +12404,7 @@ void vk_end_frame( void )
 							  vk.sceneWidth, vk.sceneHeight );
 		vk.renderPassIndex = RENDER_PASS_VR_SCREEN_EYE;
 		vk_foveation_invalidate_rate();
-		vk_hud_invalidate_caches();
+		vk_invalidate_bindings();
 		vk_draw_screen_composition( screen, qfalse );
 		vk_end_render_pass();
 		vk_finish_eye_frame( qfalse );
@@ -12993,7 +12991,6 @@ void vk_begin_post_scene_pass( void )
 
 	// the blur bound other layouts and the scene pipelines don't fit this pass, so draws rebind everything
 	vk_foveation_invalidate_rate();
-	vk_hud_invalidate_caches();
 	vk_update_mvp( NULL );
 
 	backEnd.doneBloom = qtrue;
