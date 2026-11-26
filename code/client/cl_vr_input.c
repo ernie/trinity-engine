@@ -52,6 +52,15 @@ static float VRInput_Cvar( const cvar_t *cv, float fallback ) {
 	return cv && VR_FloatFinite( cv->value ) ? cv->value : fallback;
 }
 
+/* cgame's eye fold subtracts PLAYER_HEIGHT 48, so this lift maps the head's height at the last recenter to the flatscreen eye. */
+static float VRInput_HeightLift( const refXRFrame_t *frame ) {
+	float lift = VRInput_Cvar( vr_heightAdjust, 0 );
+	float worldscale = VRInput_Cvar( vr_worldscale, 32 );
+	if ( frame->standHeight > 0 && worldscale > 0 )
+		lift += 48 / worldscale - frame->standHeight;
+	return lift;
+}
+
 static void CL_VRInput_QuaternionAngles( const float quaternion[4], float pitch, vec3_t angles ) {
 	float q[4], length, x, y, z, w, s, c;
 	float forward[3], rightZ, upZ;
@@ -596,6 +605,7 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	qboolean wheel, priorWheel, menu;
 	vec3_t oldAngles, oldPosition;
 	int i, primary, secondary, twoHanded;
+	float lift;
 	const clXRHandInput_t *weapon, *other;
 	vrSignals_t signals;
 	vrThresholds_t thresholds;
@@ -618,8 +628,9 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 	CL_VRInput_QuaternionAngles( frame->head.orientation, 0, vr.hmdorientation );
 	if ( !vr.menuYawLocked && !frame->screen.visible )
 		vr.menuYaw = vr.hmdorientation[YAW];
+	lift = VRInput_HeightLift( frame );
 	VectorCopy( frame->head.position, vr.hmdposition );
-	vr.hmdposition[1] += VRInput_Cvar( vr_heightAdjust, 0 );
+	vr.hmdposition[1] += lift;
 	if ( input.tracked ) {
 		for ( i = 0; i < 3; i++ )
 			vr.hmdorientation_delta[i] = AngleSubtract( oldAngles[i], vr.hmdorientation[i] );
@@ -650,14 +661,14 @@ void CL_VRInput_Frame( const refXRFrame_t *frame ) {
 		VectorCopy( vr.weaponoffset_last[1], vr.weaponoffset_last[0] );
 		VectorCopy( vr.weaponoffset, vr.weaponoffset_last[1] );
 		VectorCopy( weapon->aim.position, vr.weaponposition );
-		vr.weaponposition[1] += VRInput_Cvar( vr_heightAdjust, 0 );
+		vr.weaponposition[1] += lift;
 		VectorSubtract( vr.weaponposition, vr.hmdposition, vr.weaponoffset );
 		CL_VRInput_QuaternionAngles( weapon->aim.orientation, weapon->pitchCorrection + VRInput_Cvar( vr_weaponPitch, 0 ),
 									vr.weaponangles );
 	}
 	if ( other->aim.positionValid && other->aim.orientationValid ) {
 		VectorCopy( other->aim.position, vr.offhandposition );
-		vr.offhandposition[1] += VRInput_Cvar( vr_heightAdjust, 0 );
+		vr.offhandposition[1] += lift;
 		VectorSubtract( vr.offhandposition, vr.hmdposition, vr.offhandoffset );
 		CL_VRInput_QuaternionAngles( other->aim.orientation, other->pitchCorrection + VRInput_Cvar( vr_weaponPitch, 0 ),
 									vr.offhandangles );
